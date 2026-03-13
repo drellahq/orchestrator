@@ -88,6 +88,11 @@ func runTask(cmd *cobra.Command, args []string) error {
 
 	// After successful provisioning, ensure cleanup on exit
 	defer func() {
+		slog.Debug("Copying transcript", "task", taskName)
+		if copyErr := runner.Cp(context.Background(), taskName, ":~/transcript.jsonl", taskDir.TranscriptPath()); copyErr != nil {
+			slog.Warn("Failed to copy transcript", "task", taskName, "error", copyErr)
+		}
+
 		slog.Debug("Copying conversations", "task", taskName)
 		if copyErr := runner.Cp(context.Background(), taskName, ":~/.claude/", taskDir.ConversationsPath()); copyErr != nil {
 			slog.Warn("Failed to copy conversations", "task", taskName, "error", copyErr)
@@ -108,13 +113,37 @@ func runTask(cmd *cobra.Command, args []string) error {
 
 	slog.Debug("Sandbox setup complete", "task", taskName)
 
-	// Run Claude
+	// Write a run script and copy it to the VM to avoid quoting issues
+	// with SSH + shell escaping
 	slog.Info("Running Claude", "task", taskName)
-	// Env vars are in .bashrc, which SSH sources automatically for non-interactive commands.
-	// Pass --dangerously-skip-permissions directly since aliases aren't expanded.
 	escapedDesc := strings.ReplaceAll(taskDescription, "'", "'\\''")
-	claudeCmd := fmt.Sprintf("cd ~/project && claude --dangerously-skip-permissions -p '%s'", escapedDesc)
-	if err := runner.SSHProxy(ctx, taskName, claudeCmd); err != nil {
+	runScript := fmt.Sprintf(`#!/bin/bash
+cd ~/project
+stdbuf -oL claude --dangerously-skip-permissions -p --verbose \
+  --output-format stream-json '%s' \
+  </dev/null | stdbuf -oL tee ~/transcript.jsonl
+`, escapedDesc)
+
+	tmpRun, err := os.CreateTemp("", "run-claude-*.sh")
+	if err != nil {
+		return fmt.Errorf("creating run script: %w", err)
+	}
+	defer os.Remove(tmpRun.Name())
+	if _, err := tmpRun.WriteString(runScript); err != nil {
+		tmpRun.Close()
+		return fmt.Errorf("writing run script: %w", err)
+	}
+	tmpRun.Close()
+
+	if err := runner.Cp(ctx, taskName, tmpRun.Name(), ":/tmp/run-claude.sh"); err != nil {
+		return fmt.Errorf("copying run script: %w", err)
+	}
+	if err := runner.SSH(ctx, taskName, "chmod +x /tmp/run-claude.sh"); err != nil {
+		return fmt.Errorf("making run script executable: %w", err)
+	}
+
+	tw := newTranscriptWriter(os.Stdout, verbose)
+	if err := runner.SSHProxyOutput(ctx, taskName, tw, "/tmp/run-claude.sh"); err != nil {
 		slog.Error("Claude exited with error", "task", taskName, "error", err)
 		// Don't return error - still want to archive results
 	}

@@ -64,14 +64,37 @@ Example:
 orchestrator run fix-bug "Fix the nil pointer dereference in handler.go when the request body is empty"
 ```
 
+Use `-v` for verbose output including debug logging and model reasoning:
+
+```bash
+orchestrator run -v fix-bug "Fix the nil pointer dereference in handler.go"
+```
+
+During execution, a human-readable transcript streams to stdout showing tool
+calls, their results, and Claude's text output.
+
+### Viewing transcripts
+
+```bash
+# View a completed task's transcript
+orchestrator log <task-name>
+
+# Include model reasoning (thinking blocks)
+orchestrator log -v <task-name>
+
+# Follow a live task in another terminal
+orchestrator log -f <task-name>
+```
+
 ### What happens
 
 1. Task directory is created under `output_dir`
 2. MCP server starts on `127.0.0.1:19090`
 3. Sandbox VM is provisioned via gjoll
 4. Git, CLAUDE.md, and MCP client are configured in the VM
-5. Claude runs with the task description (with proxy tunnels for Vertex AI and MCP)
-6. On completion, conversations are archived and the VM is stopped
+5. Claude runs with `-p --output-format stream-json` (with proxy tunnels for Vertex AI and MCP)
+6. Stream-json output is piped through `tee` to `~/transcript.jsonl` in the VM
+7. On completion, the transcript and conversations are archived and the VM is stopped
 
 ## Task Output Structure
 
@@ -79,6 +102,7 @@ orchestrator run fix-bug "Fix the nil pointer dereference in handler.go when the
 <output_dir>/<task-name>/
   repo/              # Pulled code (git repo with gjoll/<task-name> branch)
   conversations/     # Claude conversation archive (~/.claude/ from VM)
+  transcript.jsonl   # Stream-json transcript of the Claude session
   metadata.json      # Task name, description, timestamps
 ```
 
