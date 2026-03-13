@@ -71,7 +71,20 @@ func TestCreate(t *testing.T) {
 			if got := td.ConversationsPath(); got != wantConv {
 				t.Errorf("ConversationsPath() = %q, want %q", got, wantConv)
 			}
+
+			wantTranscript := filepath.Join(outputDir, tt.taskName, "transcript.jsonl")
+			if got := td.TranscriptPath(); got != wantTranscript {
+				t.Errorf("TranscriptPath() = %q, want %q", got, wantTranscript)
+			}
 		})
+	}
+}
+
+func TestTranscriptPathFor(t *testing.T) {
+	got := TranscriptPathFor("/output", "my-task")
+	want := filepath.Join("/output", "my-task", "transcript.jsonl")
+	if got != want {
+		t.Errorf("TranscriptPathFor() = %q, want %q", got, want)
 	}
 }
 

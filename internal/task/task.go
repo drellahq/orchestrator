@@ -47,6 +47,17 @@ func (d *Dir) ConversationsPath() string {
 	return filepath.Join(d.root, "conversations")
 }
 
+// TranscriptPath returns the path to the stream-json transcript file.
+func (d *Dir) TranscriptPath() string {
+	return filepath.Join(d.root, "transcript.jsonl")
+}
+
+// TranscriptPathFor returns the transcript path for a task by name,
+// without requiring a Dir instance.
+func TranscriptPathFor(outputDir, taskName string) string {
+	return filepath.Join(outputDir, taskName, "transcript.jsonl")
+}
+
 // SaveMetadata writes task metadata to metadata.json.
 func (d *Dir) SaveMetadata(m Metadata) error {
 	data, err := json.MarshalIndent(m, "", "  ")

@@ -3,6 +3,7 @@ package gjoll
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 )
@@ -65,6 +66,21 @@ func (r *Runner) Cp(ctx context.Context, name, src, dest string) error {
 // Stop stops a running sandbox.
 func (r *Runner) Stop(ctx context.Context, name string) error {
 	return r.run(ctx, nil, "stop", name)
+}
+
+// SSHProxyOutput runs a command inside the sandbox with proxy tunnels active,
+// writing the command's stdout to w instead of os.Stdout.
+func (r *Runner) SSHProxyOutput(ctx context.Context, name string, w io.Writer, command ...string) error {
+	args := []string{"ssh", "--proxy", name, "--"}
+	args = append(args, command...)
+	cmd := exec.CommandContext(ctx, r.bin, args...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = w
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("gjoll %s: %w", args[0], err)
+	}
+	return nil
 }
 
 // Down destroys a sandbox and all its resources.

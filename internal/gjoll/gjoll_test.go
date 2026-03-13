@@ -2,6 +2,7 @@ package gjoll
 
 import (
 	"context"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -103,6 +104,20 @@ func TestCommandConstruction(t *testing.T) {
 				return r.Stop(ctx, "my-sandbox")
 			},
 			wantArgs: []string{"stop", "my-sandbox"},
+		},
+		{
+			name: "SSHProxy single command string",
+			call: func(r *Runner, ctx context.Context) error {
+				return r.SSHProxy(ctx, "my-sandbox", "tmux new-session -d -s claude /tmp/run.sh")
+			},
+			wantArgs: []string{"ssh", "--proxy", "my-sandbox", "--", "tmux new-session -d -s claude /tmp/run.sh"},
+		},
+		{
+			name: "SSHProxyOutput",
+			call: func(r *Runner, ctx context.Context) error {
+				return r.SSHProxyOutput(ctx, "my-sandbox", io.Discard, "tail -f ~/transcript.jsonl")
+			},
+			wantArgs: []string{"ssh", "--proxy", "my-sandbox", "--", "tail -f ~/transcript.jsonl"},
 		},
 		{
 			name: "Down",
