@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log/slog"
@@ -16,7 +17,6 @@ import (
 	"github.com/drellabot/orchestrator/internal/gjoll"
 	mcpserver "github.com/drellabot/orchestrator/internal/mcp"
 	"github.com/drellabot/orchestrator/internal/task"
-
 )
 
 const sandboxName = "orch-integ-test"
@@ -246,7 +246,42 @@ echo "Result: $RESULT"`, mcpPort, mcpPort, mcpPort)
 		t.Errorf("unexpected file content: %q", showOut)
 	}
 
-	// 7. Copy conversations directory (testing gjoll cp)
+	// 7. Test transcript streaming via SSHProxyOutput
+	t.Log("Testing transcript streaming...")
+	transcriptContent := `{"type":"assistant","message":{"content":[{"type":"text","text":"Hello from test"}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write"}]}}
+{"type":"result","subtype":"success"}
+`
+	if err := runner.SSH(ctx, sandboxName, fmt.Sprintf("cat > ~/transcript.jsonl << 'JSONL'\n%sJSONL", transcriptContent)); err != nil {
+		t.Fatalf("creating fake transcript: %v", err)
+	}
+
+	var buf bytes.Buffer
+	if err := runner.SSHProxyOutput(ctx, sandboxName, &buf, "cat ~/transcript.jsonl"); err != nil {
+		t.Fatalf("SSHProxyOutput: %v", err)
+	}
+	gotOutput := buf.String()
+	// SSHProxyOutput captures raw stdout — verify the JSONL comes through
+	for _, want := range []string{`"type":"assistant"`, `"tool_use"`, `"result"`} {
+		if !strings.Contains(gotOutput, want) {
+			t.Errorf("SSHProxyOutput missing %q in output:\n%s", want, gotOutput)
+		}
+	}
+
+	// 7a. Copy transcript to task directory
+	t.Log("Testing transcript copy...")
+	if err := runner.Cp(ctx, sandboxName, ":~/transcript.jsonl", taskDir.TranscriptPath()); err != nil {
+		t.Fatalf("copying transcript: %v", err)
+	}
+	transcriptData, err := os.ReadFile(taskDir.TranscriptPath())
+	if err != nil {
+		t.Fatalf("reading local transcript: %v", err)
+	}
+	if !strings.Contains(string(transcriptData), `"type":"assistant"`) {
+		t.Errorf("transcript content mismatch: %q", transcriptData)
+	}
+
+	// 8. Copy conversations directory (testing gjoll cp)
 	t.Log("Testing conversation copy...")
 	if err := runner.SSH(ctx, sandboxName, "mkdir -p ~/.claude && echo test > ~/.claude/test.json"); err != nil {
 		t.Fatalf("creating fake conversation: %v", err)
