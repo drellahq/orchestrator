@@ -1,0 +1,283 @@
+//go:build integration
+
+package main
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/drellabot/orchestrator/internal/gjoll"
+	mcpserver "github.com/drellabot/orchestrator/internal/mcp"
+	"github.com/drellabot/orchestrator/internal/task"
+
+)
+
+const sandboxName = "orch-integ-test"
+
+// testTF returns the path to a minimal .tf file for integration testing.
+// It installs git and a mock claude script via init_script.
+func testTF(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	tfPath := filepath.Join(dir, "test-sandbox.tf")
+
+	content := fmt.Sprintf(`terraform {
+  required_providers {
+    libvirt = { source = "dmacvicar/libvirt", version = "~> 0.9" }
+  }
+}
+
+provider "libvirt" { uri = "qemu:///system" }
+
+resource "libvirt_volume" "base" {
+  name   = "fedora-base-${var.gjoll_name}.qcow2"
+  pool   = "default"
+  target = { format = { type = "qcow2" } }
+  create = {
+    content = {
+      url = "https://download.fedoraproject.org/pub/fedora/linux/releases/43/Cloud/x86_64/images/Fedora-Cloud-Base-Generic-43-1.6.x86_64.qcow2"
+    }
+  }
+}
+
+resource "libvirt_volume" "root" {
+  name          = "root-${var.gjoll_name}.qcow2"
+  pool          = "default"
+  capacity      = 53687091200
+  target        = { format = { type = "qcow2" } }
+  backing_store = { path = libvirt_volume.base.path, format = { type = "qcow2" } }
+}
+
+resource "libvirt_cloudinit_disk" "init" {
+  name = "cloudinit-${var.gjoll_name}.iso"
+  meta_data = jsonencode({
+    instance-id    = "gjoll-${var.gjoll_name}"
+    local-hostname = "gjoll-${var.gjoll_name}"
+  })
+  user_data = <<-EOF
+    #cloud-config
+    users:
+      - name: fedora
+        sudo: ALL=(ALL) NOPASSWD:ALL
+        shell: /bin/bash
+        ssh_authorized_keys:
+          - ${var.gjoll_ssh_pubkey}
+  EOF
+}
+
+resource "libvirt_domain" "sandbox" {
+  name        = "gjoll-${var.gjoll_name}"
+  type        = "kvm"
+  memory      = 4096
+  memory_unit = "MiB"
+  vcpu        = 2
+  running     = var.gjoll_instance_state == "running"
+
+  cpu = { mode = "host-passthrough" }
+  os  = { type = "hvm" }
+
+  devices = {
+    disks = [
+      {
+        source = { file = { file = libvirt_volume.root.path } }
+        target = { dev = "vda", bus = "virtio" }
+        driver = { name = "qemu", type = "qcow2" }
+      },
+      {
+        device = "cdrom"
+        source = { file = { file = libvirt_cloudinit_disk.init.path } }
+        target = { dev = "sda", bus = "sata" }
+        driver = { name = "qemu", type = "raw" }
+      },
+    ]
+    interfaces = [
+      {
+        source      = { network = { network = "default" } }
+        model       = { type = "virtio" }
+        wait_for_ip = var.gjoll_instance_state == "running" ? { source = "lease" } : null
+      },
+    ]
+    consoles = [
+      { target = { type = "serial", port = 0 } },
+    ]
+  }
+}
+
+data "libvirt_domain_interface_addresses" "sandbox" {
+  count  = var.gjoll_instance_state == "running" ? 1 : 0
+  domain = libvirt_domain.sandbox.name
+  source = "lease"
+}
+
+output "public_ip" {
+  value = var.gjoll_instance_state == "running" ? data.libvirt_domain_interface_addresses.sandbox[0].interfaces[0].addrs[0].addr : ""
+}
+output "instance_id" { value = tostring(libvirt_domain.sandbox.id) }
+output "ssh_user"    { value = "fedora" }
+output "init_script" {
+  value = <<-EOT
+    #!/bin/bash
+    set -euo pipefail
+    sudo dnf install -y git-core
+  EOT
+}
+
+output "proxies" {
+  value = [
+    {
+      name   = "orchestrator-mcp"
+      target = "http://localhost:%d"
+      port   = %d
+    },
+  ]
+}
+`, mcpserver.MCPPort, mcpserver.MCPPort)
+	if err := os.WriteFile(tfPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	return tfPath
+}
+
+func TestIntegration(t *testing.T) {
+	ctx := context.Background()
+	runner := gjoll.New("")
+
+	tfPath := testTF(t)
+
+	// 1. Provision sandbox
+	t.Log("Provisioning sandbox...")
+	if err := runner.Up(ctx, sandboxName, tfPath); err != nil {
+		t.Fatalf("gjoll up failed: %v", err)
+	}
+
+	tornDown := false
+	t.Cleanup(func() {
+		if tornDown {
+			return
+		}
+		t.Log("Tearing down VM...")
+		cmd := exec.Command("gjoll", "down", sandboxName)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Logf("cleanup down failed: %v\n%s", err, out)
+		}
+	})
+
+	// 2. Set up git inside the VM
+	t.Log("Setting up git in sandbox...")
+	if err := runner.SSH(ctx, sandboxName, "git config --global user.name Test"); err != nil {
+		t.Fatalf("git config user.name: %v", err)
+	}
+	if err := runner.SSH(ctx, sandboxName, "git config --global user.email test@test.com"); err != nil {
+		t.Fatalf("git config user.email: %v", err)
+	}
+	if err := runner.SSH(ctx, sandboxName, "mkdir -p ~/project && cd ~/project && git init"); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+
+	// 3. Create a file, commit it on the VM
+	t.Log("Creating test commit in sandbox...")
+	if err := runner.SSH(ctx, sandboxName,
+		"echo 'hello from integration test' > ~/project/hello.txt && cd ~/project && git add -A && git commit -m 'test commit'"); err != nil {
+		t.Fatalf("creating test commit: %v", err)
+	}
+
+	// 4. Create task directory and start MCP server
+	outputDir := t.TempDir()
+	taskDir, err := task.Create(outputDir, sandboxName)
+	if err != nil {
+		t.Fatalf("task.Create: %v", err)
+	}
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	mcpSrv := mcpserver.New(logger, sandboxName, taskDir, runner)
+	if err := mcpSrv.Start(); err != nil {
+		t.Fatalf("MCP server start: %v", err)
+	}
+	defer func() { _ = mcpSrv.Stop(ctx) }()
+
+	// 5. Call pull_code from inside the VM via proxy tunnel
+	// Use gjoll ssh --proxy to tunnel MCP and invoke curl from within
+	t.Log("Calling pull_code from sandbox via proxy tunnel...")
+	mcpPort := mcpserver.MCPPort
+	pullScript := fmt.Sprintf(`set -e
+HEADERS=$(curl -s -D - -o /dev/null -X POST http://localhost:%d/ -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"0.1.0"}}}')
+SESSION_ID=$(echo "$HEADERS" | grep -i "mcp-session-id" | tr -d '\r' | awk '{print $2}')
+echo "Session ID: $SESSION_ID"
+curl -s -X POST http://localhost:%d/ -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -H "Mcp-Session-Id: $SESSION_ID" -d '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+RESULT=$(curl -s -X POST http://localhost:%d/ -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -H "Mcp-Session-Id: $SESSION_ID" -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"pull_code","arguments":{"path":"~/project"}}}')
+echo "Result: $RESULT"`, mcpPort, mcpPort, mcpPort)
+	if err := runner.SSHProxy(ctx, sandboxName, pullScript); err != nil {
+		t.Fatalf("pull_code via proxy: %v", err)
+	}
+
+	// 6. Verify code was pulled
+	t.Log("Verifying pulled code...")
+	repoDir := taskDir.RepoPath()
+
+	// Check that the git repo exists and has the gjoll remote branch
+	gitCmd := exec.Command("git", "branch", "-a")
+	gitCmd.Dir = repoDir
+	branchOut, err := gitCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git branch -a in repo: %v\n%s", err, branchOut)
+	}
+	t.Logf("Branches: %s", branchOut)
+
+	expectedBranch := fmt.Sprintf("gjoll/%s", sandboxName)
+	if !strings.Contains(string(branchOut), expectedBranch) {
+		t.Errorf("expected branch %q not found in:\n%s", expectedBranch, branchOut)
+	}
+
+	// Check the file content
+	showCmd := exec.Command("git", "show", expectedBranch+":hello.txt")
+	showCmd.Dir = repoDir
+	showOut, err := showCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git show hello.txt: %v\n%s", err, showOut)
+	}
+	if !strings.Contains(string(showOut), "hello from integration test") {
+		t.Errorf("unexpected file content: %q", showOut)
+	}
+
+	// 7. Copy conversations directory (testing gjoll cp)
+	t.Log("Testing conversation copy...")
+	if err := runner.SSH(ctx, sandboxName, "mkdir -p ~/.claude && echo test > ~/.claude/test.json"); err != nil {
+		t.Fatalf("creating fake conversation: %v", err)
+	}
+	if err := runner.Cp(ctx, sandboxName, ":~/.claude/", taskDir.ConversationsPath()); err != nil {
+		t.Fatalf("copying conversations: %v", err)
+	}
+
+	convFiles, err := os.ReadDir(taskDir.ConversationsPath())
+	if err != nil {
+		t.Fatalf("reading conversations dir: %v", err)
+	}
+	if len(convFiles) == 0 {
+		t.Error("no files in conversations directory after copy")
+	}
+
+	// 8. Stop sandbox
+	t.Log("Stopping sandbox...")
+	if err := runner.Stop(ctx, sandboxName); err != nil {
+		t.Fatalf("gjoll stop: %v", err)
+	}
+
+	// Give it a moment to fully stop
+	time.Sleep(2 * time.Second)
+
+	// 9. Tear down
+	t.Log("Tearing down sandbox...")
+	if err := runner.Down(ctx, sandboxName); err != nil {
+		t.Fatalf("gjoll down: %v", err)
+	}
+	tornDown = true
+
+	t.Log("Integration test passed!")
+}

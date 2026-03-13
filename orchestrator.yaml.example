@@ -1,0 +1,12 @@
+# Orchestrator configuration
+
+# Optional Slack webhook URL for notifications.
+# When set, Info+ messages are posted to Slack in addition to stderr.
+# slack_webhook: "https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
+
+# Directory where task output (code, conversations, metadata) is stored.
+# output_dir: "./tasks"
+
+# Path to the gjoll .tf file for sandbox provisioning.
+# Edit configs/sandbox.tf to set your Vertex AI project ID before use.
+# gjoll_env: "./configs/sandbox.tf"

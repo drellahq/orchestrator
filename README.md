@@ -1,0 +1,115 @@
+# Orchestrator
+
+A CLI tool that spawns sandboxed Claude instances using [gjoll](https://github.com/ondrejbudai/gjoll) (libvirt backend), exposes an MCP server for privileged actions (pulling code), and manages task lifecycle including conversation archival and code retrieval.
+
+The orchestrator bridges untrusted sandbox execution with trusted host operations: Claude runs inside a credential-free VM, but can request the host to pull committed code via MCP.
+
+## Prerequisites
+
+- **Go** (1.24+)
+- **gjoll**: `go install github.com/ondrejbudai/gjoll/cmd/gjoll@latest`
+- **libvirt**: `virsh version` must work
+- **OpenTofu**: `tofu version` must work
+- **GCP Application Default Credentials**: for Vertex AI proxying (`gcloud auth application-default login`)
+
+## Installation
+
+```bash
+go install github.com/drellabot/orchestrator/cmd/orchestrator@latest
+```
+
+Or build from source:
+
+```bash
+git clone https://github.com/drellabot/orchestrator.git
+cd orchestrator
+go build -o orchestrator ./cmd/orchestrator
+```
+
+## Setup
+
+1. Edit `configs/sandbox.tf` and replace `YOUR_PROJECT_ID_HERE` with your GCP project ID for Vertex AI.
+
+2. Copy the example config and adjust if needed:
+
+   ```bash
+   cp orchestrator.yaml.example orchestrator.yaml
+   ```
+
+3. Ensure libvirt's default network is active:
+
+   ```bash
+   sudo virsh net-start default
+   ```
+
+## Configuration
+
+The `orchestrator.yaml` file supports:
+
+| Field           | Default              | Description                                |
+|-----------------|----------------------|--------------------------------------------|
+| `slack_webhook` | (empty)              | Slack webhook URL for task notifications   |
+| `output_dir`    | `./tasks`            | Directory for task output                  |
+| `gjoll_env`     | `./configs/sandbox.tf` | Path to gjoll .tf environment file       |
+
+## Usage
+
+```bash
+orchestrator run <task-name> <task-description...>
+```
+
+Example:
+
+```bash
+orchestrator run fix-bug "Fix the nil pointer dereference in handler.go when the request body is empty"
+```
+
+### What happens
+
+1. Task directory is created under `output_dir`
+2. MCP server starts on `127.0.0.1:19090`
+3. Sandbox VM is provisioned via gjoll
+4. Git, CLAUDE.md, and MCP client are configured in the VM
+5. Claude runs with the task description (with proxy tunnels for Vertex AI and MCP)
+6. On completion, conversations are archived and the VM is stopped
+
+## Task Output Structure
+
+```
+<output_dir>/<task-name>/
+  repo/              # Pulled code (git repo with gjoll/<task-name> branch)
+  conversations/     # Claude conversation archive (~/.claude/ from VM)
+  metadata.json      # Task name, description, timestamps
+```
+
+## Architecture
+
+```
+Host                              Sandbox VM
++-----------+                     +------------------+
+|orchestrator|--gjoll ssh/proxy-->| Claude Code      |
+|           |                     |   (no credentials)|
+| MCP Server|<--reverse tunnel----|   calls pull_code |
+| (port     |                     |                  |
+|  19090)   |                     +------------------+
+|           |
+| Vertex    |--reverse tunnel---->  http://localhost:18080
+| Proxy     |                       (GCP auth injected)
+| (port     |
+|  18080)   |
++-----------+
+```
+
+## Running Tests
+
+### Unit tests
+
+```bash
+go test ./...
+```
+
+### Integration test (requires libvirt)
+
+```bash
+go test -tags integration -v -timeout 10m
+```

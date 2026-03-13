@@ -1,0 +1,51 @@
+name: Integration
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '*.md'
+      - 'orchestrator.yaml.example'
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - '*.md'
+      - 'orchestrator.yaml.example'
+
+jobs:
+  libvirt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6
+        with:
+          go-version-file: go.mod
+
+      - name: Install gjoll
+        run: go install github.com/ondrejbudai/gjoll/cmd/gjoll@8ba009e03d1e
+
+      - name: Install dependencies
+        run: |
+          sudo install -m 0755 -d /etc/apt/keyrings
+          curl -fsSL https://get.opentofu.org/opentofu.gpg | sudo tee /etc/apt/keyrings/opentofu.gpg >/dev/null
+          curl -fsSL https://packages.opentofu.org/opentofu/tofu/gpgkey | sudo gpg --no-tty --batch --dearmor -o /etc/apt/keyrings/opentofu-repo.gpg >/dev/null
+          sudo chmod a+r /etc/apt/keyrings/opentofu.gpg /etc/apt/keyrings/opentofu-repo.gpg
+          echo \
+            "deb [signed-by=/etc/apt/keyrings/opentofu.gpg,/etc/apt/keyrings/opentofu-repo.gpg] https://packages.opentofu.org/opentofu/tofu/any/ any main
+          deb-src [signed-by=/etc/apt/keyrings/opentofu.gpg,/etc/apt/keyrings/opentofu-repo.gpg] https://packages.opentofu.org/opentofu/tofu/any/ any main" \
+            | sudo tee /etc/apt/sources.list.d/opentofu.list > /dev/null
+          sudo chmod a+r /etc/apt/sources.list.d/opentofu.list
+          sudo apt update
+          sudo apt install -y tofu libvirt-daemon-system qemu-kvm
+
+      - name: Start libvirt
+        run: |
+          sudo usermod -aG libvirt $USER
+          sudo systemctl start libvirtd
+          sudo virsh net-start default || true
+          sudo virsh pool-define-as default dir --target /var/lib/libvirt/images
+          sudo virsh pool-start default
+
+      - name: Run integration tests
+        run: sg libvirt -c 'go test -tags integration -v -timeout 30m .'
