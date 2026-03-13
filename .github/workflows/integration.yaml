@@ -23,7 +23,7 @@ jobs:
           go-version: 1.25.8
 
       - name: Install gjoll
-        run: go install github.com/ondrejbudai/gjoll/cmd/gjoll@8ba009e03d1e
+        run: GOPROXY=direct go install github.com/ondrejbudai/gjoll/cmd/gjoll@latest
 
       - name: Install dependencies
         run: |
