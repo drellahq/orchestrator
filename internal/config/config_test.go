@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -44,6 +45,16 @@ func TestLoad(t *testing.T) {
 			},
 		},
 		{
+			name:      "allowed_repos parsed",
+			writeFile: true,
+			yaml:      "allowed_repos:\n  - osbuild/osbuild\n  - drellabot/*\n",
+			want: Config{
+				OutputDir:    "./tasks",
+				GjollEnv:     "./configs/sandbox.tf",
+				AllowedRepos: []string{"osbuild/osbuild", "drellabot/*"},
+			},
+		},
+		{
 			name:      "invalid yaml",
 			writeFile: true,
 			yaml:      "{{invalid",
@@ -76,8 +87,57 @@ func TestLoad(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if *got != tt.want {
+			if !reflect.DeepEqual(*got, tt.want) {
 				t.Errorf("got %+v, want %+v", *got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRepoAllowed(t *testing.T) {
+	tests := []struct {
+		name         string
+		allowedRepos []string
+		repo         string
+		want         bool
+	}{
+		{
+			name:         "exact match",
+			allowedRepos: []string{"osbuild/osbuild"},
+			repo:         "osbuild/osbuild",
+			want:         true,
+		},
+		{
+			name:         "wildcard match",
+			allowedRepos: []string{"drellabot/*"},
+			repo:         "drellabot/orchestrator",
+			want:         true,
+		},
+		{
+			name:         "no match",
+			allowedRepos: []string{"osbuild/osbuild"},
+			repo:         "evil/repo",
+			want:         false,
+		},
+		{
+			name:         "empty list denies all",
+			allowedRepos: nil,
+			repo:         "osbuild/osbuild",
+			want:         false,
+		},
+		{
+			name:         "wildcard does not cross slash",
+			allowedRepos: []string{"org/*"},
+			repo:         "org/a/b",
+			want:         false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{AllowedRepos: tt.allowedRepos}
+			if got := cfg.RepoAllowed(tt.repo); got != tt.want {
+				t.Errorf("RepoAllowed(%q) = %v, want %v", tt.repo, got, tt.want)
 			}
 		})
 	}

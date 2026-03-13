@@ -3,14 +3,28 @@ package config
 import (
 	"fmt"
 	"os"
+	"path"
 
 	"github.com/goccy/go-yaml"
 )
 
 type Config struct {
-	SlackWebhook string `yaml:"slack_webhook"`
-	OutputDir    string `yaml:"output_dir"`
-	GjollEnv     string `yaml:"gjoll_env"`
+	SlackWebhook string   `yaml:"slack_webhook"`
+	OutputDir    string   `yaml:"output_dir"`
+	GjollEnv     string   `yaml:"gjoll_env"`
+	AllowedRepos []string `yaml:"allowed_repos"`
+}
+
+// RepoAllowed reports whether repo is permitted by the AllowedRepos allowlist.
+// Each entry may contain wildcards understood by path.Match (e.g. "org/*").
+// An empty list denies all repos.
+func (c *Config) RepoAllowed(repo string) bool {
+	for _, pattern := range c.AllowedRepos {
+		if matched, _ := path.Match(pattern, repo); matched {
+			return true
+		}
+	}
+	return false
 }
 
 func Load(path string) (*Config, error) {
