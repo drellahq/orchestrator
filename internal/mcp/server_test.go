@@ -30,7 +30,53 @@ func (s *stubPuller) Pull(_ context.Context, name, remotePath, localRepoDir stri
 	return s.err
 }
 
-func startTestServer(t *testing.T, puller CodePuller) (*task.Dir, *Server, string) {
+// stubPROpener implements PROpener for testing.
+type stubPROpener struct {
+	user    string
+	userErr error
+
+	forkName   string
+	forkErr    error
+	forkCalled bool
+
+	pushErr     error
+	gotRepoDir  string
+	gotForkName string
+	gotBranch   string
+	gotSource   string
+
+	prURL     string
+	prErr     error
+	gotPRRepo string
+	gotPRHead string
+	gotPRBase string
+}
+
+func (s *stubPROpener) AuthenticatedUser(_ context.Context) (string, error) {
+	return s.user, s.userErr
+}
+
+func (s *stubPROpener) EnsureFork(_ context.Context, upstream string) (string, error) {
+	s.forkCalled = true
+	return s.forkName, s.forkErr
+}
+
+func (s *stubPROpener) PushBranch(_ context.Context, repoDir, forkFullName, branch, sourceRef string) error {
+	s.gotRepoDir = repoDir
+	s.gotForkName = forkFullName
+	s.gotBranch = branch
+	s.gotSource = sourceRef
+	return s.pushErr
+}
+
+func (s *stubPROpener) CreatePR(_ context.Context, upstream, forkOwner, branch, base, title, body string) (string, error) {
+	s.gotPRRepo = upstream
+	s.gotPRHead = forkOwner + ":" + branch
+	s.gotPRBase = base
+	return s.prURL, s.prErr
+}
+
+func startTestServer(t *testing.T, puller CodePuller, prOpener PROpener, allowedRepos []string) (*task.Dir, *Server, string) {
 	t.Helper()
 	dir := t.TempDir()
 	td, err := task.Create(dir, "test-task")
@@ -39,7 +85,7 @@ func startTestServer(t *testing.T, puller CodePuller) (*task.Dir, *Server, strin
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	s := New(logger, "test-task", td, puller)
+	s := New(logger, "test-task", td, puller, prOpener, allowedRepos)
 	if err := s.StartOn("127.0.0.1:0"); err != nil {
 		t.Fatalf("StartOn() error: %v", err)
 	}
@@ -70,7 +116,8 @@ func connectClient(t *testing.T, endpoint string) *mcp.ClientSession {
 }
 
 func TestServerListTools(t *testing.T) {
-	_, _, endpoint := startTestServer(t, &stubPuller{})
+	opener := &stubPROpener{user: "testuser", forkName: "testuser/repo", prURL: "https://github.com/org/repo/pull/1"}
+	_, _, endpoint := startTestServer(t, &stubPuller{}, opener, []string{"org/*"})
 	session := connectClient(t, endpoint)
 
 	result, err := session.ListTools(context.Background(), nil)
@@ -78,15 +125,16 @@ func TestServerListTools(t *testing.T) {
 		t.Fatalf("ListTools() error: %v", err)
 	}
 
-	found := false
+	wantTools := map[string]bool{"pull_code": false, "open_pr": false}
 	for _, tool := range result.Tools {
-		if tool.Name == "pull_code" {
-			found = true
-			break
+		if _, ok := wantTools[tool.Name]; ok {
+			wantTools[tool.Name] = true
 		}
 	}
-	if !found {
-		t.Error("pull_code tool not found in tool list")
+	for name, found := range wantTools {
+		if !found {
+			t.Errorf("%s tool not found in tool list", name)
+		}
 	}
 }
 
@@ -112,7 +160,7 @@ func TestPullCodeTool(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			td, _, endpoint := startTestServer(t, tt.puller)
+			td, _, endpoint := startTestServer(t, tt.puller, nil, nil)
 			session := connectClient(t, endpoint)
 
 			result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
@@ -149,6 +197,185 @@ func TestPullCodeTool(t *testing.T) {
 			}
 			if !strings.Contains(text, tt.wantText) {
 				t.Errorf("result text %q does not contain %q", text, tt.wantText)
+			}
+		})
+	}
+}
+
+func TestOpenPRTool(t *testing.T) {
+	tests := []struct {
+		name           string
+		opener         *stubPROpener
+		allowedRepos   []string
+		input          map[string]any
+		wantError      bool
+		wantText       string
+		wantForkCalled bool
+	}{
+		{
+			name: "successful PR via fork",
+			opener: &stubPROpener{
+				user:     "testuser",
+				forkName: "testuser/osbuild",
+				prURL:    "https://github.com/osbuild/osbuild/pull/42",
+			},
+			allowedRepos: []string{"osbuild/*"},
+			input: map[string]any{
+				"repo":   "osbuild/osbuild",
+				"branch": "fix-bug",
+				"base":   "main",
+				"title":  "Fix bug",
+				"body":   "This fixes the bug",
+			},
+			wantText:       "https://github.com/osbuild/osbuild/pull/42",
+			wantForkCalled: true,
+		},
+		{
+			name: "user owns repo skips fork",
+			opener: &stubPROpener{
+				user:  "osbuild",
+				prURL: "https://github.com/osbuild/osbuild/pull/99",
+			},
+			allowedRepos: []string{"osbuild/*"},
+			input: map[string]any{
+				"repo":   "osbuild/osbuild",
+				"branch": "fix-bug",
+				"base":   "main",
+				"title":  "Fix bug",
+				"body":   "Direct push",
+			},
+			wantText:       "https://github.com/osbuild/osbuild/pull/99",
+			wantForkCalled: false,
+		},
+		{
+			name: "default base branch",
+			opener: &stubPROpener{
+				user:     "testuser",
+				forkName: "testuser/osbuild",
+				prURL:    "https://github.com/osbuild/osbuild/pull/43",
+			},
+			allowedRepos:   []string{"osbuild/osbuild"},
+			wantForkCalled: true,
+			input: map[string]any{
+				"repo":   "osbuild/osbuild",
+				"branch": "fix-bug",
+				"title":  "Fix bug",
+				"body":   "This fixes the bug",
+			},
+			wantText: "https://github.com/osbuild/osbuild/pull/43",
+		},
+		{
+			name:         "repo not allowed",
+			opener:       &stubPROpener{},
+			allowedRepos: []string{"osbuild/*"},
+			input: map[string]any{
+				"repo":   "evil/repo",
+				"branch": "fix-bug",
+				"title":  "Fix bug",
+				"body":   "This fixes the bug",
+			},
+			wantError: true,
+			wantText:  "not in the allowed repos list",
+		},
+		{
+			name: "fork failure",
+			opener: &stubPROpener{
+				user:    "testuser",
+				forkErr: fmt.Errorf("fork failed"),
+			},
+			allowedRepos:   []string{"osbuild/*"},
+			wantForkCalled: true,
+			input: map[string]any{
+				"repo":   "osbuild/osbuild",
+				"branch": "fix-bug",
+				"title":  "Fix bug",
+				"body":   "body",
+			},
+			wantError: true,
+			wantText:  "fork failed",
+		},
+		{
+			name: "push failure",
+			opener: &stubPROpener{
+				user:     "testuser",
+				forkName: "testuser/osbuild",
+				pushErr:  fmt.Errorf("push rejected"),
+			},
+			allowedRepos:   []string{"osbuild/*"},
+			wantForkCalled: true,
+			input: map[string]any{
+				"repo":   "osbuild/osbuild",
+				"branch": "fix-bug",
+				"title":  "Fix bug",
+				"body":   "body",
+			},
+			wantError: true,
+			wantText:  "push rejected",
+		},
+		{
+			name: "PR creation failure",
+			opener: &stubPROpener{
+				user:     "testuser",
+				forkName: "testuser/osbuild",
+				prErr:    fmt.Errorf("duplicate PR"),
+			},
+			allowedRepos:   []string{"osbuild/*"},
+			wantForkCalled: true,
+			input: map[string]any{
+				"repo":   "osbuild/osbuild",
+				"branch": "fix-bug",
+				"title":  "Fix bug",
+				"body":   "body",
+			},
+			wantError: true,
+			wantText:  "duplicate PR",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, endpoint := startTestServer(t, &stubPuller{}, tt.opener, tt.allowedRepos)
+			session := connectClient(t, endpoint)
+
+			result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+				Name:      "open_pr",
+				Arguments: tt.input,
+			})
+			if err != nil {
+				t.Fatalf("CallTool() protocol error: %v", err)
+			}
+
+			if result.IsError != tt.wantError {
+				t.Errorf("IsError = %v, want %v", result.IsError, tt.wantError)
+			}
+
+			var text string
+			for _, c := range result.Content {
+				if tc, ok := c.(*mcp.TextContent); ok {
+					text = tc.Text
+				}
+			}
+			if !strings.Contains(text, tt.wantText) {
+				t.Errorf("result text %q does not contain %q", text, tt.wantText)
+			}
+
+			// Verify default base branch
+			if tt.name == "default base branch" && tt.opener.gotPRBase != "main" {
+				t.Errorf("base = %q, want %q", tt.opener.gotPRBase, "main")
+			}
+
+			// Verify sourceRef includes task name
+			if !tt.wantError && tt.opener.gotSource != "gjoll/test-task" {
+				t.Errorf("sourceRef = %q, want %q", tt.opener.gotSource, "gjoll/test-task")
+			}
+
+			if tt.opener.forkCalled != tt.wantForkCalled {
+				t.Errorf("forkCalled = %v, want %v", tt.opener.forkCalled, tt.wantForkCalled)
+			}
+
+			// When user owns repo, push target should be the upstream itself
+			if tt.name == "user owns repo skips fork" && tt.opener.gotForkName != "osbuild/osbuild" {
+				t.Errorf("pushTarget = %q, want %q", tt.opener.gotForkName, "osbuild/osbuild")
 			}
 		})
 	}

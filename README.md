@@ -11,6 +11,7 @@ The orchestrator bridges untrusted sandbox execution with trusted host operation
 - **libvirt**: `virsh version` must work
 - **OpenTofu**: `tofu version` must work
 - **GCP Application Default Credentials**: for Vertex AI proxying (`gcloud auth application-default login`)
+- **gh** (optional): GitHub CLI, authenticated (`gh auth login`) — required for `open_pr`
 
 ## Installation
 
@@ -51,6 +52,7 @@ The `orchestrator.yaml` file supports:
 | `slack_webhook` | (empty)              | Slack webhook URL for task notifications   |
 | `output_dir`    | `./tasks`            | Directory for task output                  |
 | `gjoll_env`     | `./configs/sandbox.tf` | Path to gjoll .tf environment file       |
+| `allowed_repos` | `[]` (deny all)      | Repos allowed for `open_pr` (glob patterns)|
 
 ## Usage
 

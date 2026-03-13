@@ -196,7 +196,7 @@ func TestIntegration(t *testing.T) {
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	mcpSrv := mcpserver.New(logger, sandboxName, taskDir, runner)
+	mcpSrv := mcpserver.New(logger, sandboxName, taskDir, runner, nil, nil)
 	if err := mcpSrv.Start(); err != nil {
 		t.Fatalf("MCP server start: %v", err)
 	}

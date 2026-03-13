@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"path"
+	"strings"
 
 	"github.com/drellabot/orchestrator/internal/task"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -19,9 +21,26 @@ type CodePuller interface {
 	Pull(ctx context.Context, name, remotePath, localRepoDir string) error
 }
 
+// PROpener handles GitHub operations for opening pull requests.
+type PROpener interface {
+	AuthenticatedUser(ctx context.Context) (string, error)
+	EnsureFork(ctx context.Context, upstream string) (string, error)
+	PushBranch(ctx context.Context, repoDir, forkFullName, branch, sourceRef string) error
+	CreatePR(ctx context.Context, upstream, forkOwner, branch, base, title, body string) (string, error)
+}
+
 // PullCodeInput is the input schema for the pull_code tool.
 type PullCodeInput struct {
 	Path string `json:"path" jsonschema_description:"Absolute path to the git repo in the sandbox"`
+}
+
+// OpenPRInput is the input schema for the open_pr tool.
+type OpenPRInput struct {
+	Repo   string `json:"repo" jsonschema_description:"Target repository as owner/repo (e.g. osbuild/osbuild)"`
+	Branch string `json:"branch" jsonschema_description:"Branch name to push"`
+	Base   string `json:"base,omitempty" jsonschema_description:"Base branch for the PR (default: main)"`
+	Title  string `json:"title" jsonschema_description:"PR title"`
+	Body   string `json:"body" jsonschema_description:"PR body/description"`
 }
 
 // Server wraps an MCP server that exposes the pull_code tool.
@@ -31,8 +50,9 @@ type Server struct {
 }
 
 // New creates a new MCP server. The pull_code tool calls puller.Pull to fetch
-// committed code from the sandbox into the local task directory.
-func New(logger *slog.Logger, taskName string, taskDir *task.Dir, puller CodePuller) *Server {
+// committed code from the sandbox into the local task directory. If prOpener
+// is non-nil and allowedRepos is non-empty, the open_pr tool is registered.
+func New(logger *slog.Logger, taskName string, taskDir *task.Dir, puller CodePuller, prOpener PROpener, allowedRepos []string) *Server {
 	mcpServer := mcp.NewServer(&mcp.Implementation{
 		Name:    "orchestrator",
 		Version: "0.1.0",
@@ -61,6 +81,95 @@ func New(logger *slog.Logger, taskName string, taskDir *task.Dir, puller CodePul
 			},
 		}, nil, nil
 	})
+
+	if prOpener != nil && len(allowedRepos) > 0 {
+		mcp.AddTool(mcpServer, &mcp.Tool{
+			Name:        "open_pr",
+			Description: "Open a pull request on GitHub from the pulled code",
+		}, func(ctx context.Context, req *mcp.CallToolRequest, input *OpenPRInput) (*mcp.CallToolResult, any, error) {
+			logger.Info("PR open requested", "task", taskName, "repo", input.Repo)
+
+			// Validate repo against allowlist
+			allowed := false
+			for _, pattern := range allowedRepos {
+				if matched, _ := path.Match(pattern, input.Repo); matched {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				logger.Warn("PR open denied: repo not allowed", "task", taskName, "repo", input.Repo)
+				return &mcp.CallToolResult{
+					Content: []mcp.Content{
+						&mcp.TextContent{Text: fmt.Sprintf("repo %q is not in the allowed repos list", input.Repo)},
+					},
+					IsError: true,
+				}, nil, nil
+			}
+
+			if input.Base == "" {
+				input.Base = "main"
+			}
+
+			forkOwner, err := prOpener.AuthenticatedUser(ctx)
+			if err != nil {
+				logger.Error("Failed to get authenticated user", "task", taskName, "error", err)
+				return &mcp.CallToolResult{
+					Content: []mcp.Content{
+						&mcp.TextContent{Text: fmt.Sprintf("open_pr failed: %v", err)},
+					},
+					IsError: true,
+				}, nil, nil
+			}
+
+			// If the authenticated user owns the upstream repo, push
+			// directly instead of forking (you can't fork your own repo).
+			repoOwner, _, _ := strings.Cut(input.Repo, "/")
+			pushTarget := input.Repo
+			if forkOwner != repoOwner {
+				forkFullName, err := prOpener.EnsureFork(ctx, input.Repo)
+				if err != nil {
+					logger.Error("Failed to ensure fork", "task", taskName, "error", err)
+					return &mcp.CallToolResult{
+						Content: []mcp.Content{
+							&mcp.TextContent{Text: fmt.Sprintf("open_pr failed: %v", err)},
+						},
+						IsError: true,
+					}, nil, nil
+				}
+				pushTarget = forkFullName
+			}
+
+			sourceRef := "gjoll/" + taskName
+			if err := prOpener.PushBranch(ctx, taskDir.RepoPath(), pushTarget, input.Branch, sourceRef); err != nil {
+				logger.Error("Failed to push branch", "task", taskName, "error", err)
+				return &mcp.CallToolResult{
+					Content: []mcp.Content{
+						&mcp.TextContent{Text: fmt.Sprintf("open_pr failed: %v", err)},
+					},
+					IsError: true,
+				}, nil, nil
+			}
+
+			prURL, err := prOpener.CreatePR(ctx, input.Repo, forkOwner, input.Branch, input.Base, input.Title, input.Body)
+			if err != nil {
+				logger.Error("Failed to create PR", "task", taskName, "error", err)
+				return &mcp.CallToolResult{
+					Content: []mcp.Content{
+						&mcp.TextContent{Text: fmt.Sprintf("open_pr failed: %v", err)},
+					},
+					IsError: true,
+				}, nil, nil
+			}
+
+			logger.Info("PR created", "task", taskName, "url", prURL, "repo", input.Repo)
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{
+					&mcp.TextContent{Text: prURL},
+				},
+			}, nil, nil
+		})
+	}
 
 	handler := mcp.NewStreamableHTTPHandler(func(req *http.Request) *mcp.Server {
 		return mcpServer

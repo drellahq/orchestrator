@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/drellabot/orchestrator/internal/config"
+	gh "github.com/drellabot/orchestrator/internal/github"
 	"github.com/drellabot/orchestrator/internal/gjoll"
 	"github.com/drellabot/orchestrator/internal/logging"
 	mcpserver "github.com/drellabot/orchestrator/internal/mcp"
@@ -65,9 +66,10 @@ func runTask(cmd *cobra.Command, args []string) error {
 	}
 
 	runner := gjoll.New("")
+	ghRunner := gh.New("")
 
 	// Start MCP server
-	mcpSrv := mcpserver.New(logger, taskName, taskDir, runner)
+	mcpSrv := mcpserver.New(logger, taskName, taskDir, runner, ghRunner, cfg.AllowedRepos)
 	if err := mcpSrv.Start(); err != nil {
 		return fmt.Errorf("starting MCP server: %w", err)
 	}

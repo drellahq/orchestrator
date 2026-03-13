@@ -10,3 +10,9 @@
 # Path to the gjoll .tf file for sandbox provisioning.
 # Edit configs/sandbox.tf to set your Vertex AI project ID before use.
 # gjoll_env: "./configs/sandbox.tf"
+
+# Repos the sandbox is allowed to open PRs against (supports wildcards).
+# Requires gh CLI authentication on the host.
+# allowed_repos:
+#   - myorg/myrepo
+#   - myorg/*
