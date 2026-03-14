@@ -1,8 +1,10 @@
 # Orchestrator configuration
 
-# Optional Slack webhook URL for notifications.
-# When set, Info+ messages are posted to Slack in addition to stderr.
-# slack_webhook: "https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
+# Optional Slack bot token and channel for notifications.
+# When both are set, an initial task summary is posted to the channel and all
+# subsequent updates are threaded as replies. The bot token needs chat:write scope.
+# slack_bot_token: "xoxb-YOUR-BOT-TOKEN"
+# slack_channel: "C0123456789"
 
 # Directory where task output (code, conversations, metadata) is stored.
 # output_dir: "./tasks"

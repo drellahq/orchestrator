@@ -9,10 +9,11 @@ import (
 )
 
 type Config struct {
-	SlackWebhook string   `yaml:"slack_webhook"`
-	OutputDir    string   `yaml:"output_dir"`
-	GjollEnv     string   `yaml:"gjoll_env"`
-	AllowedRepos []string `yaml:"allowed_repos"`
+	SlackBotToken string   `yaml:"slack_bot_token"`
+	SlackChannel  string   `yaml:"slack_channel"`
+	OutputDir     string   `yaml:"output_dir"`
+	GjollEnv      string   `yaml:"gjoll_env"`
+	AllowedRepos  []string `yaml:"allowed_repos"`
 }
 
 // RepoAllowed reports whether repo is permitted by the AllowedRepos allowlist.

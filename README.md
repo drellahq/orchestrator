@@ -47,12 +47,15 @@ go build -o orchestrator ./cmd/orchestrator
 
 The `orchestrator.yaml` file supports:
 
-| Field           | Default              | Description                                |
-|-----------------|----------------------|--------------------------------------------|
-| `slack_webhook` | (empty)              | Slack webhook URL for task notifications   |
-| `output_dir`    | `./tasks`            | Directory for task output                  |
-| `gjoll_env`     | `./configs/sandbox.tf` | Path to gjoll .tf environment file       |
-| `allowed_repos` | `[]` (deny all)      | Repos allowed for `open_pr` (glob patterns)|
+| Field             | Default              | Description                                              |
+|-------------------|----------------------|----------------------------------------------------------|
+| `slack_bot_token` | (empty)              | Slack bot token (`xoxb-...`) with `chat:write` scope     |
+| `slack_channel`   | (empty)              | Slack channel ID to post to (e.g. `C0123456789`)         |
+| `output_dir`      | `./tasks`            | Directory for task output                                |
+| `gjoll_env`       | `./configs/sandbox.tf` | Path to gjoll .tf environment file                     |
+| `allowed_repos`   | `[]` (deny all)      | Repos allowed for `open_pr` (glob patterns)              |
+
+When both `slack_bot_token` and `slack_channel` are set, the orchestrator posts an initial task summary to the channel and threads all subsequent updates as replies.
 
 ## Usage
 

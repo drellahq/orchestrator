@@ -7,10 +7,19 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"strings"
+	"sync"
 	"testing"
 	"time"
 )
+
+func newTestConfig(url string) *SlackConfig {
+	return &SlackConfig{
+		BotToken:        "xoxb-test-token",
+		Channel:         "C0123456789",
+		TaskName:        "my-task",
+		TaskDescription: "Fix the login bug",
+	}
+}
 
 func TestSlackHandler(t *testing.T) {
 	tests := []struct {
@@ -18,7 +27,8 @@ func TestSlackHandler(t *testing.T) {
 		level        slog.Level
 		msg          string
 		attrs        []slog.Attr
-		serverStatus int // 0 means 200
+		serverStatus int
+		serverOK     *bool
 		wantPost     bool
 		wantSubstr   string
 		wantErr      bool
@@ -52,23 +62,56 @@ func TestSlackHandler(t *testing.T) {
 			wantPost:     true,
 			wantErr:      true,
 		},
+		{
+			name:       "slack API error returns error",
+			level:      slog.LevelInfo,
+			msg:        "test",
+			serverOK:   boolPtr(false),
+			wantPost:   true,
+			wantErr:    true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var received string
+			var mu sync.Mutex
+			var requests []slackRequest
 			status := tt.serverStatus
 			if status == 0 {
 				status = http.StatusOK
 			}
+			apiOK := true
+			if tt.serverOK != nil {
+				apiOK = *tt.serverOK
+			}
+
 			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if got := r.Header.Get("Authorization"); got != "Bearer xoxb-test-token" {
+					t.Errorf("Authorization = %q, want Bearer xoxb-test-token", got)
+				}
 				body, _ := io.ReadAll(r.Body)
-				received = string(body)
+				var req slackRequest
+				_ = json.Unmarshal(body, &req)
+				mu.Lock()
+				requests = append(requests, req)
+				mu.Unlock()
+
 				w.WriteHeader(status)
+				if status == http.StatusOK {
+					resp := slackResponse{OK: apiOK, TS: "1234.5678"}
+					if !apiOK {
+						resp.Error = "channel_not_found"
+					}
+					_ = json.NewEncoder(w).Encode(resp)
+				}
 			}))
 			defer ts.Close()
 
-			h := NewSlackHandler(ts.URL, ts.Client())
+			// Override the Slack API URL by using a custom transport
+			cfg := newTestConfig(ts.URL)
+			h := NewSlackHandler(cfg, ts.Client())
+			// Point the handler at our test server
+			overrideSlackURL(t, ts.URL)
 
 			if h.Enabled(context.Background(), tt.level) != tt.wantPost {
 				t.Fatalf("Enabled(%v) = %v, want %v", tt.level, !tt.wantPost, tt.wantPost)
@@ -94,24 +137,132 @@ func TestSlackHandler(t *testing.T) {
 				t.Fatalf("Handle() error: %v", err)
 			}
 
-			if received == "" {
-				t.Fatal("no HTTP request received")
+			mu.Lock()
+			defer mu.Unlock()
+
+			// First request is the initial summary, second is the log record
+			if len(requests) < 2 {
+				t.Fatalf("expected at least 2 requests, got %d", len(requests))
 			}
 
-			var payload map[string]string
-			if err := json.Unmarshal([]byte(received), &payload); err != nil {
-				t.Fatalf("invalid JSON payload: %v", err)
+			// Initial message should not have thread_ts
+			if requests[0].ThreadTS != "" {
+				t.Errorf("initial message has thread_ts = %q, want empty", requests[0].ThreadTS)
+			}
+			if requests[0].Channel != "C0123456789" {
+				t.Errorf("initial message channel = %q, want C0123456789", requests[0].Channel)
 			}
 
-			text := payload["text"]
-			if text == "" {
-				t.Fatal("empty text in payload")
+			// Thread reply should have thread_ts
+			lastReq := requests[len(requests)-1]
+			if lastReq.ThreadTS != "1234.5678" {
+				t.Errorf("thread reply thread_ts = %q, want 1234.5678", lastReq.ThreadTS)
 			}
 
-			if tt.wantSubstr != "" && !strings.Contains(text, tt.wantSubstr) {
-				t.Errorf("payload text %q does not contain %q", text, tt.wantSubstr)
+			if tt.wantSubstr != "" {
+				found := false
+				for _, req := range requests {
+					if contains(req.Text, tt.wantSubstr) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("no request text contains %q", tt.wantSubstr)
+				}
 			}
 		})
+	}
+}
+
+func TestSlackHandlerThreading(t *testing.T) {
+	var mu sync.Mutex
+	var requests []slackRequest
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var req slackRequest
+		_ = json.Unmarshal(body, &req)
+		mu.Lock()
+		requests = append(requests, req)
+		mu.Unlock()
+		_ = json.NewEncoder(w).Encode(slackResponse{OK: true, TS: "9999.0001"})
+	}))
+	defer ts.Close()
+	overrideSlackURL(t, ts.URL)
+
+	cfg := newTestConfig(ts.URL)
+	h := NewSlackHandler(cfg, ts.Client())
+
+	for i, msg := range []string{"First", "Second", "Third"} {
+		record := slog.NewRecord(time.Now(), slog.LevelInfo, msg, 0)
+		if err := h.Handle(context.Background(), record); err != nil {
+			t.Fatalf("Handle(%d) error: %v", i, err)
+		}
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	// 1 initial summary + 3 log records = 4 requests
+	if len(requests) != 4 {
+		t.Fatalf("expected 4 requests, got %d", len(requests))
+	}
+
+	if requests[0].ThreadTS != "" {
+		t.Errorf("initial message should have no thread_ts, got %q", requests[0].ThreadTS)
+	}
+	for i := 1; i < len(requests); i++ {
+		if requests[i].ThreadTS != "9999.0001" {
+			t.Errorf("request[%d] thread_ts = %q, want 9999.0001", i, requests[i].ThreadTS)
+		}
+	}
+}
+
+func TestSlackHandlerWithAttrsSharingThread(t *testing.T) {
+	var mu sync.Mutex
+	var requests []slackRequest
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var req slackRequest
+		_ = json.Unmarshal(body, &req)
+		mu.Lock()
+		requests = append(requests, req)
+		mu.Unlock()
+		_ = json.NewEncoder(w).Encode(slackResponse{OK: true, TS: "5555.0001"})
+	}))
+	defer ts.Close()
+	overrideSlackURL(t, ts.URL)
+
+	cfg := newTestConfig(ts.URL)
+	h := NewSlackHandler(cfg, ts.Client())
+
+	// Post via original handler to establish thread
+	record := slog.NewRecord(time.Now(), slog.LevelInfo, "original", 0)
+	if err := h.Handle(context.Background(), record); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a copy via WithAttrs and post — should reuse thread
+	h2 := h.WithAttrs([]slog.Attr{slog.String("key", "val")})
+	record2 := slog.NewRecord(time.Now(), slog.LevelInfo, "from copy", 0)
+	if err := h2.Handle(context.Background(), record2); err != nil {
+		t.Fatal(err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	// initial + original + from-copy = 3
+	if len(requests) != 3 {
+		t.Fatalf("expected 3 requests, got %d", len(requests))
+	}
+	if requests[2].ThreadTS != "5555.0001" {
+		t.Errorf("WithAttrs copy thread_ts = %q, want 5555.0001", requests[2].ThreadTS)
+	}
+	if !contains(requests[2].Text, "key=val") {
+		t.Errorf("WithAttrs copy should include attr, got %q", requests[2].Text)
 	}
 }
 
@@ -152,3 +303,26 @@ func (h *trackingHandler) Handle(_ context.Context, _ slog.Record) error {
 }
 func (h *trackingHandler) WithAttrs(_ []slog.Attr) slog.Handler { return h }
 func (h *trackingHandler) WithGroup(_ string) slog.Handler      { return h }
+
+func boolPtr(b bool) *bool { return &b }
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsStr(s, substr))
+}
+
+func containsStr(s, sub string) bool {
+	for i := 0; i <= len(s)-len(sub); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
+}
+
+// overrideSlackURL temporarily replaces the package-level Slack URL for testing.
+func overrideSlackURL(t *testing.T, url string) {
+	t.Helper()
+	old := slackPostMessageURL
+	slackPostMessageURL = url
+	t.Cleanup(func() { slackPostMessageURL = old })
+}

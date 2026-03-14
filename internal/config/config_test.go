@@ -18,21 +18,23 @@ func TestLoad(t *testing.T) {
 		{
 			name:      "full config",
 			writeFile: true,
-			yaml:      "slack_webhook: https://hooks.slack.com/test\noutput_dir: /tmp/tasks\ngjoll_env: /path/to/sandbox.tf\n",
+			yaml:      "slack_bot_token: xoxb-test-token\nslack_channel: C0123456789\noutput_dir: /tmp/tasks\ngjoll_env: /path/to/sandbox.tf\n",
 			want: Config{
-				SlackWebhook: "https://hooks.slack.com/test",
-				OutputDir:    "/tmp/tasks",
-				GjollEnv:     "/path/to/sandbox.tf",
+				SlackBotToken: "xoxb-test-token",
+				SlackChannel:  "C0123456789",
+				OutputDir:     "/tmp/tasks",
+				GjollEnv:      "/path/to/sandbox.tf",
 			},
 		},
 		{
 			name:      "defaults applied",
 			writeFile: true,
-			yaml:      "slack_webhook: https://hooks.slack.com/test\n",
+			yaml:      "slack_bot_token: xoxb-test-token\nslack_channel: C0123456789\n",
 			want: Config{
-				SlackWebhook: "https://hooks.slack.com/test",
-				OutputDir:    "./tasks",
-				GjollEnv:     "./configs/sandbox.tf",
+				SlackBotToken: "xoxb-test-token",
+				SlackChannel:  "C0123456789",
+				OutputDir:     "./tasks",
+				GjollEnv:      "./configs/sandbox.tf",
 			},
 		},
 		{

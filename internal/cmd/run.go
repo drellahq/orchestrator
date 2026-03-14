@@ -43,7 +43,16 @@ func runTask(cmd *cobra.Command, args []string) error {
 	}
 
 	// Set up logging
-	logger := logging.SetupLogger(cfg.SlackWebhook, verbose)
+	var slackCfg *logging.SlackConfig
+	if cfg.SlackBotToken != "" && cfg.SlackChannel != "" {
+		slackCfg = &logging.SlackConfig{
+			BotToken:        cfg.SlackBotToken,
+			Channel:         cfg.SlackChannel,
+			TaskName:        taskName,
+			TaskDescription: taskDescription,
+		}
+	}
+	logger := logging.SetupLogger(slackCfg, verbose)
 	slog.SetDefault(logger)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
