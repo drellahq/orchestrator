@@ -115,7 +115,7 @@ Host                              Sandbox VM
 +-----------+                     +------------------+
 |orchestrator|--gjoll ssh/proxy-->| Claude Code      |
 |           |                     |   (no credentials)|
-| MCP Server|<--reverse tunnel----|   calls pull_code |
+| MCP Server|<--reverse tunnel----|   calls open_pr   |
 | (port     |                     |                  |
 |  19090)   |                     +------------------+
 |           |

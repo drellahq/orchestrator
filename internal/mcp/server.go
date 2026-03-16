@@ -29,13 +29,9 @@ type PROpener interface {
 	CreatePR(ctx context.Context, upstream, forkOwner, branch, base, title, body string) (string, error)
 }
 
-// PullCodeInput is the input schema for the pull_code tool.
-type PullCodeInput struct {
-	Path string `json:"path" jsonschema_description:"Absolute path to the git repo in the sandbox"`
-}
-
 // OpenPRInput is the input schema for the open_pr tool.
 type OpenPRInput struct {
+	Path   string `json:"path" jsonschema_description:"Absolute path to the git repo in the sandbox"`
 	Repo   string `json:"repo" jsonschema_description:"Target repository as owner/repo (e.g. osbuild/osbuild)"`
 	Branch string `json:"branch" jsonschema_description:"Branch name to push"`
 	Base   string `json:"base,omitempty" jsonschema_description:"Base branch for the PR (default: main)"`
@@ -43,61 +39,55 @@ type OpenPRInput struct {
 	Body   string `json:"body" jsonschema_description:"PR body/description"`
 }
 
-// Server wraps an MCP server that exposes the pull_code tool.
+// Server wraps an MCP server that exposes tools for sandbox operations.
 type Server struct {
 	httpServer *http.Server
 	listener   net.Listener
 }
 
-// New creates a new MCP server. The pull_code tool calls puller.Pull to fetch
-// committed code from the sandbox into the local task directory. If prOpener
-// is non-nil and allowedRepos is non-empty, the open_pr tool is registered.
+func isRepoAllowed(repo string, allowedRepos []string) bool {
+	for _, pattern := range allowedRepos {
+		if matched, _ := path.Match(pattern, repo); matched {
+			return true
+		}
+	}
+	return false
+}
+
+func resolvePushTarget(ctx context.Context, repo string, prOpener PROpener) (pushTarget, forkOwner string, err error) {
+	forkOwner, err = prOpener.AuthenticatedUser(ctx)
+	if err != nil {
+		return "", "", fmt.Errorf("getting authenticated user: %w", err)
+	}
+
+	repoOwner, _, _ := strings.Cut(repo, "/")
+	pushTarget = repo
+	if forkOwner != repoOwner {
+		forkFullName, err := prOpener.EnsureFork(ctx, repo)
+		if err != nil {
+			return "", "", fmt.Errorf("ensuring fork: %w", err)
+		}
+		pushTarget = forkFullName
+	}
+	return pushTarget, forkOwner, nil
+}
+
+// New creates a new MCP server. If prOpener is non-nil and allowedRepos is
+// non-empty, the open_pr tool is registered.
 func New(logger *slog.Logger, taskName string, taskDir *task.Dir, puller CodePuller, prOpener PROpener, allowedRepos []string) *Server {
 	mcpServer := mcp.NewServer(&mcp.Implementation{
 		Name:    "orchestrator",
 		Version: "0.1.0",
 	}, nil)
 
-	mcp.AddTool(mcpServer, &mcp.Tool{
-		Name:        "pull_code",
-		Description: "Pull committed code from the sandbox git repo to the host",
-	}, func(ctx context.Context, req *mcp.CallToolRequest, input *PullCodeInput) (*mcp.CallToolResult, any, error) {
-		logger.Info("Code pull requested", "task", taskName, "path", input.Path)
-
-		if err := puller.Pull(ctx, taskName, input.Path, taskDir.RepoPath()); err != nil {
-			logger.Error("Code pull failed", "task", taskName, "error", err)
-			return &mcp.CallToolResult{
-				Content: []mcp.Content{
-					&mcp.TextContent{Text: fmt.Sprintf("pull_code failed: %v", err)},
-				},
-				IsError: true,
-			}, nil, nil
-		}
-
-		logger.Info("Code pulled", "task", taskName)
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				&mcp.TextContent{Text: "Code pulled successfully to host"},
-			},
-		}, nil, nil
-	})
-
 	if prOpener != nil && len(allowedRepos) > 0 {
 		mcp.AddTool(mcpServer, &mcp.Tool{
 			Name:        "open_pr",
-			Description: "Open a pull request on GitHub from the pulled code",
+			Description: "Pull committed code from the sandbox and open a pull request on GitHub",
 		}, func(ctx context.Context, req *mcp.CallToolRequest, input *OpenPRInput) (*mcp.CallToolResult, any, error) {
 			logger.Info("PR open requested", "task", taskName, "repo", input.Repo)
 
-			// Validate repo against allowlist
-			allowed := false
-			for _, pattern := range allowedRepos {
-				if matched, _ := path.Match(pattern, input.Repo); matched {
-					allowed = true
-					break
-				}
-			}
-			if !allowed {
+			if !isRepoAllowed(input.Repo, allowedRepos) {
 				logger.Warn("PR open denied: repo not allowed", "task", taskName, "repo", input.Repo)
 				return &mcp.CallToolResult{
 					Content: []mcp.Content{
@@ -107,13 +97,8 @@ func New(logger *slog.Logger, taskName string, taskDir *task.Dir, puller CodePul
 				}, nil, nil
 			}
 
-			if input.Base == "" {
-				input.Base = "main"
-			}
-
-			forkOwner, err := prOpener.AuthenticatedUser(ctx)
-			if err != nil {
-				logger.Error("Failed to get authenticated user", "task", taskName, "error", err)
+			if err := puller.Pull(ctx, taskName, input.Path, taskDir.RepoPath()); err != nil {
+				logger.Error("Code pull failed", "task", taskName, "error", err)
 				return &mcp.CallToolResult{
 					Content: []mcp.Content{
 						&mcp.TextContent{Text: fmt.Sprintf("open_pr failed: %v", err)},
@@ -122,22 +107,19 @@ func New(logger *slog.Logger, taskName string, taskDir *task.Dir, puller CodePul
 				}, nil, nil
 			}
 
-			// If the authenticated user owns the upstream repo, push
-			// directly instead of forking (you can't fork your own repo).
-			repoOwner, _, _ := strings.Cut(input.Repo, "/")
-			pushTarget := input.Repo
-			if forkOwner != repoOwner {
-				forkFullName, err := prOpener.EnsureFork(ctx, input.Repo)
-				if err != nil {
-					logger.Error("Failed to ensure fork", "task", taskName, "error", err)
-					return &mcp.CallToolResult{
-						Content: []mcp.Content{
-							&mcp.TextContent{Text: fmt.Sprintf("open_pr failed: %v", err)},
-						},
-						IsError: true,
-					}, nil, nil
-				}
-				pushTarget = forkFullName
+			if input.Base == "" {
+				input.Base = "main"
+			}
+
+			pushTarget, forkOwner, err := resolvePushTarget(ctx, input.Repo, prOpener)
+			if err != nil {
+				logger.Error("Failed to resolve push target", "task", taskName, "error", err)
+				return &mcp.CallToolResult{
+					Content: []mcp.Content{
+						&mcp.TextContent{Text: fmt.Sprintf("open_pr failed: %v", err)},
+					},
+					IsError: true,
+				}, nil, nil
 			}
 
 			sourceRef := "gjoll/" + taskName

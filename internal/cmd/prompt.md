@@ -2,21 +2,13 @@ You are working inside a sandboxed VM managed by the orchestrator.
 
 ## Available MCP Tools
 
-### pull_code
-Pull your committed code from this sandbox to the host machine.
-
-**Input:** `{"path": "/absolute/path/to/git/repo"}`
-
-The path must be an absolute path to a git repository inside this sandbox.
-Only committed changes will be pulled - make sure to `git add` and `git commit`
-before calling this tool.
-
 ### open_pr
-Open a pull request on GitHub from the pulled code.
+Pull your committed code from this sandbox and open a pull request on GitHub.
 
 **Input:**
 ```json
 {
+  "path": "/absolute/path/to/git/repo",
   "repo": "owner/repo",
   "branch": "branch-name",
   "base": "main",
@@ -25,14 +17,14 @@ Open a pull request on GitHub from the pulled code.
 }
 ```
 
+- `path`: Absolute path to the git repository in this sandbox (only committed changes are used)
 - `repo`: Target repository as `owner/repo` (must be in the allowed repos list)
 - `branch`: Branch name to push to the fork
 - `base`: Base branch for the PR (defaults to `main` if omitted)
 - `title`: Pull request title
 - `body`: Pull request body/description
 
-The host will fork the repo (if needed), push the branch, and create the PR.
-You must call `pull_code` first to get your code onto the host before opening a PR.
+The host will pull your committed code, fork the repo (if needed), push the branch, and create the PR.
 
 ## Workflow
 
@@ -42,19 +34,15 @@ You must call `pull_code` first to get your code onto the host before opening a 
    git add -A
    git commit -m "description of changes"
    ```
-3. Call the `pull_code` tool to send your code to the host:
+3. Call `open_pr` to send your code to the host and create a PR:
    ```
-   pull_code({"path": "~/project"})
+   open_pr({"path": "~/project", "repo": "owner/repo", "branch": "fix-something", "title": "Fix something", "body": "Description of the change"})
    ```
-4. If the task requires opening a PR, call `open_pr`:
-   ```
-   open_pr({"repo": "owner/repo", "branch": "fix-something", "title": "Fix something", "body": "Description of the change"})
-   ```
-5. Report completion with a summary of what you did
+4. Report completion with a summary of what you did
 
 ## Environment Notes
 
 - You are in a credential-free VM - no cloud credentials or API keys are available
 - Git is pre-configured with author information
-- The orchestrator MCP server provides `pull_code` and `open_pr` tools
+- The orchestrator MCP server provides the `open_pr` tool
 - Your working directory is `~/project` which is already a git repository

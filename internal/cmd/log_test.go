@@ -44,8 +44,8 @@ func TestFormatTranscriptLine(t *testing.T) {
 		},
 		{
 			name: "tool use MCP with path fallback",
-			line: `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"mcp__orchestrator__pull_code","input":{"path":"~/project"}}]}}`,
-			want: "[tool] mcp__orchestrator__pull_code: ~/project\n",
+			line: `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"mcp__orchestrator__open_pr","input":{"path":"~/project"}}]}}`,
+			want: "[tool] mcp__orchestrator__open_pr: ~/project\n",
 		},
 		{
 			name: "mixed content",
@@ -235,7 +235,7 @@ func TestToolInputSummary(t *testing.T) {
 		},
 		{
 			name:  "generic path fallback",
-			tool:  "mcp__orchestrator__pull_code",
+			tool:  "mcp__orchestrator__open_pr",
 			input: `{"path":"~/project"}`,
 			want:  "~/project",
 		},

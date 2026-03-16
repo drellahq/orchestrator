@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -125,7 +124,7 @@ func TestServerListTools(t *testing.T) {
 		t.Fatalf("ListTools() error: %v", err)
 	}
 
-	wantTools := map[string]bool{"pull_code": false, "open_pr": false}
+	wantTools := map[string]bool{"open_pr": false}
 	for _, tool := range result.Tools {
 		if _, ok := wantTools[tool.Name]; ok {
 			wantTools[tool.Name] = true
@@ -138,82 +137,21 @@ func TestServerListTools(t *testing.T) {
 	}
 }
 
-func TestPullCodeTool(t *testing.T) {
-	tests := []struct {
-		name      string
-		puller    *stubPuller
-		wantError bool
-		wantText  string
-	}{
-		{
-			name:     "successful pull",
-			puller:   &stubPuller{},
-			wantText: "Code pulled successfully",
-		},
-		{
-			name:      "failed pull",
-			puller:    &stubPuller{err: fmt.Errorf("connection refused")},
-			wantError: true,
-			wantText:  "connection refused",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			td, _, endpoint := startTestServer(t, tt.puller, nil, nil)
-			session := connectClient(t, endpoint)
-
-			result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-				Name:      "pull_code",
-				Arguments: map[string]any{"path": "/test/project"},
-			})
-			if err != nil {
-				t.Fatalf("CallTool() protocol error: %v", err)
-			}
-
-			if result.IsError != tt.wantError {
-				t.Errorf("IsError = %v, want %v", result.IsError, tt.wantError)
-			}
-
-			if !tt.puller.called {
-				t.Error("puller.Pull was not called")
-			}
-			if tt.puller.gotName != "test-task" {
-				t.Errorf("puller.gotName = %q, want %q", tt.puller.gotName, "test-task")
-			}
-			if tt.puller.gotPath != "/test/project" {
-				t.Errorf("puller.gotPath = %q, want %q", tt.puller.gotPath, "/test/project")
-			}
-			wantLocal := filepath.Join(td.RepoPath())
-			if tt.puller.gotLocal != wantLocal {
-				t.Errorf("puller.gotLocal = %q, want %q", tt.puller.gotLocal, wantLocal)
-			}
-
-			var text string
-			for _, c := range result.Content {
-				if tc, ok := c.(*mcp.TextContent); ok {
-					text = tc.Text
-				}
-			}
-			if !strings.Contains(text, tt.wantText) {
-				t.Errorf("result text %q does not contain %q", text, tt.wantText)
-			}
-		})
-	}
-}
-
 func TestOpenPRTool(t *testing.T) {
 	tests := []struct {
 		name           string
+		puller         *stubPuller
 		opener         *stubPROpener
 		allowedRepos   []string
 		input          map[string]any
 		wantError      bool
 		wantText       string
 		wantForkCalled bool
+		wantPullCalled bool
 	}{
 		{
-			name: "successful PR via fork",
+			name:   "successful PR via fork",
+			puller: &stubPuller{},
 			opener: &stubPROpener{
 				user:     "testuser",
 				forkName: "testuser/osbuild",
@@ -221,6 +159,7 @@ func TestOpenPRTool(t *testing.T) {
 			},
 			allowedRepos: []string{"osbuild/*"},
 			input: map[string]any{
+				"path":   "/test/project",
 				"repo":   "osbuild/osbuild",
 				"branch": "fix-bug",
 				"base":   "main",
@@ -229,15 +168,18 @@ func TestOpenPRTool(t *testing.T) {
 			},
 			wantText:       "https://github.com/osbuild/osbuild/pull/42",
 			wantForkCalled: true,
+			wantPullCalled: true,
 		},
 		{
-			name: "user owns repo skips fork",
+			name:   "user owns repo skips fork",
+			puller: &stubPuller{},
 			opener: &stubPROpener{
 				user:  "osbuild",
 				prURL: "https://github.com/osbuild/osbuild/pull/99",
 			},
 			allowedRepos: []string{"osbuild/*"},
 			input: map[string]any{
+				"path":   "/test/project",
 				"repo":   "osbuild/osbuild",
 				"branch": "fix-bug",
 				"base":   "main",
@@ -246,9 +188,11 @@ func TestOpenPRTool(t *testing.T) {
 			},
 			wantText:       "https://github.com/osbuild/osbuild/pull/99",
 			wantForkCalled: false,
+			wantPullCalled: true,
 		},
 		{
-			name: "default base branch",
+			name:   "default base branch",
+			puller: &stubPuller{},
 			opener: &stubPROpener{
 				user:     "testuser",
 				forkName: "testuser/osbuild",
@@ -256,7 +200,9 @@ func TestOpenPRTool(t *testing.T) {
 			},
 			allowedRepos:   []string{"osbuild/osbuild"},
 			wantForkCalled: true,
+			wantPullCalled: true,
 			input: map[string]any{
+				"path":   "/test/project",
 				"repo":   "osbuild/osbuild",
 				"branch": "fix-bug",
 				"title":  "Fix bug",
@@ -266,26 +212,51 @@ func TestOpenPRTool(t *testing.T) {
 		},
 		{
 			name:         "repo not allowed",
+			puller:       &stubPuller{},
 			opener:       &stubPROpener{},
 			allowedRepos: []string{"osbuild/*"},
 			input: map[string]any{
+				"path":   "/test/project",
 				"repo":   "evil/repo",
 				"branch": "fix-bug",
 				"title":  "Fix bug",
 				"body":   "This fixes the bug",
 			},
-			wantError: true,
-			wantText:  "not in the allowed repos list",
+			wantError:      true,
+			wantText:       "not in the allowed repos list",
+			wantPullCalled: false,
 		},
 		{
-			name: "fork failure",
+			name:   "pull failure",
+			puller: &stubPuller{err: fmt.Errorf("connection refused")},
+			opener: &stubPROpener{
+				user:     "testuser",
+				forkName: "testuser/osbuild",
+			},
+			allowedRepos: []string{"osbuild/*"},
+			input: map[string]any{
+				"path":   "/test/project",
+				"repo":   "osbuild/osbuild",
+				"branch": "fix-bug",
+				"title":  "Fix bug",
+				"body":   "body",
+			},
+			wantError:      true,
+			wantText:       "connection refused",
+			wantPullCalled: true,
+		},
+		{
+			name:   "fork failure",
+			puller: &stubPuller{},
 			opener: &stubPROpener{
 				user:    "testuser",
 				forkErr: fmt.Errorf("fork failed"),
 			},
 			allowedRepos:   []string{"osbuild/*"},
 			wantForkCalled: true,
+			wantPullCalled: true,
 			input: map[string]any{
+				"path":   "/test/project",
 				"repo":   "osbuild/osbuild",
 				"branch": "fix-bug",
 				"title":  "Fix bug",
@@ -295,7 +266,8 @@ func TestOpenPRTool(t *testing.T) {
 			wantText:  "fork failed",
 		},
 		{
-			name: "push failure",
+			name:   "push failure",
+			puller: &stubPuller{},
 			opener: &stubPROpener{
 				user:     "testuser",
 				forkName: "testuser/osbuild",
@@ -303,7 +275,9 @@ func TestOpenPRTool(t *testing.T) {
 			},
 			allowedRepos:   []string{"osbuild/*"},
 			wantForkCalled: true,
+			wantPullCalled: true,
 			input: map[string]any{
+				"path":   "/test/project",
 				"repo":   "osbuild/osbuild",
 				"branch": "fix-bug",
 				"title":  "Fix bug",
@@ -313,7 +287,8 @@ func TestOpenPRTool(t *testing.T) {
 			wantText:  "push rejected",
 		},
 		{
-			name: "PR creation failure",
+			name:   "PR creation failure",
+			puller: &stubPuller{},
 			opener: &stubPROpener{
 				user:     "testuser",
 				forkName: "testuser/osbuild",
@@ -321,7 +296,9 @@ func TestOpenPRTool(t *testing.T) {
 			},
 			allowedRepos:   []string{"osbuild/*"},
 			wantForkCalled: true,
+			wantPullCalled: true,
 			input: map[string]any{
+				"path":   "/test/project",
 				"repo":   "osbuild/osbuild",
 				"branch": "fix-bug",
 				"title":  "Fix bug",
@@ -330,11 +307,29 @@ func TestOpenPRTool(t *testing.T) {
 			wantError: true,
 			wantText:  "duplicate PR",
 		},
+		{
+			name:   "auth failure",
+			puller: &stubPuller{},
+			opener: &stubPROpener{
+				userErr: fmt.Errorf("not authenticated"),
+			},
+			allowedRepos:   []string{"osbuild/*"},
+			wantPullCalled: true,
+			input: map[string]any{
+				"path":   "/test/project",
+				"repo":   "osbuild/osbuild",
+				"branch": "fix-bug",
+				"title":  "Fix bug",
+				"body":   "body",
+			},
+			wantError: true,
+			wantText:  "not authenticated",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, _, endpoint := startTestServer(t, &stubPuller{}, tt.opener, tt.allowedRepos)
+			_, _, endpoint := startTestServer(t, tt.puller, tt.opener, tt.allowedRepos)
 			session := connectClient(t, endpoint)
 
 			result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
@@ -357,6 +352,13 @@ func TestOpenPRTool(t *testing.T) {
 			}
 			if !strings.Contains(text, tt.wantText) {
 				t.Errorf("result text %q does not contain %q", text, tt.wantText)
+			}
+
+			if tt.puller.called != tt.wantPullCalled {
+				t.Errorf("puller.called = %v, want %v", tt.puller.called, tt.wantPullCalled)
+			}
+			if tt.wantPullCalled && tt.puller.gotPath != "/test/project" {
+				t.Errorf("puller.gotPath = %q, want %q", tt.puller.gotPath, "/test/project")
 			}
 
 			// Verify default base branch
