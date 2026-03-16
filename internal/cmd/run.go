@@ -53,6 +53,11 @@ func runTask(cmd *cobra.Command, args []string) error {
 		slog.Warn("allowed_repos is empty; open_pr and update_pr tools will not be available")
 	}
 
+	ghRunner := gh.New("")
+	if _, err := ghRunner.AuthenticatedUser(context.Background()); err != nil {
+		slog.Warn("GitHub CLI not authenticated; open_pr and update_pr tools will not be available", "error", err)
+	}
+
 	slog.Info("Task started", "task", taskName)
 
 	// Create task directory
@@ -70,7 +75,6 @@ func runTask(cmd *cobra.Command, args []string) error {
 	}
 
 	runner := gjoll.New("")
-	ghRunner := gh.New("")
 
 	// Start MCP server
 	mcpSrv := mcpserver.New(logger, taskName, taskDir, runner, ghRunner, cfg.AllowedRepos)
