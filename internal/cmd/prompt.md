@@ -40,7 +40,7 @@ Pull committed code from this sandbox and push to an existing PR branch.
 
 - `path`: Absolute path to the git repository in this sandbox (only committed changes are used)
 - `repo`: Target repository as `owner/repo` (must be in the allowed repos list)
-- `branch`: Branch name to push (must match the existing PR branch)
+- `branch`: Branch name to push (should match the branch used when the PR was opened)
 
 Use this to push additional commits to an already-open PR.
 

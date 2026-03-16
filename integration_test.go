@@ -233,7 +233,7 @@ curl -s -X POST http://localhost:%d/ -H "Content-Type: application/json" -H "Acc
 RESULT=$(curl -s -X POST http://localhost:%d/ -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -H "Mcp-Session-Id: $SESSION_ID" -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"open_pr","arguments":{"path":"~/project","repo":"test/repo","branch":"test-branch","title":"Test","body":"Test"}}}')
 echo "Result: $RESULT"`, mcpPort, mcpPort, mcpPort)
 	if err := runner.SSHProxy(ctx, sandboxName, pullScript); err != nil {
-		t.Fatalf("pull_code via proxy: %v", err)
+		t.Fatalf("open_pr via proxy: %v", err)
 	}
 
 	// 6. Verify code was pulled
@@ -343,7 +343,7 @@ echo "Result: $RESULT"`, mcpPort, mcpPort, mcpPort)
 	if err := runner.Stop(ctx, sandboxName); err != nil {
 		t.Fatalf("gjoll stop (2nd): %v", err)
 	}
-	time.Sleep(2 * time.Second)
+	time.Sleep(5 * time.Second)
 
 	// 11. Tear down
 	t.Log("Tearing down sandbox...")

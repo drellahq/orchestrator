@@ -63,7 +63,7 @@ func runTask(cmd *cobra.Command, args []string) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	preflightChecks(cfg)
+	ghRunner := logPreflightWarnings(ctx, cfg)
 
 	slog.Info("Task started", "task", taskName)
 
@@ -80,7 +80,7 @@ func runTask(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("saving metadata: %w", err)
 	}
 
-	return executeTask(ctx, taskName, taskDescription, taskDir, cfg, false)
+	return executeTask(ctx, taskName, taskDescription, taskDir, cfg, ghRunner, false)
 }
 
 func continueTask(cmd *cobra.Command, args []string) error {
@@ -95,7 +95,7 @@ func continueTask(cmd *cobra.Command, args []string) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	preflightChecks(cfg)
+	ghRunner := logPreflightWarnings(ctx, cfg)
 
 	slog.Info("Task continuing", "task", taskName)
 
@@ -104,7 +104,7 @@ func continueTask(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("opening task directory: %w", err)
 	}
 
-	return executeTask(ctx, taskName, taskDescription, taskDir, cfg, true)
+	return executeTask(ctx, taskName, taskDescription, taskDir, cfg, ghRunner, true)
 }
 
 func loadConfigAndSetupLogging() (*config.Config, error) {
@@ -119,20 +119,21 @@ func loadConfigAndSetupLogging() (*config.Config, error) {
 	return cfg, nil
 }
 
-func preflightChecks(cfg *config.Config) {
+func logPreflightWarnings(ctx context.Context, cfg *config.Config) *gh.Runner {
 	if len(cfg.AllowedRepos) == 0 {
 		slog.Warn("allowed_repos is empty; open_pr and update_pr tools will not be available")
 	}
 
 	ghRunner := gh.New("")
-	if _, err := ghRunner.AuthenticatedUser(context.Background()); err != nil {
+	if _, err := ghRunner.AuthenticatedUser(ctx); err != nil {
 		slog.Warn("GitHub CLI not authenticated; open_pr and update_pr tools will not be available", "error", err)
 	}
+
+	return ghRunner
 }
 
-func executeTask(ctx context.Context, taskName, taskDescription string, taskDir *task.Dir, cfg *config.Config, continueSession bool) error {
+func executeTask(ctx context.Context, taskName, taskDescription string, taskDir *task.Dir, cfg *config.Config, ghRunner *gh.Runner, continueSession bool) error {
 	runner := gjoll.New("")
-	ghRunner := gh.New("")
 
 	logger := slog.Default()
 
