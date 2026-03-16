@@ -52,7 +52,7 @@ The `orchestrator.yaml` file supports:
 | `slack_webhook` | (empty)              | Slack webhook URL for task notifications   |
 | `output_dir`    | `./tasks`            | Directory for task output                  |
 | `gjoll_env`     | `./configs/sandbox.tf` | Path to gjoll .tf environment file       |
-| `allowed_repos` | `[]` (deny all)      | Repos allowed for `open_pr` (glob patterns)|
+| `allowed_repos` | `[]` (deny all)      | Repos allowed for `open_pr`/`update_pr` (glob patterns)|
 
 ## Usage
 

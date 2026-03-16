@@ -26,6 +26,24 @@ Pull your committed code from this sandbox and open a pull request on GitHub.
 
 The host will pull your committed code, fork the repo (if needed), push the branch, and create the PR.
 
+### update_pr
+Pull committed code from this sandbox and push to an existing PR branch.
+
+**Input:**
+```json
+{
+  "path": "/absolute/path/to/git/repo",
+  "repo": "owner/repo",
+  "branch": "branch-name"
+}
+```
+
+- `path`: Absolute path to the git repository in this sandbox (only committed changes are used)
+- `repo`: Target repository as `owner/repo` (must be in the allowed repos list)
+- `branch`: Branch name to push (must match the existing PR branch)
+
+Use this to push additional commits to an already-open PR.
+
 ## Workflow
 
 1. Work on the assigned task in `~/project`
@@ -44,5 +62,5 @@ The host will pull your committed code, fork the repo (if needed), push the bran
 
 - You are in a credential-free VM - no cloud credentials or API keys are available
 - Git is pre-configured with author information
-- The orchestrator MCP server provides the `open_pr` tool
+- The orchestrator MCP server provides `open_pr` and `update_pr` tools
 - Your working directory is `~/project` which is already a git repository

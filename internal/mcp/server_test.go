@@ -124,7 +124,7 @@ func TestServerListTools(t *testing.T) {
 		t.Fatalf("ListTools() error: %v", err)
 	}
 
-	wantTools := map[string]bool{"open_pr": false}
+	wantTools := map[string]bool{"open_pr": false, "update_pr": false}
 	for _, tool := range result.Tools {
 		if _, ok := wantTools[tool.Name]; ok {
 			wantTools[tool.Name] = true
@@ -378,6 +378,157 @@ func TestOpenPRTool(t *testing.T) {
 			// When user owns repo, push target should be the upstream itself
 			if tt.name == "user owns repo skips fork" && tt.opener.gotForkName != "osbuild/osbuild" {
 				t.Errorf("pushTarget = %q, want %q", tt.opener.gotForkName, "osbuild/osbuild")
+			}
+		})
+	}
+}
+
+func TestUpdatePRTool(t *testing.T) {
+	tests := []struct {
+		name           string
+		puller         *stubPuller
+		opener         *stubPROpener
+		allowedRepos   []string
+		input          map[string]any
+		wantError      bool
+		wantText       string
+		wantForkCalled bool
+		wantPullCalled bool
+	}{
+		{
+			name:   "successful update via fork",
+			puller: &stubPuller{},
+			opener: &stubPROpener{
+				user:     "testuser",
+				forkName: "testuser/osbuild",
+			},
+			allowedRepos: []string{"osbuild/*"},
+			input: map[string]any{
+				"path":   "/test/project",
+				"repo":   "osbuild/osbuild",
+				"branch": "fix-bug",
+			},
+			wantText:       "Branch fix-bug updated on testuser/osbuild",
+			wantForkCalled: true,
+			wantPullCalled: true,
+		},
+		{
+			name:   "user owns repo skips fork",
+			puller: &stubPuller{},
+			opener: &stubPROpener{
+				user: "osbuild",
+			},
+			allowedRepos: []string{"osbuild/*"},
+			input: map[string]any{
+				"path":   "/test/project",
+				"repo":   "osbuild/osbuild",
+				"branch": "fix-bug",
+			},
+			wantText:       "Branch fix-bug updated on osbuild/osbuild",
+			wantForkCalled: false,
+			wantPullCalled: true,
+		},
+		{
+			name:         "repo not allowed",
+			puller:       &stubPuller{},
+			opener:       &stubPROpener{},
+			allowedRepos: []string{"osbuild/*"},
+			input: map[string]any{
+				"path":   "/test/project",
+				"repo":   "evil/repo",
+				"branch": "fix-bug",
+			},
+			wantError:      true,
+			wantText:       "not in the allowed repos list",
+			wantPullCalled: false,
+		},
+		{
+			name:   "pull failure",
+			puller: &stubPuller{err: fmt.Errorf("connection refused")},
+			opener: &stubPROpener{
+				user:     "testuser",
+				forkName: "testuser/osbuild",
+			},
+			allowedRepos: []string{"osbuild/*"},
+			input: map[string]any{
+				"path":   "/test/project",
+				"repo":   "osbuild/osbuild",
+				"branch": "fix-bug",
+			},
+			wantError:      true,
+			wantText:       "connection refused",
+			wantPullCalled: true,
+		},
+		{
+			name:   "push failure",
+			puller: &stubPuller{},
+			opener: &stubPROpener{
+				user:     "testuser",
+				forkName: "testuser/osbuild",
+				pushErr:  fmt.Errorf("push rejected"),
+			},
+			allowedRepos:   []string{"osbuild/*"},
+			wantForkCalled: true,
+			wantPullCalled: true,
+			input: map[string]any{
+				"path":   "/test/project",
+				"repo":   "osbuild/osbuild",
+				"branch": "fix-bug",
+			},
+			wantError: true,
+			wantText:  "push rejected",
+		},
+		{
+			name:   "auth failure",
+			puller: &stubPuller{},
+			opener: &stubPROpener{
+				userErr: fmt.Errorf("not authenticated"),
+			},
+			allowedRepos:   []string{"osbuild/*"},
+			wantPullCalled: true,
+			input: map[string]any{
+				"path":   "/test/project",
+				"repo":   "osbuild/osbuild",
+				"branch": "fix-bug",
+			},
+			wantError: true,
+			wantText:  "not authenticated",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, endpoint := startTestServer(t, tt.puller, tt.opener, tt.allowedRepos)
+			session := connectClient(t, endpoint)
+
+			result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+				Name:      "update_pr",
+				Arguments: tt.input,
+			})
+			if err != nil {
+				t.Fatalf("CallTool() protocol error: %v", err)
+			}
+
+			if result.IsError != tt.wantError {
+				t.Errorf("IsError = %v, want %v", result.IsError, tt.wantError)
+			}
+
+			var text string
+			for _, c := range result.Content {
+				if tc, ok := c.(*mcp.TextContent); ok {
+					text = tc.Text
+				}
+			}
+			if !strings.Contains(text, tt.wantText) {
+				t.Errorf("result text %q does not contain %q", text, tt.wantText)
+			}
+
+			if tt.puller.called != tt.wantPullCalled {
+				t.Errorf("puller.called = %v, want %v", tt.puller.called, tt.wantPullCalled)
+			}
+
+			if tt.opener.forkCalled != tt.wantForkCalled {
+				t.Errorf("forkCalled = %v, want %v", tt.opener.forkCalled, tt.wantForkCalled)
 			}
 		})
 	}

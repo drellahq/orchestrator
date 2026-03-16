@@ -39,6 +39,13 @@ type OpenPRInput struct {
 	Body   string `json:"body" jsonschema_description:"PR body/description"`
 }
 
+// UpdatePRInput is the input schema for the update_pr tool.
+type UpdatePRInput struct {
+	Path   string `json:"path" jsonschema_description:"Absolute path to the git repo in the sandbox"`
+	Repo   string `json:"repo" jsonschema_description:"Target repository as owner/repo (e.g. osbuild/osbuild)"`
+	Branch string `json:"branch" jsonschema_description:"Branch name to push (must match the existing PR branch)"`
+}
+
 // Server wraps an MCP server that exposes tools for sandbox operations.
 type Server struct {
 	httpServer *http.Server
@@ -148,6 +155,62 @@ func New(logger *slog.Logger, taskName string, taskDir *task.Dir, puller CodePul
 			return &mcp.CallToolResult{
 				Content: []mcp.Content{
 					&mcp.TextContent{Text: prURL},
+				},
+			}, nil, nil
+		})
+
+		mcp.AddTool(mcpServer, &mcp.Tool{
+			Name:        "update_pr",
+			Description: "Pull committed code from the sandbox and push to an existing PR branch",
+		}, func(ctx context.Context, req *mcp.CallToolRequest, input *UpdatePRInput) (*mcp.CallToolResult, any, error) {
+			logger.Info("PR update requested", "task", taskName, "repo", input.Repo, "branch", input.Branch)
+
+			if !isRepoAllowed(input.Repo, allowedRepos) {
+				logger.Warn("PR update denied: repo not allowed", "task", taskName, "repo", input.Repo)
+				return &mcp.CallToolResult{
+					Content: []mcp.Content{
+						&mcp.TextContent{Text: fmt.Sprintf("repo %q is not in the allowed repos list", input.Repo)},
+					},
+					IsError: true,
+				}, nil, nil
+			}
+
+			if err := puller.Pull(ctx, taskName, input.Path, taskDir.RepoPath()); err != nil {
+				logger.Error("Code pull failed", "task", taskName, "error", err)
+				return &mcp.CallToolResult{
+					Content: []mcp.Content{
+						&mcp.TextContent{Text: fmt.Sprintf("update_pr failed: %v", err)},
+					},
+					IsError: true,
+				}, nil, nil
+			}
+
+			pushTarget, _, err := resolvePushTarget(ctx, input.Repo, prOpener)
+			if err != nil {
+				logger.Error("Failed to resolve push target", "task", taskName, "error", err)
+				return &mcp.CallToolResult{
+					Content: []mcp.Content{
+						&mcp.TextContent{Text: fmt.Sprintf("update_pr failed: %v", err)},
+					},
+					IsError: true,
+				}, nil, nil
+			}
+
+			sourceRef := "gjoll/" + taskName
+			if err := prOpener.PushBranch(ctx, taskDir.RepoPath(), pushTarget, input.Branch, sourceRef); err != nil {
+				logger.Error("Failed to push branch", "task", taskName, "error", err)
+				return &mcp.CallToolResult{
+					Content: []mcp.Content{
+						&mcp.TextContent{Text: fmt.Sprintf("update_pr failed: %v", err)},
+					},
+					IsError: true,
+				}, nil, nil
+			}
+
+			logger.Info("Branch updated", "task", taskName, "branch", input.Branch, "target", pushTarget)
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{
+					&mcp.TextContent{Text: fmt.Sprintf("Branch %s updated on %s", input.Branch, pushTarget)},
 				},
 			}, nil, nil
 		})
