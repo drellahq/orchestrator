@@ -85,6 +85,13 @@ func TestCommandConstruction(t *testing.T) {
 			wantArgs: []string{"up", "-n", "my-sandbox", "/path/to/env.tf"},
 		},
 		{
+			name: "Start",
+			call: func(r *Runner, ctx context.Context) error {
+				return r.Start(ctx, "my-sandbox")
+			},
+			wantArgs: []string{"start", "my-sandbox"},
+		},
+		{
 			name: "SSH single command string",
 			call: func(r *Runner, ctx context.Context) error {
 				return r.SSH(ctx, "my-sandbox", "echo hello && echo world")

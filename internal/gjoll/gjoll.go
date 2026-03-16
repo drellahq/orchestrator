@@ -26,6 +26,11 @@ func (r *Runner) Up(ctx context.Context, name, tfPath string) error {
 	return r.run(ctx, nil, "up", "-n", name, tfPath)
 }
 
+// Start starts a stopped sandbox VM.
+func (r *Runner) Start(ctx context.Context, name string) error {
+	return r.run(ctx, nil, "start", name)
+}
+
 // SSH runs a command inside the sandbox (no proxy tunnels).
 func (r *Runner) SSH(ctx context.Context, name string, command ...string) error {
 	args := []string{"ssh", name, "--"}

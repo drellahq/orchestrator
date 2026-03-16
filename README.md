@@ -72,6 +72,18 @@ Use `-v` for verbose output including debug logging and model reasoning:
 orchestrator task new -v fix-bug "Fix the nil pointer dereference in handler.go"
 ```
 
+To continue a stopped task with a new prompt (resumes the VM and Claude conversation):
+
+```bash
+orchestrator task continue <task-name> <new-prompt...>
+```
+
+Example:
+
+```bash
+orchestrator task continue fix-bug "The tests are failing, please also update the test fixtures"
+```
+
 During execution, a human-readable transcript streams to stdout showing tool
 calls, their results, and Claude's text output.
 

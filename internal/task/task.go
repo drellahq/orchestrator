@@ -37,6 +37,16 @@ func Create(outputDir, taskName string) (*Dir, error) {
 	return &Dir{root: root}, nil
 }
 
+// Open returns a Dir for an existing task directory.
+// It fails if the task directory does not exist.
+func Open(outputDir, taskName string) (*Dir, error) {
+	root := filepath.Join(outputDir, taskName)
+	if _, err := os.Stat(root); err != nil {
+		return nil, fmt.Errorf("task directory does not exist: %s", root)
+	}
+	return &Dir{root: root}, nil
+}
+
 // RepoPath returns the path to the repo subdirectory.
 func (d *Dir) RepoPath() string {
 	return filepath.Join(d.root, "repo")
