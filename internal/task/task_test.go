@@ -80,6 +80,56 @@ func TestCreate(t *testing.T) {
 	}
 }
 
+func TestOpen(t *testing.T) {
+	tests := []struct {
+		name     string
+		taskName string
+		setup    func(t *testing.T, dir string)
+		wantErr  bool
+	}{
+		{
+			name:     "opens existing task",
+			taskName: "my-task",
+			setup: func(t *testing.T, dir string) {
+				t.Helper()
+				if _, err := Create(dir, "my-task"); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name:     "fails if not exists",
+			taskName: "nonexistent",
+			wantErr:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			outputDir := t.TempDir()
+			if tt.setup != nil {
+				tt.setup(t, outputDir)
+			}
+
+			td, err := Open(outputDir, tt.taskName)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			wantRepo := filepath.Join(outputDir, tt.taskName, "repo")
+			if got := td.RepoPath(); got != wantRepo {
+				t.Errorf("RepoPath() = %q, want %q", got, wantRepo)
+			}
+		})
+	}
+}
+
 func TestTranscriptPathFor(t *testing.T) {
 	got := TranscriptPathFor("/output", "my-task")
 	want := filepath.Join("/output", "my-task", "transcript.jsonl")

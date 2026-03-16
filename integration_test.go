@@ -317,16 +317,35 @@ echo "Result: $RESULT"`, mcpPort, mcpPort, mcpPort)
 		t.Error("no files in conversations directory after copy")
 	}
 
-	// 8. Stop sandbox
+	// 9. Stop sandbox
 	t.Log("Stopping sandbox...")
+	// Sync disk before stopping to ensure data is persisted
+	_ = runner.SSH(ctx, sandboxName, "sync")
 	if err := runner.Stop(ctx, sandboxName); err != nil {
 		t.Fatalf("gjoll stop: %v", err)
 	}
 
 	// Give it a moment to fully stop
+	time.Sleep(5 * time.Second)
+
+	// 10. Resume stopped sandbox and verify state persisted
+	t.Log("Resuming stopped sandbox...")
+	if err := runner.Start(ctx, sandboxName); err != nil {
+		t.Fatalf("gjoll start (resume) failed: %v", err)
+	}
+
+	t.Log("Verifying state persisted after resume...")
+	if err := runner.SSH(ctx, sandboxName, "test -f ~/project/hello.txt"); err != nil {
+		t.Fatalf("hello.txt does not exist after resume: %v", err)
+	}
+
+	t.Log("Stopping sandbox again...")
+	if err := runner.Stop(ctx, sandboxName); err != nil {
+		t.Fatalf("gjoll stop (2nd): %v", err)
+	}
 	time.Sleep(2 * time.Second)
 
-	// 9. Tear down
+	// 11. Tear down
 	t.Log("Tearing down sandbox...")
 	if err := runner.Down(ctx, sandboxName); err != nil {
 		t.Fatalf("gjoll down: %v", err)

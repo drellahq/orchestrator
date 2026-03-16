@@ -37,39 +37,36 @@ launches Claude with the task description, and archives the results.`,
 	RunE: runTask,
 }
 
+var taskContinueCmd = &cobra.Command{
+	Use:   "continue <task-name> <task-description...>",
+	Short: "Continue a stopped task with a new prompt",
+	Long: `Resumes a stopped sandbox VM, starts an MCP server, and launches Claude
+with --continue to resume the previous conversation with a new prompt.`,
+	Args: cobra.MinimumNArgs(2),
+	RunE: continueTask,
+}
+
 func init() {
 	taskCmd.AddCommand(taskNewCmd)
+	taskCmd.AddCommand(taskContinueCmd)
 }
 
 func runTask(cmd *cobra.Command, args []string) error {
 	taskName := args[0]
 	taskDescription := strings.Join(args[1:], " ")
 
-	// Load config
-	cfg, err := config.Load(configPath)
+	cfg, err := loadConfigAndSetupLogging()
 	if err != nil {
-		return fmt.Errorf("loading config: %w", err)
+		return err
 	}
-
-	// Set up logging
-	logger := logging.SetupLogger(cfg.SlackWebhook, verbose)
-	slog.SetDefault(logger)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	if len(cfg.AllowedRepos) == 0 {
-		slog.Warn("allowed_repos is empty; open_pr and update_pr tools will not be available")
-	}
-
-	ghRunner := gh.New("")
-	if _, err := ghRunner.AuthenticatedUser(context.Background()); err != nil {
-		slog.Warn("GitHub CLI not authenticated; open_pr and update_pr tools will not be available", "error", err)
-	}
+	preflightChecks(cfg)
 
 	slog.Info("Task started", "task", taskName)
 
-	// Create task directory
 	taskDir, err := task.Create(cfg.OutputDir, taskName)
 	if err != nil {
 		return fmt.Errorf("creating task directory: %w", err)
@@ -83,7 +80,61 @@ func runTask(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("saving metadata: %w", err)
 	}
 
+	return executeTask(ctx, taskName, taskDescription, taskDir, cfg, false)
+}
+
+func continueTask(cmd *cobra.Command, args []string) error {
+	taskName := args[0]
+	taskDescription := strings.Join(args[1:], " ")
+
+	cfg, err := loadConfigAndSetupLogging()
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer cancel()
+
+	preflightChecks(cfg)
+
+	slog.Info("Task continuing", "task", taskName)
+
+	taskDir, err := task.Open(cfg.OutputDir, taskName)
+	if err != nil {
+		return fmt.Errorf("opening task directory: %w", err)
+	}
+
+	return executeTask(ctx, taskName, taskDescription, taskDir, cfg, true)
+}
+
+func loadConfigAndSetupLogging() (*config.Config, error) {
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("loading config: %w", err)
+	}
+
+	logger := logging.SetupLogger(cfg.SlackWebhook, verbose)
+	slog.SetDefault(logger)
+
+	return cfg, nil
+}
+
+func preflightChecks(cfg *config.Config) {
+	if len(cfg.AllowedRepos) == 0 {
+		slog.Warn("allowed_repos is empty; open_pr and update_pr tools will not be available")
+	}
+
+	ghRunner := gh.New("")
+	if _, err := ghRunner.AuthenticatedUser(context.Background()); err != nil {
+		slog.Warn("GitHub CLI not authenticated; open_pr and update_pr tools will not be available", "error", err)
+	}
+}
+
+func executeTask(ctx context.Context, taskName, taskDescription string, taskDir *task.Dir, cfg *config.Config, continueSession bool) error {
 	runner := gjoll.New("")
+	ghRunner := gh.New("")
+
+	logger := slog.Default()
 
 	// Start MCP server
 	mcpSrv := mcpserver.New(logger, taskName, taskDir, runner, ghRunner, cfg.AllowedRepos)
@@ -94,15 +145,21 @@ func runTask(cmd *cobra.Command, args []string) error {
 
 	slog.Debug("MCP server started", "task", taskName, "port", mcpserver.MCPPort)
 
-	// Provision sandbox
-	tfPath, err := filepath.Abs(cfg.GjollEnv)
-	if err != nil {
-		return fmt.Errorf("resolving tf path: %w", err)
-	}
+	if continueSession {
+		slog.Info("Resuming sandbox", "task", taskName)
+		if err := runner.Start(ctx, taskName); err != nil {
+			return fmt.Errorf("resuming sandbox: %w", err)
+		}
+	} else {
+		tfPath, err := filepath.Abs(cfg.GjollEnv)
+		if err != nil {
+			return fmt.Errorf("resolving tf path: %w", err)
+		}
 
-	slog.Info("Provisioning sandbox", "task", taskName)
-	if err := runner.Up(ctx, taskName, tfPath); err != nil {
-		return fmt.Errorf("provisioning sandbox: %w", err)
+		slog.Info("Provisioning sandbox", "task", taskName)
+		if err := runner.Up(ctx, taskName, tfPath); err != nil {
+			return fmt.Errorf("provisioning sandbox: %w", err)
+		}
 	}
 
 	// After successful provisioning, ensure cleanup on exit
@@ -117,6 +174,12 @@ func runTask(cmd *cobra.Command, args []string) error {
 			slog.Warn("Failed to copy conversations", "task", taskName, "error", copyErr)
 		}
 
+		// Flush filesystem writes before stopping — the libvirt provider
+		// only waits 5 seconds for graceful ACPI shutdown before force-
+		// destroying the VM, which can lose unflushed data.
+		slog.Debug("Syncing filesystem", "task", taskName)
+		_ = runner.SSH(context.Background(), taskName, "sync")
+
 		slog.Debug("Stopping sandbox", "task", taskName)
 		if stopErr := runner.Stop(context.Background(), taskName); stopErr != nil {
 			slog.Warn("Failed to stop sandbox", "task", taskName, "error", stopErr)
@@ -125,23 +188,31 @@ func runTask(cmd *cobra.Command, args []string) error {
 
 	slog.Info("Sandbox provisioned", "task", taskName)
 
-	// Post-provision setup
-	if err := setupSandbox(ctx, runner, taskName); err != nil {
-		return fmt.Errorf("setting up sandbox: %w", err)
+	if !continueSession {
+		if err := setupSandbox(ctx, runner, taskName); err != nil {
+			return fmt.Errorf("setting up sandbox: %w", err)
+		}
+		slog.Debug("Sandbox setup complete", "task", taskName)
 	}
 
-	slog.Debug("Sandbox setup complete", "task", taskName)
-
-	// Write a run script and copy it to the VM to avoid quoting issues
-	// with SSH + shell escaping
+	// Build the Claude run script
 	slog.Info("Running Claude", "task", taskName)
 	escapedDesc := strings.ReplaceAll(taskDescription, "'", "'\\''")
+
+	var claudeFlags string
+	var teeFlag string
+	if continueSession {
+		claudeFlags = "--continue"
+		teeFlag = "-a"
+	}
+
 	runScript := fmt.Sprintf(`#!/bin/bash
+source ~/.bashrc
 cd ~/project
 stdbuf -oL claude --dangerously-skip-permissions -p --verbose \
-  --output-format stream-json '%s' \
-  </dev/null | stdbuf -oL tee ~/transcript.jsonl
-`, escapedDesc)
+  --output-format stream-json %s '%s' \
+  </dev/null | stdbuf -oL tee %s ~/transcript.jsonl
+`, claudeFlags, escapedDesc, teeFlag)
 
 	tmpRun, err := os.CreateTemp("", "run-claude-*.sh")
 	if err != nil {
