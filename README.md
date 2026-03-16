@@ -57,19 +57,19 @@ The `orchestrator.yaml` file supports:
 ## Usage
 
 ```bash
-orchestrator run <task-name> <task-description...>
+orchestrator task new <task-name> <task-description...>
 ```
 
 Example:
 
 ```bash
-orchestrator run fix-bug "Fix the nil pointer dereference in handler.go when the request body is empty"
+orchestrator task new fix-bug "Fix the nil pointer dereference in handler.go when the request body is empty"
 ```
 
 Use `-v` for verbose output including debug logging and model reasoning:
 
 ```bash
-orchestrator run -v fix-bug "Fix the nil pointer dereference in handler.go"
+orchestrator task new -v fix-bug "Fix the nil pointer dereference in handler.go"
 ```
 
 During execution, a human-readable transcript streams to stdout showing tool
