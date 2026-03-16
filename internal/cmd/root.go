@@ -28,6 +28,6 @@ func Execute() {
 func init() {
 	rootCmd.PersistentFlags().StringVarP(&configPath, "config", "c", "./orchestrator.yaml", "config file path")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "enable debug logging")
-	rootCmd.AddCommand(runCmd)
+	rootCmd.AddCommand(taskCmd)
 	rootCmd.AddCommand(logCmd)
 }

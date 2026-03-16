@@ -23,13 +23,22 @@ import (
 //go:embed prompt.md
 var promptContent string
 
-var runCmd = &cobra.Command{
-	Use:   "run <task-name> <task-description...>",
-	Short: "Run a task in a sandboxed Claude instance",
+var taskCmd = &cobra.Command{
+	Use:   "task",
+	Short: "Manage tasks",
+}
+
+var taskNewCmd = &cobra.Command{
+	Use:   "new <task-name> <task-description...>",
+	Short: "Run a new task in a sandboxed Claude instance",
 	Long: `Provisions a sandbox VM via gjoll, starts an MCP server for code pulling,
 launches Claude with the task description, and archives the results.`,
 	Args: cobra.MinimumNArgs(2),
 	RunE: runTask,
+}
+
+func init() {
+	taskCmd.AddCommand(taskNewCmd)
 }
 
 func runTask(cmd *cobra.Command, args []string) error {
