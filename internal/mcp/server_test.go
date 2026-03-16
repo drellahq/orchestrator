@@ -530,6 +530,16 @@ func TestUpdatePRTool(t *testing.T) {
 			if tt.opener.forkCalled != tt.wantForkCalled {
 				t.Errorf("forkCalled = %v, want %v", tt.opener.forkCalled, tt.wantForkCalled)
 			}
+
+			// Verify sourceRef includes task name
+			if !tt.wantError && tt.opener.gotSource != "gjoll/test-task" {
+				t.Errorf("sourceRef = %q, want %q", tt.opener.gotSource, "gjoll/test-task")
+			}
+
+			// When user owns repo, push target should be the upstream itself
+			if tt.name == "user owns repo skips fork" && tt.opener.gotForkName != "osbuild/osbuild" {
+				t.Errorf("pushTarget = %q, want %q", tt.opener.gotForkName, "osbuild/osbuild")
+			}
 		})
 	}
 }
