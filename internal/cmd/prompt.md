@@ -3,7 +3,7 @@ You are working inside a sandboxed VM managed by the orchestrator.
 ## Available MCP Tools
 
 ### open_pr
-Pull your committed code from this sandbox and open a pull request on GitHub.
+Push your committed code from this sandbox and open a pull request on GitHub.
 
 **Input:**
 ```json
@@ -24,10 +24,10 @@ Pull your committed code from this sandbox and open a pull request on GitHub.
 - `title`: Pull request title
 - `body`: Pull request body/description
 
-The host will pull your committed code, fork the repo (if needed), push the branch, and create the PR.
+This will push your committed code, fork the repo (if needed), push the branch, and create the PR.
 
 ### update_pr
-Pull committed code from this sandbox and push to an existing PR branch.
+Push committed code from this sandbox to an existing PR branch.
 
 **Input:**
 ```json
