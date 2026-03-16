@@ -21,6 +21,25 @@ import (
 
 const sandboxName = "orch-integ-test"
 
+// testPROpener implements mcpserver.PROpener for integration testing.
+type testPROpener struct{}
+
+func (t *testPROpener) AuthenticatedUser(_ context.Context) (string, error) {
+	return "testuser", nil
+}
+
+func (t *testPROpener) EnsureFork(_ context.Context, upstream string) (string, error) {
+	return "testuser/" + strings.SplitN(upstream, "/", 2)[1], nil
+}
+
+func (t *testPROpener) PushBranch(_ context.Context, repoDir, forkFullName, branch, sourceRef string) error {
+	return nil
+}
+
+func (t *testPROpener) CreatePR(_ context.Context, upstream, forkOwner, branch, base, title, body string) (string, error) {
+	return fmt.Sprintf("https://github.com/%s/pull/1", upstream), nil
+}
+
 // testTF returns the path to a minimal .tf file for integration testing.
 // It installs git and a mock claude script via init_script.
 func testTF(t *testing.T) string {
@@ -196,22 +215,22 @@ func TestIntegration(t *testing.T) {
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	mcpSrv := mcpserver.New(logger, sandboxName, taskDir, runner, nil, nil)
+	mcpSrv := mcpserver.New(logger, sandboxName, taskDir, runner, &testPROpener{}, []string{"test/*"})
 	if err := mcpSrv.Start(); err != nil {
 		t.Fatalf("MCP server start: %v", err)
 	}
 	defer func() { _ = mcpSrv.Stop(ctx) }()
 
-	// 5. Call pull_code from inside the VM via proxy tunnel
+	// 5. Call open_pr from inside the VM via proxy tunnel
 	// Use gjoll ssh --proxy to tunnel MCP and invoke curl from within
-	t.Log("Calling pull_code from sandbox via proxy tunnel...")
+	t.Log("Calling open_pr from sandbox via proxy tunnel...")
 	mcpPort := mcpserver.MCPPort
 	pullScript := fmt.Sprintf(`set -e
 HEADERS=$(curl -s -D - -o /dev/null -X POST http://localhost:%d/ -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"0.1.0"}}}')
 SESSION_ID=$(echo "$HEADERS" | grep -i "mcp-session-id" | tr -d '\r' | awk '{print $2}')
 echo "Session ID: $SESSION_ID"
 curl -s -X POST http://localhost:%d/ -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -H "Mcp-Session-Id: $SESSION_ID" -d '{"jsonrpc":"2.0","method":"notifications/initialized"}'
-RESULT=$(curl -s -X POST http://localhost:%d/ -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -H "Mcp-Session-Id: $SESSION_ID" -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"pull_code","arguments":{"path":"~/project"}}}')
+RESULT=$(curl -s -X POST http://localhost:%d/ -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -H "Mcp-Session-Id: $SESSION_ID" -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"open_pr","arguments":{"path":"~/project","repo":"test/repo","branch":"test-branch","title":"Test","body":"Test"}}}')
 echo "Result: $RESULT"`, mcpPort, mcpPort, mcpPort)
 	if err := runner.SSHProxy(ctx, sandboxName, pullScript); err != nil {
 		t.Fatalf("pull_code via proxy: %v", err)
