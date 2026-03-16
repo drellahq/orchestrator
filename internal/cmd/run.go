@@ -49,6 +49,10 @@ func runTask(cmd *cobra.Command, args []string) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
+	if len(cfg.AllowedRepos) == 0 {
+		slog.Warn("allowed_repos is empty; open_pr and update_pr tools will not be available")
+	}
+
 	slog.Info("Task started", "task", taskName)
 
 	// Create task directory
