@@ -114,6 +114,37 @@ func connectClient(t *testing.T, endpoint string) *mcp.ClientSession {
 	return session
 }
 
+func TestStartAllocatesDynamicPort(t *testing.T) {
+	dir := t.TempDir()
+	td, err := task.Create(dir, "dyn-port-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+
+	s1 := New(logger, "task-1", td, nil, nil, nil)
+	if err := s1.Start(); err != nil {
+		t.Fatalf("Start() error: %v", err)
+	}
+	defer s1.Stop(context.Background())
+
+	if s1.Port() == 0 {
+		t.Fatal("Port() returned 0 after Start()")
+	}
+
+	dir2 := t.TempDir()
+	td2, _ := task.Create(dir2, "dyn-port-test-2")
+	s2 := New(logger, "task-2", td2, nil, nil, nil)
+	if err := s2.Start(); err != nil {
+		t.Fatalf("Start() second server: %v", err)
+	}
+	defer s2.Stop(context.Background())
+
+	if s1.Port() == s2.Port() {
+		t.Errorf("two servers got the same port %d", s1.Port())
+	}
+}
+
 func TestServerListTools(t *testing.T) {
 	opener := &stubPROpener{user: "testuser", forkName: "testuser/repo", prURL: "https://github.com/org/repo/pull/1"}
 	_, _, endpoint := startTestServer(t, &stubPuller{}, opener, []string{"org/*"})

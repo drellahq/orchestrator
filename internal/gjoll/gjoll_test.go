@@ -127,11 +127,40 @@ func TestCommandConstruction(t *testing.T) {
 			wantArgs: []string{"ssh", "my-sandbox", "--", "echo hello"},
 		},
 		{
+			name: "SSHProxy with proxy and reverse tunnels",
+			call: func(r *Runner, ctx context.Context) error {
+				return r.SSHProxy(ctx, "my-sandbox", &SSHOpts{
+					Proxy:          true,
+					ReverseTunnels: []string{"19090:localhost:12345"},
+				}, "run.sh")
+			},
+			wantArgs: []string{"ssh", "--proxy", "-R", "19090:localhost:12345", "my-sandbox", "--", "run.sh"},
+		},
+		{
+			name: "SSHProxy reverse tunnel only no proxy",
+			call: func(r *Runner, ctx context.Context) error {
+				return r.SSHProxy(ctx, "my-sandbox", &SSHOpts{
+					ReverseTunnels: []string{"19090:localhost:12345"},
+				}, "run.sh")
+			},
+			wantArgs: []string{"ssh", "-R", "19090:localhost:12345", "my-sandbox", "--", "run.sh"},
+		},
+		{
 			name: "SSHProxyOutput with proxy only",
 			call: func(r *Runner, ctx context.Context) error {
 				return r.SSHProxyOutput(ctx, "my-sandbox", io.Discard, &SSHOpts{Proxy: true}, "tail -f ~/transcript.jsonl")
 			},
 			wantArgs: []string{"ssh", "--proxy", "my-sandbox", "--", "tail -f ~/transcript.jsonl"},
+		},
+		{
+			name: "SSHProxyOutput with proxy and reverse tunnels",
+			call: func(r *Runner, ctx context.Context) error {
+				return r.SSHProxyOutput(ctx, "my-sandbox", io.Discard, &SSHOpts{
+					Proxy:          true,
+					ReverseTunnels: []string{"19090:localhost:12345", "8080:localhost:3000"},
+				}, "run.sh")
+			},
+			wantArgs: []string{"ssh", "--proxy", "-R", "19090:localhost:12345", "-R", "8080:localhost:3000", "my-sandbox", "--", "run.sh"},
 		},
 		{
 			name: "Down",
