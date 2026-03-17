@@ -105,7 +105,7 @@ orchestrator log -f <task-name>
 1. Task directory is created under `output_dir`
 2. MCP server starts on `127.0.0.1:19090`
 3. Sandbox VM is provisioned via gjoll
-4. Git, CLAUDE.md, and MCP client are configured in the VM
+4. Git, system prompt, and MCP client are configured in the VM
 5. Claude runs with `-p --output-format stream-json` (with proxy tunnels for Vertex AI and MCP)
 6. Stream-json output is piped through `tee` to `~/transcript.jsonl` in the VM
 7. On completion, the transcript and conversations are archived and the VM is stopped
