@@ -2,22 +2,44 @@ package task
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
-// Metadata holds task metadata persisted to disk.
-type Metadata struct {
+// PR records a pull request opened by the task.
+type PR struct {
+	URL    string `json:"url"`
+	Repo   string `json:"repo"`
+	Branch string `json:"branch"`
+	Base   string `json:"base"`
+}
+
+// GitHubResources holds GitHub-related resources created by the task.
+type GitHubResources struct {
+	PRs []PR `json:"prs"`
+}
+
+// Resources holds external resources created by the task.
+type Resources struct {
+	GitHub GitHubResources `json:"github"`
+}
+
+// State holds task metadata and mutable state persisted to state.json.
+type State struct {
 	Name        string    `json:"name"`
 	Description string    `json:"description"`
 	CreatedAt   time.Time `json:"created_at"`
+	Resources   Resources `json:"resources"`
 }
 
 // Dir represents a per-task directory structure.
 type Dir struct {
 	root string
+	mu   sync.Mutex
 }
 
 // Create creates a new task directory structure under outputDir.
@@ -68,11 +90,65 @@ func TranscriptPathFor(outputDir, taskName string) string {
 	return filepath.Join(outputDir, taskName, "transcript.jsonl")
 }
 
-// SaveMetadata writes task metadata to metadata.json.
-func (d *Dir) SaveMetadata(m Metadata) error {
-	data, err := json.MarshalIndent(m, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshaling metadata: %w", err)
+func (d *Dir) statePath() string {
+	return filepath.Join(d.root, "state.json")
+}
+
+// LoadState reads the task state from disk. Returns an empty State if
+// the file does not exist yet.
+func (d *Dir) LoadState() (*State, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.loadStateLocked()
+}
+
+func (d *Dir) loadStateLocked() (*State, error) {
+	data, err := os.ReadFile(d.statePath())
+	if errors.Is(err, os.ErrNotExist) {
+		return &State{}, nil
 	}
-	return os.WriteFile(filepath.Join(d.root, "metadata.json"), data, 0644)
+	if err != nil {
+		return nil, fmt.Errorf("reading state: %w", err)
+	}
+	var s State
+	if err := json.Unmarshal(data, &s); err != nil {
+		return nil, fmt.Errorf("unmarshaling state: %w", err)
+	}
+	return &s, nil
+}
+
+func (d *Dir) saveStateLocked(s *State) error {
+	data, err := json.MarshalIndent(s, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling state: %w", err)
+	}
+	return os.WriteFile(d.statePath(), data, 0644)
+}
+
+// SaveMetadata writes task metadata to state.json.
+func (d *Dir) SaveMetadata(name, description string, createdAt time.Time) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	s, err := d.loadStateLocked()
+	if err != nil {
+		return err
+	}
+	s.Name = name
+	s.Description = description
+	s.CreatedAt = createdAt
+	return d.saveStateLocked(s)
+}
+
+// AddPR appends a PR to the task state and persists it to disk.
+func (d *Dir) AddPR(pr PR) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	s, err := d.loadStateLocked()
+	if err != nil {
+		return err
+	}
+	s.Resources.GitHub.PRs = append(s.Resources.GitHub.PRs, pr)
+	return d.saveStateLocked(s)
 }

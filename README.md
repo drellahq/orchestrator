@@ -117,7 +117,7 @@ orchestrator log -f <task-name>
   repo/              # Pulled code (git repo with gjoll/<task-name> branch)
   conversations/     # Claude conversation archive (~/.claude/ from VM)
   transcript.jsonl   # Stream-json transcript of the Claude session
-  metadata.json      # Task name, description, timestamps
+  state.json         # Task metadata and state (name, description, opened PRs)
 ```
 
 ## Architecture

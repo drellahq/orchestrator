@@ -146,27 +146,149 @@ func TestSaveMetadata(t *testing.T) {
 	}
 
 	now := time.Now().Truncate(time.Second)
-	meta := Metadata{
-		Name:        "meta-test",
-		Description: "test task description",
-		CreatedAt:   now,
-	}
-
-	if err := td.SaveMetadata(meta); err != nil {
+	if err := td.SaveMetadata("meta-test", "test task description", now); err != nil {
 		t.Fatalf("SaveMetadata() error: %v", err)
 	}
 
-	data, err := os.ReadFile(filepath.Join(outputDir, "meta-test", "metadata.json"))
+	s, err := td.LoadState()
 	if err != nil {
-		t.Fatalf("reading metadata.json: %v", err)
+		t.Fatalf("LoadState() error: %v", err)
 	}
 
-	var got Metadata
-	if err := json.Unmarshal(data, &got); err != nil {
-		t.Fatalf("unmarshaling metadata: %v", err)
+	if s.Name != "meta-test" {
+		t.Errorf("Name = %q, want %q", s.Name, "meta-test")
+	}
+	if s.Description != "test task description" {
+		t.Errorf("Description = %q, want %q", s.Description, "test task description")
+	}
+	if !s.CreatedAt.Equal(now) {
+		t.Errorf("CreatedAt = %v, want %v", s.CreatedAt, now)
+	}
+}
+
+func TestSaveMetadataPreservesExistingState(t *testing.T) {
+	outputDir := t.TempDir()
+	td, err := Create(outputDir, "preserve-test")
+	if err != nil {
+		t.Fatal(err)
 	}
 
-	if got.Name != meta.Name || got.Description != meta.Description {
-		t.Errorf("metadata mismatch: got %+v, want %+v", got, meta)
+	// Add a PR first
+	pr := PR{URL: "https://github.com/org/repo/pull/1", Repo: "org/repo", Branch: "fix", Base: "main"}
+	if err := td.AddPR(pr); err != nil {
+		t.Fatalf("AddPR() error: %v", err)
+	}
+
+	// Save metadata — should preserve the PR
+	now := time.Now().Truncate(time.Second)
+	if err := td.SaveMetadata("preserve-test", "desc", now); err != nil {
+		t.Fatalf("SaveMetadata() error: %v", err)
+	}
+
+	s, err := td.LoadState()
+	if err != nil {
+		t.Fatalf("LoadState() error: %v", err)
+	}
+	if s.Name != "preserve-test" {
+		t.Errorf("Name = %q, want %q", s.Name, "preserve-test")
+	}
+	if len(s.Resources.GitHub.PRs) != 1 {
+		t.Fatalf("expected 1 PR after SaveMetadata, got %d", len(s.Resources.GitHub.PRs))
+	}
+	if s.Resources.GitHub.PRs[0] != pr {
+		t.Errorf("PR mismatch: got %+v, want %+v", s.Resources.GitHub.PRs[0], pr)
+	}
+}
+
+func TestLoadState_NoFile(t *testing.T) {
+	outputDir := t.TempDir()
+	td, err := Create(outputDir, "state-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := td.LoadState()
+	if err != nil {
+		t.Fatalf("LoadState() error: %v", err)
+	}
+	if len(s.Resources.GitHub.PRs) != 0 {
+		t.Errorf("expected empty PRs, got %d", len(s.Resources.GitHub.PRs))
+	}
+}
+
+func TestAddPR(t *testing.T) {
+	outputDir := t.TempDir()
+	td, err := Create(outputDir, "pr-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pr1 := PR{
+		URL:    "https://github.com/org/repo/pull/1",
+		Repo:   "org/repo",
+		Branch: "fix-bug",
+		Base:   "main",
+	}
+	if err := td.AddPR(pr1); err != nil {
+		t.Fatalf("AddPR() error: %v", err)
+	}
+
+	// Verify state was persisted
+	s, err := td.LoadState()
+	if err != nil {
+		t.Fatalf("LoadState() error: %v", err)
+	}
+	if len(s.Resources.GitHub.PRs) != 1 {
+		t.Fatalf("expected 1 PR, got %d", len(s.Resources.GitHub.PRs))
+	}
+	if s.Resources.GitHub.PRs[0] != pr1 {
+		t.Errorf("PR mismatch: got %+v, want %+v", s.Resources.GitHub.PRs[0], pr1)
+	}
+
+	// Add a second PR
+	pr2 := PR{
+		URL:    "https://github.com/org/repo/pull/2",
+		Repo:   "org/repo",
+		Branch: "add-feature",
+		Base:   "main",
+	}
+	if err := td.AddPR(pr2); err != nil {
+		t.Fatalf("AddPR() second call error: %v", err)
+	}
+
+	s, err = td.LoadState()
+	if err != nil {
+		t.Fatalf("LoadState() error: %v", err)
+	}
+	if len(s.Resources.GitHub.PRs) != 2 {
+		t.Fatalf("expected 2 PRs, got %d", len(s.Resources.GitHub.PRs))
+	}
+	if s.Resources.GitHub.PRs[1] != pr2 {
+		t.Errorf("second PR mismatch: got %+v, want %+v", s.Resources.GitHub.PRs[1], pr2)
+	}
+
+	// Verify on-disk JSON structure
+	data, err := os.ReadFile(filepath.Join(outputDir, "pr-test", "state.json"))
+	if err != nil {
+		t.Fatalf("reading state.json: %v", err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("unmarshaling state.json: %v", err)
+	}
+	resources, ok := raw["resources"].(map[string]any)
+	if !ok {
+		t.Fatal("state.json missing resources key")
+	}
+	github, ok := resources["github"].(map[string]any)
+	if !ok {
+		t.Fatal("state.json missing resources.github key")
+	}
+	prs, ok := github["prs"].([]any)
+	if !ok {
+		t.Fatal("state.json missing resources.github.prs key")
+	}
+	if len(prs) != 2 {
+		t.Errorf("state.json has %d PRs, want 2", len(prs))
 	}
 }

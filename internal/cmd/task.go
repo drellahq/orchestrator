@@ -72,11 +72,7 @@ func runTask(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("creating task directory: %w", err)
 	}
 
-	if err := taskDir.SaveMetadata(task.Metadata{
-		Name:        taskName,
-		Description: taskDescription,
-		CreatedAt:   time.Now(),
-	}); err != nil {
+	if err := taskDir.SaveMetadata(taskName, taskDescription, time.Now()); err != nil {
 		return fmt.Errorf("saving metadata: %w", err)
 	}
 

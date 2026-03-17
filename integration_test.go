@@ -258,6 +258,29 @@ echo "Result: $RESULT"`, remotePort, remotePort, remotePort)
 		t.Errorf("unexpected file content: %q", showOut)
 	}
 
+	// 6a. Verify PR was recorded in task state
+	t.Log("Verifying PR recorded in task state...")
+	state, err := taskDir.LoadState()
+	if err != nil {
+		t.Fatalf("LoadState() error: %v", err)
+	}
+	if len(state.Resources.GitHub.PRs) != 1 {
+		t.Fatalf("expected 1 PR in state, got %d", len(state.Resources.GitHub.PRs))
+	}
+	pr := state.Resources.GitHub.PRs[0]
+	if pr.URL != "https://github.com/test/repo/pull/1" {
+		t.Errorf("PR URL = %q, want %q", pr.URL, "https://github.com/test/repo/pull/1")
+	}
+	if pr.Repo != "test/repo" {
+		t.Errorf("PR Repo = %q, want %q", pr.Repo, "test/repo")
+	}
+	if pr.Branch != "test-branch" {
+		t.Errorf("PR Branch = %q, want %q", pr.Branch, "test-branch")
+	}
+	if pr.Base != "main" {
+		t.Errorf("PR Base = %q, want %q", pr.Base, "main")
+	}
+
 	// 7. Test transcript streaming via SSHProxyOutput
 	t.Log("Testing transcript streaming...")
 	transcriptContent := `{"type":"assistant","message":{"content":[{"type":"text","text":"Hello from test"}]}}
