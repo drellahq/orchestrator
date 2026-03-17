@@ -29,6 +29,7 @@ type PROpener interface {
 	EnsureFork(ctx context.Context, upstream string) (string, error)
 	PushBranch(ctx context.Context, repoDir, forkFullName, branch, sourceRef string) error
 	CreatePR(ctx context.Context, upstream, forkOwner, branch, base, title, body string) (string, error)
+	AddCoAuthorTrailers(ctx context.Context, repoDir, upstream, base, sourceRef, trailer string) error
 }
 
 // OpenPRInput is the input schema for the open_pr tool.
@@ -63,6 +64,21 @@ func isRepoAllowed(repo string, allowedRepos []string) bool {
 	return false
 }
 
+// baseBranchForPR looks up the base branch for a previously opened PR
+// matching the given repo and branch. Falls back to "main" if not found.
+func baseBranchForPR(taskDir *task.Dir, repo, branch string) string {
+	state, err := taskDir.LoadState()
+	if err != nil {
+		return "main"
+	}
+	for _, pr := range state.Resources.GitHub.PRs {
+		if pr.Repo == repo && pr.Branch == branch {
+			return pr.Base
+		}
+	}
+	return "main"
+}
+
 func resolvePushTarget(ctx context.Context, repo string, prOpener PROpener) (pushTarget, forkOwner string, err error) {
 	forkOwner, err = prOpener.AuthenticatedUser(ctx)
 	if err != nil {
@@ -82,8 +98,9 @@ func resolvePushTarget(ctx context.Context, repo string, prOpener PROpener) (pus
 }
 
 // New creates a new MCP server. If prOpener is non-nil and allowedRepos is
-// non-empty, the open_pr tool is registered.
-func New(logger *slog.Logger, taskName string, taskDir *task.Dir, puller CodePuller, prOpener PROpener, allowedRepos []string) *Server {
+// non-empty, the open_pr tool is registered. When author is non-empty, a
+// Co-authored-by trailer is appended to each new commit before pushing.
+func New(logger *slog.Logger, taskName string, taskDir *task.Dir, puller CodePuller, prOpener PROpener, allowedRepos []string, author string) *Server {
 	mcpServer := mcp.NewServer(&mcp.Implementation{
 		Name:    "orchestrator",
 		Version: "0.1.0",
@@ -120,6 +137,21 @@ func New(logger *slog.Logger, taskName string, taskDir *task.Dir, puller CodePul
 				input.Base = "main"
 			}
 
+			sourceRef := "gjoll/" + taskName
+
+			if author != "" {
+				trailer := fmt.Sprintf("Co-authored-by: %s", author)
+				if err := prOpener.AddCoAuthorTrailers(ctx, taskDir.RepoPath(), input.Repo, input.Base, sourceRef, trailer); err != nil {
+					logger.Error("Failed to add co-author trailers", "task", taskName, "error", err)
+					return &mcp.CallToolResult{
+						Content: []mcp.Content{
+							&mcp.TextContent{Text: fmt.Sprintf("open_pr failed: %v", err)},
+						},
+						IsError: true,
+					}, nil, nil
+				}
+			}
+
 			pushTarget, forkOwner, err := resolvePushTarget(ctx, input.Repo, prOpener)
 			if err != nil {
 				logger.Error("Failed to resolve push target", "task", taskName, "error", err)
@@ -131,7 +163,6 @@ func New(logger *slog.Logger, taskName string, taskDir *task.Dir, puller CodePul
 				}, nil, nil
 			}
 
-			sourceRef := "gjoll/" + taskName
 			if err := prOpener.PushBranch(ctx, taskDir.RepoPath(), pushTarget, input.Branch, sourceRef); err != nil {
 				logger.Error("Failed to push branch", "task", taskName, "error", err)
 				return &mcp.CallToolResult{
@@ -196,6 +227,22 @@ func New(logger *slog.Logger, taskName string, taskDir *task.Dir, puller CodePul
 				}, nil, nil
 			}
 
+			sourceRef := "gjoll/" + taskName
+
+			if author != "" {
+				base := baseBranchForPR(taskDir, input.Repo, input.Branch)
+				trailer := fmt.Sprintf("Co-authored-by: %s", author)
+				if err := prOpener.AddCoAuthorTrailers(ctx, taskDir.RepoPath(), input.Repo, base, sourceRef, trailer); err != nil {
+					logger.Error("Failed to add co-author trailers", "task", taskName, "error", err)
+					return &mcp.CallToolResult{
+						Content: []mcp.Content{
+							&mcp.TextContent{Text: fmt.Sprintf("update_pr failed: %v", err)},
+						},
+						IsError: true,
+					}, nil, nil
+				}
+			}
+
 			pushTarget, _, err := resolvePushTarget(ctx, input.Repo, prOpener)
 			if err != nil {
 				logger.Error("Failed to resolve push target", "task", taskName, "error", err)
@@ -207,7 +254,6 @@ func New(logger *slog.Logger, taskName string, taskDir *task.Dir, puller CodePul
 				}, nil, nil
 			}
 
-			sourceRef := "gjoll/" + taskName
 			if err := prOpener.PushBranch(ctx, taskDir.RepoPath(), pushTarget, input.Branch, sourceRef); err != nil {
 				logger.Error("Failed to push branch", "task", taskName, "error", err)
 				return &mcp.CallToolResult{

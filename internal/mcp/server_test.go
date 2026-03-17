@@ -49,6 +49,11 @@ type stubPROpener struct {
 	gotPRRepo string
 	gotPRHead string
 	gotPRBase string
+
+	trailerErr    error
+	trailerCalled bool
+	gotTrailer    string
+	gotTrailerBase string
 }
 
 func (s *stubPROpener) AuthenticatedUser(_ context.Context) (string, error) {
@@ -75,7 +80,14 @@ func (s *stubPROpener) CreatePR(_ context.Context, upstream, forkOwner, branch, 
 	return s.prURL, s.prErr
 }
 
-func startTestServer(t *testing.T, puller CodePuller, prOpener PROpener, allowedRepos []string) (*task.Dir, *Server, string) {
+func (s *stubPROpener) AddCoAuthorTrailers(_ context.Context, repoDir, upstream, base, sourceRef, trailer string) error {
+	s.trailerCalled = true
+	s.gotTrailer = trailer
+	s.gotTrailerBase = base
+	return s.trailerErr
+}
+
+func startTestServer(t *testing.T, puller CodePuller, prOpener PROpener, allowedRepos []string, authors ...string) (*task.Dir, *Server, string) {
 	t.Helper()
 	dir := t.TempDir()
 	td, err := task.Create(dir, "test-task")
@@ -83,8 +95,12 @@ func startTestServer(t *testing.T, puller CodePuller, prOpener PROpener, allowed
 		t.Fatal(err)
 	}
 
+	var author string
+	if len(authors) > 0 {
+		author = authors[0]
+	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	s := New(logger, "test-task", td, puller, prOpener, allowedRepos)
+	s := New(logger, "test-task", td, puller, prOpener, allowedRepos, author)
 	if err := s.StartOn("127.0.0.1:0"); err != nil {
 		t.Fatalf("StartOn() error: %v", err)
 	}
@@ -122,7 +138,7 @@ func TestStartAllocatesDynamicPort(t *testing.T) {
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 
-	s1 := New(logger, "task-1", td, nil, nil, nil)
+	s1 := New(logger, "task-1", td, nil, nil, nil, "")
 	if err := s1.Start(); err != nil {
 		t.Fatalf("Start() error: %v", err)
 	}
@@ -134,7 +150,7 @@ func TestStartAllocatesDynamicPort(t *testing.T) {
 
 	dir2 := t.TempDir()
 	td2, _ := task.Create(dir2, "dyn-port-test-2")
-	s2 := New(logger, "task-2", td2, nil, nil, nil)
+	s2 := New(logger, "task-2", td2, nil, nil, nil, "")
 	if err := s2.Start(); err != nil {
 		t.Fatalf("Start() second server: %v", err)
 	}
@@ -436,6 +452,225 @@ func TestOpenPRTool(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestOpenPRToolWithAuthor(t *testing.T) {
+	t.Run("calls AddCoAuthorTrailers when author is set", func(t *testing.T) {
+		puller := &stubPuller{}
+		opener := &stubPROpener{
+			user:     "testuser",
+			forkName: "testuser/osbuild",
+			prURL:    "https://github.com/osbuild/osbuild/pull/42",
+		}
+		_, _, endpoint := startTestServer(t, puller, opener, []string{"osbuild/*"}, "Jane Doe <jane@example.com>")
+		session := connectClient(t, endpoint)
+
+		result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+			Name: "open_pr",
+			Arguments: map[string]any{
+				"path":   "/test/project",
+				"repo":   "osbuild/osbuild",
+				"branch": "fix-bug",
+				"base":   "main",
+				"title":  "Fix bug",
+				"body":   "body",
+			},
+		})
+		if err != nil {
+			t.Fatalf("CallTool() error: %v", err)
+		}
+		if result.IsError {
+			t.Fatalf("unexpected error result")
+		}
+
+		if !opener.trailerCalled {
+			t.Error("AddCoAuthorTrailers was not called")
+		}
+		if opener.gotTrailer != "Co-authored-by: Jane Doe <jane@example.com>" {
+			t.Errorf("trailer = %q, want %q", opener.gotTrailer, "Co-authored-by: Jane Doe <jane@example.com>")
+		}
+		if opener.gotTrailerBase != "main" {
+			t.Errorf("trailer base = %q, want %q", opener.gotTrailerBase, "main")
+		}
+	})
+
+	t.Run("skips AddCoAuthorTrailers when author is empty", func(t *testing.T) {
+		puller := &stubPuller{}
+		opener := &stubPROpener{
+			user:     "testuser",
+			forkName: "testuser/osbuild",
+			prURL:    "https://github.com/osbuild/osbuild/pull/42",
+		}
+		_, _, endpoint := startTestServer(t, puller, opener, []string{"osbuild/*"})
+		session := connectClient(t, endpoint)
+
+		result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+			Name: "open_pr",
+			Arguments: map[string]any{
+				"path":   "/test/project",
+				"repo":   "osbuild/osbuild",
+				"branch": "fix-bug",
+				"base":   "main",
+				"title":  "Fix bug",
+				"body":   "body",
+			},
+		})
+		if err != nil {
+			t.Fatalf("CallTool() error: %v", err)
+		}
+		if result.IsError {
+			t.Fatalf("unexpected error result")
+		}
+
+		if opener.trailerCalled {
+			t.Error("AddCoAuthorTrailers should not be called when author is empty")
+		}
+	})
+
+	t.Run("returns error when AddCoAuthorTrailers fails", func(t *testing.T) {
+		puller := &stubPuller{}
+		opener := &stubPROpener{
+			user:       "testuser",
+			forkName:   "testuser/osbuild",
+			prURL:      "https://github.com/osbuild/osbuild/pull/42",
+			trailerErr: fmt.Errorf("filter-branch failed"),
+		}
+		_, _, endpoint := startTestServer(t, puller, opener, []string{"osbuild/*"}, "Jane Doe <jane@example.com>")
+		session := connectClient(t, endpoint)
+
+		result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+			Name: "open_pr",
+			Arguments: map[string]any{
+				"path":   "/test/project",
+				"repo":   "osbuild/osbuild",
+				"branch": "fix-bug",
+				"base":   "main",
+				"title":  "Fix bug",
+				"body":   "body",
+			},
+		})
+		if err != nil {
+			t.Fatalf("CallTool() error: %v", err)
+		}
+		if !result.IsError {
+			t.Error("expected error result")
+		}
+		var text string
+		for _, c := range result.Content {
+			if tc, ok := c.(*mcp.TextContent); ok {
+				text = tc.Text
+			}
+		}
+		if !strings.Contains(text, "filter-branch failed") {
+			t.Errorf("error text %q does not mention filter-branch", text)
+		}
+	})
+}
+
+func TestUpdatePRToolWithAuthor(t *testing.T) {
+	t.Run("looks up base branch from task state", func(t *testing.T) {
+		puller := &stubPuller{}
+		opener := &stubPROpener{
+			user:     "testuser",
+			forkName: "testuser/osbuild",
+		}
+		td, _, endpoint := startTestServer(t, puller, opener, []string{"osbuild/*"}, "Jane Doe <jane@example.com>")
+
+		// Record a PR so update_pr can look up the base branch
+		if err := td.AddPR(task.PR{
+			URL:    "https://github.com/osbuild/osbuild/pull/1",
+			Repo:   "osbuild/osbuild",
+			Branch: "fix-bug",
+			Base:   "develop",
+		}); err != nil {
+			t.Fatal(err)
+		}
+
+		session := connectClient(t, endpoint)
+
+		result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+			Name: "update_pr",
+			Arguments: map[string]any{
+				"path":   "/test/project",
+				"repo":   "osbuild/osbuild",
+				"branch": "fix-bug",
+			},
+		})
+		if err != nil {
+			t.Fatalf("CallTool() error: %v", err)
+		}
+		if result.IsError {
+			t.Fatalf("unexpected error result")
+		}
+
+		if !opener.trailerCalled {
+			t.Error("AddCoAuthorTrailers was not called")
+		}
+		if opener.gotTrailerBase != "develop" {
+			t.Errorf("trailer base = %q, want %q (from task state)", opener.gotTrailerBase, "develop")
+		}
+	})
+
+	t.Run("defaults to main when no PR recorded", func(t *testing.T) {
+		puller := &stubPuller{}
+		opener := &stubPROpener{
+			user:     "testuser",
+			forkName: "testuser/osbuild",
+		}
+		_, _, endpoint := startTestServer(t, puller, opener, []string{"osbuild/*"}, "Jane Doe <jane@example.com>")
+		session := connectClient(t, endpoint)
+
+		result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+			Name: "update_pr",
+			Arguments: map[string]any{
+				"path":   "/test/project",
+				"repo":   "osbuild/osbuild",
+				"branch": "fix-bug",
+			},
+		})
+		if err != nil {
+			t.Fatalf("CallTool() error: %v", err)
+		}
+		if result.IsError {
+			t.Fatalf("unexpected error result")
+		}
+
+		if opener.gotTrailerBase != "main" {
+			t.Errorf("trailer base = %q, want %q (default)", opener.gotTrailerBase, "main")
+		}
+	})
+}
+
+func TestBaseBranchForPR(t *testing.T) {
+	dir := t.TempDir()
+	td, err := task.Create(dir, "test-task")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// No PRs recorded — should default to "main"
+	if got := baseBranchForPR(td, "org/repo", "my-branch"); got != "main" {
+		t.Errorf("baseBranchForPR (no PRs) = %q, want %q", got, "main")
+	}
+
+	// Record a PR
+	if err := td.AddPR(task.PR{
+		URL:    "https://github.com/org/repo/pull/1",
+		Repo:   "org/repo",
+		Branch: "my-branch",
+		Base:   "develop",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := baseBranchForPR(td, "org/repo", "my-branch"); got != "develop" {
+		t.Errorf("baseBranchForPR (matching PR) = %q, want %q", got, "develop")
+	}
+
+	// Non-matching branch — should default
+	if got := baseBranchForPR(td, "org/repo", "other-branch"); got != "main" {
+		t.Errorf("baseBranchForPR (no match) = %q, want %q", got, "main")
 	}
 }
 

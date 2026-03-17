@@ -23,6 +23,8 @@ import (
 //go:embed prompt.md
 var promptContent string
 
+var author string
+
 var taskCmd = &cobra.Command{
 	Use:   "task",
 	Short: "Manage tasks",
@@ -47,6 +49,8 @@ with --continue to resume the previous conversation with a new prompt.`,
 }
 
 func init() {
+	taskNewCmd.Flags().StringVar(&author, "author", "", "co-author to add to PR commits (e.g. \"Jane Doe <jane@example.com>\")")
+	taskContinueCmd.Flags().StringVar(&author, "author", "", "co-author to add to PR commits (e.g. \"Jane Doe <jane@example.com>\")")
 	taskCmd.AddCommand(taskNewCmd)
 	taskCmd.AddCommand(taskContinueCmd)
 }
@@ -76,7 +80,7 @@ func runTask(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("saving metadata: %w", err)
 	}
 
-	return executeTask(ctx, taskName, taskDescription, taskDir, cfg, ghRunner, false)
+	return executeTask(ctx, taskName, taskDescription, taskDir, cfg, ghRunner, false, author)
 }
 
 func continueTask(cmd *cobra.Command, args []string) error {
@@ -100,7 +104,7 @@ func continueTask(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("opening task directory: %w", err)
 	}
 
-	return executeTask(ctx, taskName, taskDescription, taskDir, cfg, ghRunner, true)
+	return executeTask(ctx, taskName, taskDescription, taskDir, cfg, ghRunner, true, author)
 }
 
 func loadConfigAndSetupLogging() (*config.Config, error) {
@@ -128,13 +132,13 @@ func logPreflightWarnings(ctx context.Context, cfg *config.Config) *gh.Runner {
 	return ghRunner
 }
 
-func executeTask(ctx context.Context, taskName, taskDescription string, taskDir *task.Dir, cfg *config.Config, ghRunner *gh.Runner, continueSession bool) error {
+func executeTask(ctx context.Context, taskName, taskDescription string, taskDir *task.Dir, cfg *config.Config, ghRunner *gh.Runner, continueSession bool, author string) error {
 	runner := gjoll.New("")
 
 	logger := slog.Default()
 
 	// Start MCP server
-	mcpSrv := mcpserver.New(logger, taskName, taskDir, runner, ghRunner, cfg.AllowedRepos)
+	mcpSrv := mcpserver.New(logger, taskName, taskDir, runner, ghRunner, cfg.AllowedRepos, author)
 	if err := mcpSrv.Start(); err != nil {
 		return fmt.Errorf("starting MCP server: %w", err)
 	}
