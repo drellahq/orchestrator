@@ -113,16 +113,23 @@ func TestCommandConstruction(t *testing.T) {
 			wantArgs: []string{"stop", "my-sandbox"},
 		},
 		{
-			name: "SSHProxy single command string",
+			name: "SSHProxy with proxy only",
 			call: func(r *Runner, ctx context.Context) error {
-				return r.SSHProxy(ctx, "my-sandbox", "tmux new-session -d -s claude /tmp/run.sh")
+				return r.SSHProxy(ctx, "my-sandbox", &SSHOpts{Proxy: true}, "tmux new-session -d -s claude /tmp/run.sh")
 			},
 			wantArgs: []string{"ssh", "--proxy", "my-sandbox", "--", "tmux new-session -d -s claude /tmp/run.sh"},
 		},
 		{
-			name: "SSHProxyOutput",
+			name: "SSHProxy nil opts",
 			call: func(r *Runner, ctx context.Context) error {
-				return r.SSHProxyOutput(ctx, "my-sandbox", io.Discard, "tail -f ~/transcript.jsonl")
+				return r.SSHProxy(ctx, "my-sandbox", nil, "echo hello")
+			},
+			wantArgs: []string{"ssh", "my-sandbox", "--", "echo hello"},
+		},
+		{
+			name: "SSHProxyOutput with proxy only",
+			call: func(r *Runner, ctx context.Context) error {
+				return r.SSHProxyOutput(ctx, "my-sandbox", io.Discard, &SSHOpts{Proxy: true}, "tail -f ~/transcript.jsonl")
 			},
 			wantArgs: []string{"ssh", "--proxy", "my-sandbox", "--", "tail -f ~/transcript.jsonl"},
 		},

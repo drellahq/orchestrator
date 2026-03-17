@@ -52,7 +52,7 @@ func runLog(cmd *cobra.Command, args []string) error {
 
 		runner := gjoll.New("")
 		tw := newTranscriptWriter(os.Stdout, verbose)
-		return runner.SSHProxyOutput(ctx, taskName, tw, "tail -f ~/transcript.jsonl")
+		return runner.SSHProxyOutput(ctx, taskName, tw, &gjoll.SSHOpts{Proxy: true}, "tail -f ~/transcript.jsonl")
 	}
 
 	// Read local transcript
