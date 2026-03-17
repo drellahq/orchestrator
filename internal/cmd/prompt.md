@@ -46,7 +46,7 @@ Use this to push additional commits to an already-open PR.
 
 ## Workflow
 
-1. Work on the assigned task in `~/project`
+1. Work on the assigned task in `$HOME`
 2. When you have changes ready, commit them with git:
    ```bash
    git add -A
@@ -54,7 +54,7 @@ Use this to push additional commits to an already-open PR.
    ```
 3. Call `open_pr` to send your code to the host and create a PR:
    ```
-   open_pr({"path": "~/project", "repo": "owner/repo", "branch": "fix-something", "title": "Fix something", "body": "Description of the change"})
+   open_pr({"path": "$HOME", "repo": "owner/repo", "branch": "fix-something", "title": "Fix something", "body": "Description of the change"})
    ```
 4. Report completion with a summary of what you did
 
@@ -63,4 +63,4 @@ Use this to push additional commits to an already-open PR.
 - You are in a credential-free VM - no cloud credentials or API keys are available
 - Git is pre-configured with author information
 - The orchestrator MCP server provides `open_pr` and `update_pr` tools
-- Your working directory is `~/project` which is already a git repository
+- Your working directory is `$HOME`

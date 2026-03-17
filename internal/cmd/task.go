@@ -248,7 +248,6 @@ func buildRunScript(taskDescription string, continueSession bool) string {
 
 	return fmt.Sprintf(`#!/bin/bash
 source ~/.bashrc
-cd ~/project
 stdbuf -oL claude --dangerously-skip-permissions -p --verbose \
   --output-format stream-json --append-system-prompt-file ~/system-prompt.md \
   %s '%s' \
@@ -263,11 +262,6 @@ func setupSandbox(ctx context.Context, runner *gjoll.Runner, taskName string) er
 	}
 	if err := runner.SSH(ctx, taskName, "git config --global user.email imagebuilder-bots+drella@redhat.com"); err != nil {
 		return fmt.Errorf("git config user.email: %w", err)
-	}
-
-	// Initialize project repo
-	if err := runner.SSH(ctx, taskName, "mkdir -p ~/project && cd ~/project && git init"); err != nil {
-		return fmt.Errorf("git init: %w", err)
 	}
 
 	// Write system prompt to a temp file and copy it to the sandbox
@@ -285,11 +279,6 @@ func setupSandbox(ctx context.Context, runner *gjoll.Runner, taskName string) er
 
 	if err := runner.Cp(ctx, taskName, tmpFile.Name(), ":~/system-prompt.md"); err != nil {
 		return fmt.Errorf("copying system prompt: %w", err)
-	}
-
-	// Initial commit so the repo starts clean
-	if err := runner.SSH(ctx, taskName, "cd ~/project && git commit --allow-empty -m 'Initial setup'"); err != nil {
-		return fmt.Errorf("initial commit: %w", err)
 	}
 
 	// Register MCP server with Claude

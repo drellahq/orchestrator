@@ -178,7 +178,7 @@ func TestIntegration(t *testing.T) {
 		}
 	})
 
-	// 2. Set up git inside the VM
+	// 2. Set up git inside the VM (using $HOME as the working directory)
 	t.Log("Setting up git in sandbox...")
 	if err := runner.SSH(ctx, sandboxName, "git config --global user.name Test"); err != nil {
 		t.Fatalf("git config user.name: %v", err)
@@ -186,14 +186,14 @@ func TestIntegration(t *testing.T) {
 	if err := runner.SSH(ctx, sandboxName, "git config --global user.email test@test.com"); err != nil {
 		t.Fatalf("git config user.email: %v", err)
 	}
-	if err := runner.SSH(ctx, sandboxName, "mkdir -p ~/project && cd ~/project && git init"); err != nil {
+	if err := runner.SSH(ctx, sandboxName, "cd ~ && git init"); err != nil {
 		t.Fatalf("git init: %v", err)
 	}
 
 	// 3. Create a file, commit it on the VM
 	t.Log("Creating test commit in sandbox...")
 	if err := runner.SSH(ctx, sandboxName,
-		"echo 'hello from integration test' > ~/project/hello.txt && cd ~/project && git add -A && git commit -m 'test commit'"); err != nil {
+		"echo 'hello from integration test' > ~/hello.txt && cd ~ && git add -A && git commit -m 'test commit'"); err != nil {
 		t.Fatalf("creating test commit: %v", err)
 	}
 
@@ -223,7 +223,7 @@ HEADERS=$(curl -s -D - -o /dev/null -X POST http://localhost:%d/ -H "Content-Typ
 SESSION_ID=$(echo "$HEADERS" | grep -i "mcp-session-id" | tr -d '\r' | awk '{print $2}')
 echo "Session ID: $SESSION_ID"
 curl -s -X POST http://localhost:%d/ -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -H "Mcp-Session-Id: $SESSION_ID" -d '{"jsonrpc":"2.0","method":"notifications/initialized"}'
-RESULT=$(curl -s -X POST http://localhost:%d/ -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -H "Mcp-Session-Id: $SESSION_ID" -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"open_pr","arguments":{"path":"~/project","repo":"test/repo","branch":"test-branch","title":"Test","body":"Test"}}}')
+RESULT=$(curl -s -X POST http://localhost:%d/ -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -H "Mcp-Session-Id: $SESSION_ID" -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"open_pr","arguments":{"path":"~","repo":"test/repo","branch":"test-branch","title":"Test","body":"Test"}}}')
 echo "Result: $RESULT"`, remotePort, remotePort, remotePort)
 	if err := runner.SSHProxy(ctx, sandboxName, &gjoll.SSHOpts{ReverseTunnels: []string{mcpTunnel}}, pullScript); err != nil {
 		t.Fatalf("open_pr via ssh -R: %v", err)
@@ -328,7 +328,7 @@ echo "Result: $RESULT"`, remotePort, remotePort, remotePort)
 	}
 
 	t.Log("Verifying state persisted after resume...")
-	if err := runner.SSH(ctx, sandboxName, "test -f ~/project/hello.txt"); err != nil {
+	if err := runner.SSH(ctx, sandboxName, "test -f ~/hello.txt"); err != nil {
 		t.Fatalf("hello.txt does not exist after resume: %v", err)
 	}
 
