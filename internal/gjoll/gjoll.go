@@ -38,10 +38,32 @@ func (r *Runner) SSH(ctx context.Context, name string, command ...string) error 
 	return r.run(ctx, nil, args...)
 }
 
-// SSHProxy runs a command inside the sandbox with proxy tunnels active.
+// SSHOpts configures gjoll ssh flags.
+type SSHOpts struct {
+	Proxy          bool     // activate terraform-defined credential-injecting proxies
+	ReverseTunnels []string // SSH -R specs (e.g. "19090:localhost:12345")
+}
+
+func (o *SSHOpts) args() []string {
+	var a []string
+	if o == nil {
+		return a
+	}
+	if o.Proxy {
+		a = append(a, "--proxy")
+	}
+	for _, rt := range o.ReverseTunnels {
+		a = append(a, "-R", rt)
+	}
+	return a
+}
+
+// SSHProxy runs a command inside the sandbox with the given SSH options.
 // Stdin/stdout/stderr are connected to the current process.
-func (r *Runner) SSHProxy(ctx context.Context, name string, command ...string) error {
-	args := []string{"ssh", "--proxy", name, "--"}
+func (r *Runner) SSHProxy(ctx context.Context, name string, opts *SSHOpts, command ...string) error {
+	args := []string{"ssh"}
+	args = append(args, opts.args()...)
+	args = append(args, name, "--")
 	args = append(args, command...)
 	return r.runInteractive(ctx, args...)
 }
@@ -73,10 +95,12 @@ func (r *Runner) Stop(ctx context.Context, name string) error {
 	return r.run(ctx, nil, "stop", name)
 }
 
-// SSHProxyOutput runs a command inside the sandbox with proxy tunnels active,
+// SSHProxyOutput runs a command inside the sandbox with the given SSH options,
 // writing the command's stdout to w instead of os.Stdout.
-func (r *Runner) SSHProxyOutput(ctx context.Context, name string, w io.Writer, command ...string) error {
-	args := []string{"ssh", "--proxy", name, "--"}
+func (r *Runner) SSHProxyOutput(ctx context.Context, name string, w io.Writer, opts *SSHOpts, command ...string) error {
+	args := []string{"ssh"}
+	args = append(args, opts.args()...)
+	args = append(args, name, "--")
 	args = append(args, command...)
 	cmd := exec.CommandContext(ctx, r.bin, args...)
 	cmd.Stdin = os.Stdin

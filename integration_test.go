@@ -232,7 +232,7 @@ echo "Session ID: $SESSION_ID"
 curl -s -X POST http://localhost:%d/ -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -H "Mcp-Session-Id: $SESSION_ID" -d '{"jsonrpc":"2.0","method":"notifications/initialized"}'
 RESULT=$(curl -s -X POST http://localhost:%d/ -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -H "Mcp-Session-Id: $SESSION_ID" -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"open_pr","arguments":{"path":"~/project","repo":"test/repo","branch":"test-branch","title":"Test","body":"Test"}}}')
 echo "Result: $RESULT"`, mcpPort, mcpPort, mcpPort)
-	if err := runner.SSHProxy(ctx, sandboxName, pullScript); err != nil {
+	if err := runner.SSHProxy(ctx, sandboxName, &gjoll.SSHOpts{Proxy: true}, pullScript); err != nil {
 		t.Fatalf("open_pr via proxy: %v", err)
 	}
 
@@ -276,7 +276,7 @@ echo "Result: $RESULT"`, mcpPort, mcpPort, mcpPort)
 	}
 
 	var buf bytes.Buffer
-	if err := runner.SSHProxyOutput(ctx, sandboxName, &buf, "cat ~/transcript.jsonl"); err != nil {
+	if err := runner.SSHProxyOutput(ctx, sandboxName, &buf, nil, "cat ~/transcript.jsonl"); err != nil {
 		t.Fatalf("SSHProxyOutput: %v", err)
 	}
 	gotOutput := buf.String()

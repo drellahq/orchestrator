@@ -233,8 +233,10 @@ stdbuf -oL claude --dangerously-skip-permissions -p --verbose \
 		return fmt.Errorf("making run script executable: %w", err)
 	}
 
+	sshOpts := &gjoll.SSHOpts{Proxy: true}
+
 	tw := newTranscriptWriter(os.Stdout, verbose)
-	if err := runner.SSHProxyOutput(ctx, taskName, tw, "/tmp/run-claude.sh"); err != nil {
+	if err := runner.SSHProxyOutput(ctx, taskName, tw, sshOpts, "/tmp/run-claude.sh"); err != nil {
 		slog.Error("Claude exited with error", "task", taskName, "error", err)
 		// Don't return error - still want to archive results
 	}
