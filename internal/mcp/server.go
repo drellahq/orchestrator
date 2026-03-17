@@ -13,8 +13,10 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// MCPPort is the default port for the MCP server.
-const MCPPort = 19090
+// MCPRemotePort is the port exposed inside the sandbox VM. The MCP server
+// itself listens on a dynamic port on the host; an SSH reverse tunnel
+// (-R MCPRemotePort:localhost:<dynamic>) bridges the two.
+const MCPRemotePort = 19090
 
 // CodePuller pulls committed code from a sandbox into a local git repo.
 type CodePuller interface {
@@ -227,9 +229,18 @@ func New(logger *slog.Logger, taskName string, taskDir *task.Dir, puller CodePul
 	}
 }
 
-// Start starts the MCP server on 127.0.0.1:MCPPort.
+// Start starts the MCP server on a dynamically allocated port.
+// Use Port() to retrieve the assigned port.
 func (s *Server) Start() error {
-	return s.StartOn(fmt.Sprintf("127.0.0.1:%d", MCPPort))
+	return s.StartOn("127.0.0.1:0")
+}
+
+// Port returns the port the server is listening on, or 0 if not started.
+func (s *Server) Port() int {
+	if s.listener != nil {
+		return s.listener.Addr().(*net.TCPAddr).Port
+	}
+	return 0
 }
 
 // StartOn starts the MCP server on the given address.

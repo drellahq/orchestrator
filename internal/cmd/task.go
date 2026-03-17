@@ -144,7 +144,9 @@ func executeTask(ctx context.Context, taskName, taskDescription string, taskDir 
 	}
 	defer func() { _ = mcpSrv.Stop(context.Background()) }()
 
-	slog.Debug("MCP server started", "task", taskName, "port", mcpserver.MCPPort)
+	mcpPort := mcpSrv.Port()
+	mcpTunnel := fmt.Sprintf("%d:localhost:%d", mcpserver.MCPRemotePort, mcpPort)
+	slog.Debug("MCP server started", "task", taskName, "port", mcpPort)
 
 	if continueSession {
 		slog.Info("Resuming sandbox", "task", taskName)
@@ -233,7 +235,10 @@ stdbuf -oL claude --dangerously-skip-permissions -p --verbose \
 		return fmt.Errorf("making run script executable: %w", err)
 	}
 
-	sshOpts := &gjoll.SSHOpts{Proxy: true}
+	sshOpts := &gjoll.SSHOpts{
+		Proxy:          true,
+		ReverseTunnels: []string{mcpTunnel},
+	}
 
 	tw := newTranscriptWriter(os.Stdout, verbose)
 	if err := runner.SSHProxyOutput(ctx, taskName, tw, sshOpts, "/tmp/run-claude.sh"); err != nil {
@@ -283,7 +288,7 @@ func setupSandbox(ctx context.Context, runner *gjoll.Runner, taskName string) er
 	}
 
 	// Register MCP server with Claude
-	mcpURL := fmt.Sprintf("http://localhost:%d/mcp", mcpserver.MCPPort)
+	mcpURL := fmt.Sprintf("http://localhost:%d/mcp", mcpserver.MCPRemotePort)
 	if err := runner.SSH(ctx, taskName, fmt.Sprintf("claude mcp add --transport http orchestrator %s --scope user", mcpURL)); err != nil {
 		return fmt.Errorf("registering MCP server: %w", err)
 	}

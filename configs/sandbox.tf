@@ -111,7 +111,9 @@ output "init_script" {
   EOT
 }
 
-# Proxy configuration
+# Proxy configuration — the orchestrator MCP server is tunneled via ssh -R
+# at runtime rather than being listed here, so multiple tasks can share this
+# tf file in parallel (each gets its own dynamic port).
 output "proxies" {
   value = [
     {
@@ -119,11 +121,6 @@ output "proxies" {
       target = "https://us-east5-aiplatform.googleapis.com/v1"
       auth   = "gcp"
       port   = 18080
-    },
-    {
-      name   = "orchestrator-mcp"
-      target = "http://localhost:19090" # keep in sync with mcp.MCPPort
-      port   = 19090                    # keep in sync with mcp.MCPPort
     },
   ]
 }

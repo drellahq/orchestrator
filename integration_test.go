@@ -47,7 +47,7 @@ func testTF(t *testing.T) string {
 	dir := t.TempDir()
 	tfPath := filepath.Join(dir, "test-sandbox.tf")
 
-	content := fmt.Sprintf(`terraform {
+	content := `terraform {
   required_providers {
     libvirt = { source = "dmacvicar/libvirt", version = "~> 0.9" }
   }
@@ -147,17 +147,7 @@ output "init_script" {
     sudo dnf install -y git-core
   EOT
 }
-
-output "proxies" {
-  value = [
-    {
-      name   = "orchestrator-mcp"
-      target = "http://localhost:%d"
-      port   = %d
-    },
-  ]
-}
-`, mcpserver.MCPPort, mcpserver.MCPPort)
+`
 	if err := os.WriteFile(tfPath, []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -221,19 +211,22 @@ func TestIntegration(t *testing.T) {
 	}
 	defer func() { _ = mcpSrv.Stop(ctx) }()
 
-	// 5. Call open_pr from inside the VM via proxy tunnel
-	// Use gjoll ssh --proxy to tunnel MCP and invoke curl from within
-	t.Log("Calling open_pr from sandbox via proxy tunnel...")
-	mcpPort := mcpserver.MCPPort
+	// 5. Call open_pr from inside the VM via ssh -R tunnel
+	// The MCP server listens on a dynamic host port; we reverse-tunnel it
+	// to MCPRemotePort inside the VM so curl can reach it.
+	t.Log("Calling open_pr from sandbox via ssh -R tunnel...")
+	mcpPort := mcpSrv.Port()
+	mcpTunnel := fmt.Sprintf("%d:localhost:%d", mcpserver.MCPRemotePort, mcpPort)
+	remotePort := mcpserver.MCPRemotePort
 	pullScript := fmt.Sprintf(`set -e
 HEADERS=$(curl -s -D - -o /dev/null -X POST http://localhost:%d/ -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"0.1.0"}}}')
 SESSION_ID=$(echo "$HEADERS" | grep -i "mcp-session-id" | tr -d '\r' | awk '{print $2}')
 echo "Session ID: $SESSION_ID"
 curl -s -X POST http://localhost:%d/ -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -H "Mcp-Session-Id: $SESSION_ID" -d '{"jsonrpc":"2.0","method":"notifications/initialized"}'
 RESULT=$(curl -s -X POST http://localhost:%d/ -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -H "Mcp-Session-Id: $SESSION_ID" -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"open_pr","arguments":{"path":"~/project","repo":"test/repo","branch":"test-branch","title":"Test","body":"Test"}}}')
-echo "Result: $RESULT"`, mcpPort, mcpPort, mcpPort)
-	if err := runner.SSHProxy(ctx, sandboxName, &gjoll.SSHOpts{Proxy: true}, pullScript); err != nil {
-		t.Fatalf("open_pr via proxy: %v", err)
+echo "Result: $RESULT"`, remotePort, remotePort, remotePort)
+	if err := runner.SSHProxy(ctx, sandboxName, &gjoll.SSHOpts{ReverseTunnels: []string{mcpTunnel}}, pullScript); err != nil {
+		t.Fatalf("open_pr via ssh -R: %v", err)
 	}
 
 	// 6. Verify code was pulled
