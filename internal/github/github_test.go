@@ -335,7 +335,7 @@ func TestAddCoAuthorTrailers(t *testing.T) {
 		}
 
 		// Create a source branch with new commits
-		cmd = exec.Command("git", "checkout", "-b", "gjoll/test-task")
+		cmd = exec.Command("git", "checkout", "-b", "gjoll-test-task")
 		cmd.Dir = localDir
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("checkout: %v\n%s", err, out)
@@ -352,7 +352,7 @@ func TestAddCoAuthorTrailers(t *testing.T) {
 
 		r := New("")
 		trailer := "Co-authored-by: Test Author <test@example.com>"
-		err := r.addCoAuthorTrailers(context.Background(), "git", localDir, upstreamDir, "master", "gjoll/test-task", trailer)
+		err := r.addCoAuthorTrailers(context.Background(), "git", localDir, upstreamDir, "master", "gjoll-test-task", trailer)
 
 		if err != nil {
 			t.Fatalf("addCoAuthorTrailers: %v", err)
@@ -401,7 +401,7 @@ func TestAddCoAuthorTrailers(t *testing.T) {
 			t.Fatalf("reset: %v\n%s", err, out)
 		}
 
-		cmd = exec.Command("git", "checkout", "-b", "gjoll/test-task")
+		cmd = exec.Command("git", "checkout", "-b", "gjoll-test-task")
 		cmd.Dir = localDir
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("checkout: %v\n%s", err, out)
@@ -418,7 +418,7 @@ func TestAddCoAuthorTrailers(t *testing.T) {
 
 		r := New("")
 		trailer := "Co-authored-by: Test Author <test@example.com>"
-		err := r.addCoAuthorTrailers(context.Background(), "git", localDir, upstreamDir, "master", "gjoll/test-task", trailer)
+		err := r.addCoAuthorTrailers(context.Background(), "git", localDir, upstreamDir, "master", "gjoll-test-task", trailer)
 
 		if err != nil {
 			t.Fatalf("addCoAuthorTrailers: %v", err)
@@ -457,7 +457,7 @@ func TestAddCoAuthorTrailers(t *testing.T) {
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("reset: %v\n%s", err, out)
 		}
-		cmd = exec.Command("git", "checkout", "-b", "gjoll/test-task")
+		cmd = exec.Command("git", "checkout", "-b", "gjoll-test-task")
 		cmd.Dir = localDir
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("checkout: %v\n%s", err, out)
@@ -470,7 +470,7 @@ func TestAddCoAuthorTrailers(t *testing.T) {
 		}
 
 		r := New("")
-		err := r.addCoAuthorTrailers(context.Background(), "git", localDir, upstreamDir, "master", "gjoll/test-task", "Co-authored-by: X <x@x.com>")
+		err := r.addCoAuthorTrailers(context.Background(), "git", localDir, upstreamDir, "master", "gjoll-test-task", "Co-authored-by: X <x@x.com>")
 		if err != nil {
 			t.Fatalf("addCoAuthorTrailers with no new commits: %v", err)
 		}

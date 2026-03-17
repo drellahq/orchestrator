@@ -426,8 +426,8 @@ func TestOpenPRTool(t *testing.T) {
 			}
 
 			// Verify sourceRef includes task name
-			if !tt.wantError && tt.opener.gotSource != "gjoll/test-task" {
-				t.Errorf("sourceRef = %q, want %q", tt.opener.gotSource, "gjoll/test-task")
+			if !tt.wantError && tt.opener.gotSource != "gjoll-test-task" {
+				t.Errorf("sourceRef = %q, want %q", tt.opener.gotSource, "gjoll-test-task")
 			}
 
 			if tt.opener.forkCalled != tt.wantForkCalled {
@@ -835,8 +835,8 @@ func TestUpdatePRTool(t *testing.T) {
 			}
 
 			// Verify sourceRef includes task name
-			if !tt.wantError && tt.opener.gotSource != "gjoll/test-task" {
-				t.Errorf("sourceRef = %q, want %q", tt.opener.gotSource, "gjoll/test-task")
+			if !tt.wantError && tt.opener.gotSource != "gjoll-test-task" {
+				t.Errorf("sourceRef = %q, want %q", tt.opener.gotSource, "gjoll-test-task")
 			}
 
 			// When user owns repo, push target should be the upstream itself

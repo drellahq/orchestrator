@@ -126,7 +126,7 @@ orchestrator log -f <task-name>
 
 ```
 <output_dir>/<task-name>/
-  repo/              # Pulled code (git repo with gjoll/<task-name> branch)
+  repo/              # Pulled code (git repo with gjoll-<task-name> branch)
   conversations/     # Claude conversation archive (~/.claude/ from VM)
   transcript.jsonl   # Stream-json transcript of the Claude session
   state.json         # Task metadata and state (name, description, opened PRs)
@@ -161,5 +161,7 @@ go test ./...
 ### Integration test (requires libvirt)
 
 ```bash
-go test -tags integration -v -timeout 10m
+go test -tags integration -v -timeout 30m
 ```
+
+See [HACKING.md](HACKING.md) for detailed setup instructions.
