@@ -20,7 +20,6 @@ func TestBuildRunScript(t *testing.T) {
 			wantContains: []string{
 				"#!/bin/bash",
 				"source ~/.bashrc",
-				"cd ~/project",
 				"--dangerously-skip-permissions",
 				"--output-format stream-json",
 				"--append-system-prompt-file ~/system-prompt.md",
@@ -30,6 +29,7 @@ func TestBuildRunScript(t *testing.T) {
 			wantNotContains: []string{
 				"--continue",
 				"tee -a",
+				"cd ~/project",
 			},
 		},
 		{
