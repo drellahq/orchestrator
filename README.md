@@ -72,6 +72,17 @@ Use `-v` for verbose output including debug logging and model reasoning:
 orchestrator task new -v fix-bug "Fix the nil pointer dereference in handler.go"
 ```
 
+Use `--author` to add a `Co-authored-by` trailer to every PR commit:
+
+```bash
+orchestrator task new --author "Jane Doe <jane@example.com>" fix-bug "Fix the nil pointer dereference"
+```
+
+When set, the orchestrator fetches the upstream base branch before pushing and
+rewrites new commits to include the trailer. Commits that already carry the
+trailer are left unchanged. The flag works with both `open_pr` and `update_pr`
+MCP tools.
+
 To continue a stopped task with a new prompt (resumes the VM and Claude conversation):
 
 ```bash

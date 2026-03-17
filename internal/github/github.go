@@ -68,6 +68,57 @@ func (r *Runner) EnsureFork(ctx context.Context, upstream string) (string, error
 	return user + "/" + parts[1], nil
 }
 
+// AddCoAuthorTrailers fetches the upstream base branch, identifies new commits
+// on sourceRef, and appends the given trailer to each commit that lacks it.
+func (r *Runner) AddCoAuthorTrailers(ctx context.Context, repoDir, upstream, base, sourceRef, trailer string) error {
+	upstreamURL := "https://github.com/" + upstream + ".git"
+	return r.addCoAuthorTrailers(ctx, "git", repoDir, upstreamURL, base, sourceRef, trailer)
+}
+
+func (r *Runner) addCoAuthorTrailers(ctx context.Context, gitBin, repoDir, upstreamURL, base, sourceRef, trailer string) error {
+	// Add upstream remote (or update URL if it exists)
+	if _, err := r.run(ctx, repoDir, gitBin, "remote", "add", "upstream", upstreamURL); err != nil {
+		if _, err := r.run(ctx, repoDir, gitBin, "remote", "set-url", "upstream", upstreamURL); err != nil {
+			return fmt.Errorf("setting upstream remote: %w", err)
+		}
+	}
+
+	// Fetch the base branch from upstream
+	if _, err := r.run(ctx, repoDir, gitBin, "fetch", "upstream", base); err != nil {
+		return fmt.Errorf("fetching upstream %s: %w", base, err)
+	}
+
+	// Check if there are any new commits
+	out, err := r.run(ctx, repoDir, gitBin, "rev-list", "--count", "upstream/"+base+".."+sourceRef)
+	if err != nil {
+		return fmt.Errorf("counting new commits: %w", err)
+	}
+	if strings.TrimSpace(out) == "0" {
+		return nil
+	}
+
+	// Checkout the sourceRef so filter-branch can rewrite it
+	if _, err := r.run(ctx, repoDir, gitBin, "checkout", sourceRef); err != nil {
+		return fmt.Errorf("checking out %s: %w", sourceRef, err)
+	}
+
+	// Use git filter-branch to add the trailer to commits that lack it.
+	// git interpret-trailers --if-exists doNothing skips the trailer if
+	// the commit message already contains one with the same key and value.
+	msgFilter := fmt.Sprintf(`git interpret-trailers --trailer "%s" --if-exists doNothing`, trailer)
+	cmd := exec.CommandContext(ctx, gitBin, "filter-branch", "-f", "--msg-filter", msgFilter, "upstream/"+base+"..HEAD")
+	cmd.Dir = repoDir
+	cmd.Env = append(os.Environ(), "FILTER_BRANCH_SQUELCH_WARNING=1")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("filter-branch: %w\nstderr: %s", err, stderr.String())
+	}
+
+	return nil
+}
+
 // PushBranch creates a named branch from sourceRef in repoDir and pushes it
 // to the fork via the gh credential helper.
 func (r *Runner) PushBranch(ctx context.Context, repoDir, forkFullName, branch, sourceRef string) error {

@@ -22,7 +22,10 @@ import (
 const sandboxName = "orch-integ-test"
 
 // testPROpener implements mcpserver.PROpener for integration testing.
-type testPROpener struct{}
+type testPROpener struct {
+	trailerCalled bool
+	gotTrailer    string
+}
 
 func (t *testPROpener) AuthenticatedUser(_ context.Context) (string, error) {
 	return "testuser", nil
@@ -38,6 +41,12 @@ func (t *testPROpener) PushBranch(_ context.Context, repoDir, forkFullName, bran
 
 func (t *testPROpener) CreatePR(_ context.Context, upstream, forkOwner, branch, base, title, body string) (string, error) {
 	return fmt.Sprintf("https://github.com/%s/pull/1", upstream), nil
+}
+
+func (t *testPROpener) AddCoAuthorTrailers(_ context.Context, repoDir, upstream, base, sourceRef, trailer string) error {
+	t.trailerCalled = true
+	t.gotTrailer = trailer
+	return nil
 }
 
 // testTF returns the path to a minimal .tf file for integration testing.
@@ -205,7 +214,7 @@ func TestIntegration(t *testing.T) {
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	mcpSrv := mcpserver.New(logger, sandboxName, taskDir, runner, &testPROpener{}, []string{"test/*"})
+	mcpSrv := mcpserver.New(logger, sandboxName, taskDir, runner, &testPROpener{}, []string{"test/*"}, "")
 	if err := mcpSrv.Start(); err != nil {
 		t.Fatalf("MCP server start: %v", err)
 	}
@@ -369,4 +378,94 @@ echo "Result: $RESULT"`, remotePort, remotePort, remotePort)
 	tornDown = true
 
 	t.Log("Integration test passed!")
+}
+
+func TestIntegrationWithAuthor(t *testing.T) {
+	ctx := context.Background()
+	runner := gjoll.New("")
+
+	tfPath := testTF(t)
+
+	const authorSandboxName = "orch-integ-author"
+
+	t.Log("Provisioning sandbox for author test...")
+	if err := runner.Up(ctx, authorSandboxName, tfPath); err != nil {
+		t.Fatalf("gjoll up failed: %v", err)
+	}
+
+	tornDown := false
+	t.Cleanup(func() {
+		if tornDown {
+			return
+		}
+		t.Log("Tearing down author test VM...")
+		cmd := exec.Command("gjoll", "down", authorSandboxName)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Logf("cleanup down failed: %v\n%s", err, out)
+		}
+	})
+
+	// Set up git inside the VM
+	t.Log("Setting up git in sandbox...")
+	if err := runner.SSH(ctx, authorSandboxName, "git config --global user.name Test"); err != nil {
+		t.Fatalf("git config user.name: %v", err)
+	}
+	if err := runner.SSH(ctx, authorSandboxName, "git config --global user.email test@test.com"); err != nil {
+		t.Fatalf("git config user.email: %v", err)
+	}
+	if err := runner.SSH(ctx, authorSandboxName, "cd ~ && git init"); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	if err := runner.SSH(ctx, authorSandboxName,
+		"echo 'hello' > ~/hello.txt && cd ~ && git add -A && git commit -m 'test commit'"); err != nil {
+		t.Fatalf("creating test commit: %v", err)
+	}
+
+	// Create task directory and start MCP server with author
+	outputDir := t.TempDir()
+	taskDir, err := task.Create(outputDir, authorSandboxName)
+	if err != nil {
+		t.Fatalf("task.Create: %v", err)
+	}
+
+	prOpener := &testPROpener{}
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	mcpSrv := mcpserver.New(logger, authorSandboxName, taskDir, runner, prOpener, []string{"test/*"}, "Test User <test@example.com>")
+	if err := mcpSrv.Start(); err != nil {
+		t.Fatalf("MCP server start: %v", err)
+	}
+	defer func() { _ = mcpSrv.Stop(ctx) }()
+
+	// Call open_pr via ssh -R tunnel
+	t.Log("Calling open_pr with author from sandbox...")
+	mcpPort := mcpSrv.Port()
+	mcpTunnel := fmt.Sprintf("%d:localhost:%d", mcpserver.MCPRemotePort, mcpPort)
+	remotePort := mcpserver.MCPRemotePort
+	pullScript := fmt.Sprintf(`set -e
+HEADERS=$(curl -s -D - -o /dev/null -X POST http://localhost:%d/ -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"0.1.0"}}}')
+SESSION_ID=$(echo "$HEADERS" | grep -i "mcp-session-id" | tr -d '\r' | awk '{print $2}')
+curl -s -X POST http://localhost:%d/ -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -H "Mcp-Session-Id: $SESSION_ID" -d '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+RESULT=$(curl -s -X POST http://localhost:%d/ -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -H "Mcp-Session-Id: $SESSION_ID" -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"open_pr","arguments":{"path":"~","repo":"test/repo","branch":"author-test","title":"Test","body":"Test"}}}')
+echo "Result: $RESULT"`, remotePort, remotePort, remotePort)
+	if err := runner.SSHProxy(ctx, authorSandboxName, &gjoll.SSHOpts{ReverseTunnels: []string{mcpTunnel}}, pullScript); err != nil {
+		t.Fatalf("open_pr via ssh -R: %v", err)
+	}
+
+	// Verify AddCoAuthorTrailers was called
+	if !prOpener.trailerCalled {
+		t.Error("AddCoAuthorTrailers was not called")
+	}
+	wantTrailer := "Co-authored-by: Test User <test@example.com>"
+	if prOpener.gotTrailer != wantTrailer {
+		t.Errorf("trailer = %q, want %q", prOpener.gotTrailer, wantTrailer)
+	}
+
+	// Tear down
+	t.Log("Tearing down author test sandbox...")
+	if err := runner.Down(ctx, authorSandboxName); err != nil {
+		t.Fatalf("gjoll down: %v", err)
+	}
+	tornDown = true
+
+	t.Log("Author integration test passed!")
 }

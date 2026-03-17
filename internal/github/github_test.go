@@ -248,6 +248,235 @@ func TestPushBranch(t *testing.T) {
 	}
 }
 
+// initGitRepo creates a git repo in dir with an initial commit, returning
+// the path. Useful for testing operations that need real git state.
+func initGitRepo(t *testing.T, dir string) {
+	t.Helper()
+	for _, args := range [][]string{
+		{"init"},
+		{"config", "user.name", "Test"},
+		{"config", "user.email", "test@test.com"},
+		{"commit", "--allow-empty", "-m", "Initial commit"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+}
+
+// addCommit creates a commit in the given repo.
+func addCommit(t *testing.T, dir, message string) {
+	t.Helper()
+	cmd := exec.Command("git", "commit", "--allow-empty", "-m", message)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v\n%s", err, out)
+	}
+}
+
+// gitLog returns commit messages for the given range.
+func gitLog(t *testing.T, dir, rangeSpec string) []string {
+	t.Helper()
+	cmd := exec.Command("git", "log", "--format=%B%x00", rangeSpec)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git log %s: %v\n%s", rangeSpec, err, out)
+	}
+	raw := strings.TrimSpace(string(out))
+	if raw == "" {
+		return nil
+	}
+	var msgs []string
+	for _, msg := range strings.Split(raw, "\x00") {
+		msg = strings.TrimSpace(msg)
+		if msg != "" {
+			msgs = append(msgs, msg)
+		}
+	}
+	return msgs
+}
+
+func TestAddCoAuthorTrailers(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not found")
+	}
+
+	t.Run("adds trailer to new commits", func(t *testing.T) {
+		// Set up an "upstream" repo with a base branch
+		upstreamDir := t.TempDir()
+		initGitRepo(t, upstreamDir)
+		addCommit(t, upstreamDir, "upstream commit 1")
+		addCommit(t, upstreamDir, "upstream commit 2")
+
+		// Set up a "local" repo that clones from upstream
+		localDir := t.TempDir()
+		initGitRepo(t, localDir)
+
+		// Add upstream remote and fetch
+		cmd := exec.Command("git", "remote", "add", "upstream", upstreamDir)
+		cmd.Dir = localDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("remote add: %v\n%s", err, out)
+		}
+		cmd = exec.Command("git", "fetch", "upstream", "master")
+		cmd.Dir = localDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("fetch: %v\n%s", err, out)
+		}
+
+		// Reset local to upstream/master
+		cmd = exec.Command("git", "reset", "--hard", "upstream/master")
+		cmd.Dir = localDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("reset: %v\n%s", err, out)
+		}
+
+		// Create a source branch with new commits
+		cmd = exec.Command("git", "checkout", "-b", "gjoll/test-task")
+		cmd.Dir = localDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("checkout: %v\n%s", err, out)
+		}
+		addCommit(t, localDir, "new commit 1")
+		addCommit(t, localDir, "new commit 2")
+
+		// Remove the upstream remote so addCoAuthorTrailers re-adds it
+		cmd = exec.Command("git", "remote", "remove", "upstream")
+		cmd.Dir = localDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("remote remove: %v\n%s", err, out)
+		}
+
+		r := New("")
+		trailer := "Co-authored-by: Test Author <test@example.com>"
+		err := r.addCoAuthorTrailers(context.Background(), "git", localDir, upstreamDir, "master", "gjoll/test-task", trailer)
+
+		if err != nil {
+			t.Fatalf("addCoAuthorTrailers: %v", err)
+		}
+
+		// Verify trailers were added to new commits
+		msgs := gitLog(t, localDir, "upstream/master..HEAD")
+		if len(msgs) != 2 {
+			t.Fatalf("expected 2 new commits, got %d: %v", len(msgs), msgs)
+		}
+		for i, msg := range msgs {
+			if !strings.Contains(msg, trailer) {
+				t.Errorf("commit %d missing trailer: %q", i, msg)
+			}
+		}
+
+		// Verify upstream commits are untouched
+		upstreamMsgs := gitLog(t, localDir, "upstream/master")
+		for _, msg := range upstreamMsgs {
+			if strings.Contains(msg, "Co-authored-by") {
+				t.Errorf("upstream commit should not have trailer: %q", msg)
+			}
+		}
+	})
+
+	t.Run("idempotent - does not duplicate trailers", func(t *testing.T) {
+		upstreamDir := t.TempDir()
+		initGitRepo(t, upstreamDir)
+
+		localDir := t.TempDir()
+		initGitRepo(t, localDir)
+
+		cmd := exec.Command("git", "remote", "add", "upstream", upstreamDir)
+		cmd.Dir = localDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("remote add: %v\n%s", err, out)
+		}
+		cmd = exec.Command("git", "fetch", "upstream", "master")
+		cmd.Dir = localDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("fetch: %v\n%s", err, out)
+		}
+		cmd = exec.Command("git", "reset", "--hard", "upstream/master")
+		cmd.Dir = localDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("reset: %v\n%s", err, out)
+		}
+
+		cmd = exec.Command("git", "checkout", "-b", "gjoll/test-task")
+		cmd.Dir = localDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("checkout: %v\n%s", err, out)
+		}
+
+		// Create a commit that already has the trailer
+		addCommit(t, localDir, "already traced\n\nCo-authored-by: Test Author <test@example.com>")
+
+		cmd = exec.Command("git", "remote", "remove", "upstream")
+		cmd.Dir = localDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("remote remove: %v\n%s", err, out)
+		}
+
+		r := New("")
+		trailer := "Co-authored-by: Test Author <test@example.com>"
+		err := r.addCoAuthorTrailers(context.Background(), "git", localDir, upstreamDir, "master", "gjoll/test-task", trailer)
+
+		if err != nil {
+			t.Fatalf("addCoAuthorTrailers: %v", err)
+		}
+
+		msgs := gitLog(t, localDir, "upstream/master..HEAD")
+		if len(msgs) != 1 {
+			t.Fatalf("expected 1 commit, got %d", len(msgs))
+		}
+		// Count occurrences of the trailer
+		count := strings.Count(msgs[0], "Co-authored-by: Test Author")
+		if count != 1 {
+			t.Errorf("trailer appears %d times, want 1: %q", count, msgs[0])
+		}
+	})
+
+	t.Run("no new commits is a no-op", func(t *testing.T) {
+		upstreamDir := t.TempDir()
+		initGitRepo(t, upstreamDir)
+
+		localDir := t.TempDir()
+		initGitRepo(t, localDir)
+
+		cmd := exec.Command("git", "remote", "add", "upstream", upstreamDir)
+		cmd.Dir = localDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("remote add: %v\n%s", err, out)
+		}
+		cmd = exec.Command("git", "fetch", "upstream", "master")
+		cmd.Dir = localDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("fetch: %v\n%s", err, out)
+		}
+		cmd = exec.Command("git", "reset", "--hard", "upstream/master")
+		cmd.Dir = localDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("reset: %v\n%s", err, out)
+		}
+		cmd = exec.Command("git", "checkout", "-b", "gjoll/test-task")
+		cmd.Dir = localDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("checkout: %v\n%s", err, out)
+		}
+
+		cmd = exec.Command("git", "remote", "remove", "upstream")
+		cmd.Dir = localDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("remote remove: %v\n%s", err, out)
+		}
+
+		r := New("")
+		err := r.addCoAuthorTrailers(context.Background(), "git", localDir, upstreamDir, "master", "gjoll/test-task", "Co-authored-by: X <x@x.com>")
+		if err != nil {
+			t.Fatalf("addCoAuthorTrailers with no new commits: %v", err)
+		}
+	})
+}
+
 func equalArgs(got, want []string) bool {
 	if len(got) != len(want) {
 		return false
