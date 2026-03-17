@@ -25,6 +25,9 @@ const sandboxName = "orch-integ-test"
 type testPROpener struct {
 	trailerCalled bool
 	gotTrailer    string
+
+	lastCommentURL  string
+	lastCommentBody string
 }
 
 func (t *testPROpener) AuthenticatedUser(_ context.Context) (string, error) {
@@ -46,6 +49,12 @@ func (t *testPROpener) CreatePR(_ context.Context, upstream, forkOwner, branch, 
 func (t *testPROpener) AddCoAuthorTrailers(_ context.Context, repoDir, upstream, base, sourceRef, trailer string) error {
 	t.trailerCalled = true
 	t.gotTrailer = trailer
+	return nil
+}
+
+func (t *testPROpener) CommentOnPR(_ context.Context, prURL, body string) error {
+	t.lastCommentURL = prURL
+	t.lastCommentBody = body
 	return nil
 }
 
@@ -214,7 +223,8 @@ func TestIntegration(t *testing.T) {
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	mcpSrv := mcpserver.New(logger, sandboxName, taskDir, runner, &testPROpener{}, []string{"test/*"}, "")
+	prOpener := &testPROpener{}
+	mcpSrv := mcpserver.New(logger, sandboxName, taskDir, runner, prOpener, []string{"test/*"}, "")
 	if err := mcpSrv.Start(); err != nil {
 		t.Fatalf("MCP server start: %v", err)
 	}
@@ -288,6 +298,40 @@ echo "Result: $RESULT"`, remotePort, remotePort, remotePort)
 	}
 	if pr.Base != "main" {
 		t.Errorf("PR Base = %q, want %q", pr.Base, "main")
+	}
+
+	// 6b. Test comment_on_pr from inside the VM
+	t.Log("Calling comment_on_pr from sandbox via ssh -R tunnel...")
+	commentScript := fmt.Sprintf(`set -e
+HEADERS=$(curl -s -D - -o /dev/null -X POST http://localhost:%d/ -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"0.1.0"}}}')
+SESSION_ID=$(echo "$HEADERS" | grep -i "mcp-session-id" | tr -d '\r' | awk '{print $2}')
+echo "Session ID: $SESSION_ID"
+curl -s -X POST http://localhost:%d/ -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -H "Mcp-Session-Id: $SESSION_ID" -d '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+RESULT=$(curl -s -X POST http://localhost:%d/ -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -H "Mcp-Session-Id: $SESSION_ID" -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"comment_on_pr","arguments":{"pr_url":"https://github.com/test/repo/pull/1","body":"Pushed updated code"}}}')
+echo "Result: $RESULT"`, remotePort, remotePort, remotePort)
+	if err := runner.SSHProxy(ctx, sandboxName, &gjoll.SSHOpts{ReverseTunnels: []string{mcpTunnel}}, commentScript); err != nil {
+		t.Fatalf("comment_on_pr via ssh -R: %v", err)
+	}
+
+	// Verify the comment was dispatched to the PROpener
+	if prOpener.lastCommentURL != "https://github.com/test/repo/pull/1" {
+		t.Errorf("comment URL = %q, want %q", prOpener.lastCommentURL, "https://github.com/test/repo/pull/1")
+	}
+	if prOpener.lastCommentBody != "Pushed updated code" {
+		t.Errorf("comment body = %q, want %q", prOpener.lastCommentBody, "Pushed updated code")
+	}
+
+	// 6c. Verify comment_on_pr rejects unowned PRs
+	t.Log("Verifying comment_on_pr rejects unowned PRs...")
+	rejectScript := fmt.Sprintf(`set -e
+HEADERS=$(curl -s -D - -o /dev/null -X POST http://localhost:%d/ -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"0.1.0"}}}')
+SESSION_ID=$(echo "$HEADERS" | grep -i "mcp-session-id" | tr -d '\r' | awk '{print $2}')
+curl -s -X POST http://localhost:%d/ -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -H "Mcp-Session-Id: $SESSION_ID" -d '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+RESULT=$(curl -s -X POST http://localhost:%d/ -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -H "Mcp-Session-Id: $SESSION_ID" -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"comment_on_pr","arguments":{"pr_url":"https://github.com/evil/repo/pull/99","body":"sneaky"}}}')
+echo "Result: $RESULT"
+echo "$RESULT" | grep -q "was not opened by this task"`, remotePort, remotePort, remotePort)
+	if err := runner.SSHProxy(ctx, sandboxName, &gjoll.SSHOpts{ReverseTunnels: []string{mcpTunnel}}, rejectScript); err != nil {
+		t.Fatalf("comment_on_pr rejection test via ssh -R: %v", err)
 	}
 
 	// 7. Test transcript streaming via SSHProxyOutput
