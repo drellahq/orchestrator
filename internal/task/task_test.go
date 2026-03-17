@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -146,7 +147,7 @@ func TestSaveMetadata(t *testing.T) {
 	}
 
 	now := time.Now().Truncate(time.Second)
-	if err := td.SaveMetadata("meta-test", "test task description", now); err != nil {
+	if err := td.SaveMetadata("meta-test", "test task description", "", now); err != nil {
 		t.Fatalf("SaveMetadata() error: %v", err)
 	}
 
@@ -166,6 +167,59 @@ func TestSaveMetadata(t *testing.T) {
 	}
 }
 
+func TestSaveMetadataWithAuthor(t *testing.T) {
+	outputDir := t.TempDir()
+	td, err := Create(outputDir, "author-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now().Truncate(time.Second)
+	if err := td.SaveMetadata("author-test", "test task", "Jane Doe <jane@example.com>", now); err != nil {
+		t.Fatalf("SaveMetadata() error: %v", err)
+	}
+
+	s, err := td.LoadState()
+	if err != nil {
+		t.Fatalf("LoadState() error: %v", err)
+	}
+
+	if s.Author != "Jane Doe <jane@example.com>" {
+		t.Errorf("Author = %q, want %q", s.Author, "Jane Doe <jane@example.com>")
+	}
+}
+
+func TestSaveMetadataEmptyAuthor(t *testing.T) {
+	outputDir := t.TempDir()
+	td, err := Create(outputDir, "no-author-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now().Truncate(time.Second)
+	if err := td.SaveMetadata("no-author-test", "test task", "", now); err != nil {
+		t.Fatalf("SaveMetadata() error: %v", err)
+	}
+
+	s, err := td.LoadState()
+	if err != nil {
+		t.Fatalf("LoadState() error: %v", err)
+	}
+
+	if s.Author != "" {
+		t.Errorf("Author = %q, want empty string", s.Author)
+	}
+
+	// Verify omitempty: author key should not appear in JSON
+	data, err := os.ReadFile(filepath.Join(outputDir, "no-author-test", "state.json"))
+	if err != nil {
+		t.Fatalf("reading state.json: %v", err)
+	}
+	if strings.Contains(string(data), `"author"`) {
+		t.Errorf("state.json should omit empty author, got: %s", data)
+	}
+}
+
 func TestSaveMetadataPreservesExistingState(t *testing.T) {
 	outputDir := t.TempDir()
 	td, err := Create(outputDir, "preserve-test")
@@ -181,7 +235,7 @@ func TestSaveMetadataPreservesExistingState(t *testing.T) {
 
 	// Save metadata — should preserve the PR
 	now := time.Now().Truncate(time.Second)
-	if err := td.SaveMetadata("preserve-test", "desc", now); err != nil {
+	if err := td.SaveMetadata("preserve-test", "desc", "", now); err != nil {
 		t.Fatalf("SaveMetadata() error: %v", err)
 	}
 

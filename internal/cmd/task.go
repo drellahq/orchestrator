@@ -50,7 +50,6 @@ with --continue to resume the previous conversation with a new prompt.`,
 
 func init() {
 	taskNewCmd.Flags().StringVar(&author, "author", "", "co-author to add to PR commits (e.g. \"Jane Doe <jane@example.com>\")")
-	taskContinueCmd.Flags().StringVar(&author, "author", "", "co-author to add to PR commits (e.g. \"Jane Doe <jane@example.com>\")")
 	taskCmd.AddCommand(taskNewCmd)
 	taskCmd.AddCommand(taskContinueCmd)
 }
@@ -76,7 +75,7 @@ func runTask(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("creating task directory: %w", err)
 	}
 
-	if err := taskDir.SaveMetadata(taskName, taskDescription, time.Now()); err != nil {
+	if err := taskDir.SaveMetadata(taskName, taskDescription, author, time.Now()); err != nil {
 		return fmt.Errorf("saving metadata: %w", err)
 	}
 
@@ -104,7 +103,12 @@ func continueTask(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("opening task directory: %w", err)
 	}
 
-	return executeTask(ctx, taskName, taskDescription, taskDir, cfg, ghRunner, true, author)
+	state, err := taskDir.LoadState()
+	if err != nil {
+		return fmt.Errorf("loading task state: %w", err)
+	}
+
+	return executeTask(ctx, taskName, taskDescription, taskDir, cfg, ghRunner, true, state.Author)
 }
 
 func loadConfigAndSetupLogging() (*config.Config, error) {
