@@ -153,6 +153,15 @@ func New(logger *slog.Logger, taskName string, taskDir *task.Dir, puller CodePul
 				}, nil, nil
 			}
 
+			if err := taskDir.AddPR(task.PR{
+				URL:    prURL,
+				Repo:   input.Repo,
+				Branch: input.Branch,
+				Base:   input.Base,
+			}); err != nil {
+				logger.Warn("Failed to record PR in task state", "task", taskName, "error", err)
+			}
+
 			logger.Info("PR created", "task", taskName, "url", prURL, "repo", input.Repo)
 			return &mcp.CallToolResult{
 				Content: []mcp.Content{

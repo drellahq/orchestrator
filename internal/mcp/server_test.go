@@ -360,7 +360,7 @@ func TestOpenPRTool(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, _, endpoint := startTestServer(t, tt.puller, tt.opener, tt.allowedRepos)
+			td, _, endpoint := startTestServer(t, tt.puller, tt.opener, tt.allowedRepos)
 			session := connectClient(t, endpoint)
 
 			result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
@@ -409,6 +409,31 @@ func TestOpenPRTool(t *testing.T) {
 			// When user owns repo, push target should be the upstream itself
 			if tt.name == "user owns repo skips fork" && tt.opener.gotForkName != "osbuild/osbuild" {
 				t.Errorf("pushTarget = %q, want %q", tt.opener.gotForkName, "osbuild/osbuild")
+			}
+
+			// Verify PR was recorded in task state on success
+			state, stateErr := td.LoadState()
+			if stateErr != nil {
+				t.Fatalf("LoadState() error: %v", stateErr)
+			}
+			if tt.wantError {
+				if len(state.Resources.GitHub.PRs) != 0 {
+					t.Errorf("expected no PRs on error, got %d", len(state.Resources.GitHub.PRs))
+				}
+			} else {
+				if len(state.Resources.GitHub.PRs) != 1 {
+					t.Fatalf("expected 1 PR, got %d", len(state.Resources.GitHub.PRs))
+				}
+				pr := state.Resources.GitHub.PRs[0]
+				if pr.URL != tt.wantText {
+					t.Errorf("PR URL = %q, want %q", pr.URL, tt.wantText)
+				}
+				if pr.Repo != tt.input["repo"] {
+					t.Errorf("PR Repo = %q, want %q", pr.Repo, tt.input["repo"])
+				}
+				if pr.Branch != tt.input["branch"] {
+					t.Errorf("PR Branch = %q, want %q", pr.Branch, tt.input["branch"])
+				}
 			}
 		})
 	}
