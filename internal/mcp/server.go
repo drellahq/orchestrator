@@ -144,7 +144,7 @@ func New(logger *slog.Logger, taskName string, taskDir *task.Dir, puller CodePul
 				input.Base = "main"
 			}
 
-			sourceRef := "gjoll/" + taskName
+			sourceRef := "gjoll-" + taskName
 
 			if author != "" {
 				trailer := fmt.Sprintf("Co-authored-by: %s", author)
@@ -234,7 +234,7 @@ func New(logger *slog.Logger, taskName string, taskDir *task.Dir, puller CodePul
 				}, nil, nil
 			}
 
-			sourceRef := "gjoll/" + taskName
+			sourceRef := "gjoll-" + taskName
 
 			if author != "" {
 				base := baseBranchForPR(taskDir, input.Repo, input.Branch)

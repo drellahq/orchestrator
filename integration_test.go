@@ -261,7 +261,7 @@ echo "Result: $RESULT"`, remotePort, remotePort, remotePort)
 	}
 	t.Logf("Branches: %s", branchOut)
 
-	expectedBranch := fmt.Sprintf("gjoll/%s", sandboxName)
+	expectedBranch := fmt.Sprintf("gjoll-%s", sandboxName)
 	if !strings.Contains(string(branchOut), expectedBranch) {
 		t.Errorf("expected branch %q not found in:\n%s", expectedBranch, branchOut)
 	}
