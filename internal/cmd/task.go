@@ -200,22 +200,7 @@ func executeTask(ctx context.Context, taskName, taskDescription string, taskDir 
 
 	// Build the Claude run script
 	slog.Info("Running Claude", "task", taskName)
-	escapedDesc := strings.ReplaceAll(taskDescription, "'", "'\\''")
-
-	var claudeFlags string
-	var teeFlag string
-	if continueSession {
-		claudeFlags = "--continue"
-		teeFlag = "-a"
-	}
-
-	runScript := fmt.Sprintf(`#!/bin/bash
-source ~/.bashrc
-cd ~/project
-stdbuf -oL claude --dangerously-skip-permissions -p --verbose \
-  --output-format stream-json %s '%s' \
-  </dev/null | stdbuf -oL tee %s ~/transcript.jsonl
-`, claudeFlags, escapedDesc, teeFlag)
+	runScript := buildRunScript(taskDescription, continueSession)
 
 	tmpRun, err := os.CreateTemp("", "run-claude-*.sh")
 	if err != nil {
@@ -251,6 +236,26 @@ stdbuf -oL claude --dangerously-skip-permissions -p --verbose \
 	return nil
 }
 
+func buildRunScript(taskDescription string, continueSession bool) string {
+	escapedDesc := strings.ReplaceAll(taskDescription, "'", "'\\''")
+
+	var claudeFlags string
+	var teeFlag string
+	if continueSession {
+		claudeFlags = "--continue"
+		teeFlag = "-a"
+	}
+
+	return fmt.Sprintf(`#!/bin/bash
+source ~/.bashrc
+cd ~/project
+stdbuf -oL claude --dangerously-skip-permissions -p --verbose \
+  --output-format stream-json --append-system-prompt-file ~/system-prompt.md \
+  %s '%s' \
+  </dev/null | stdbuf -oL tee %s ~/transcript.jsonl
+`, claudeFlags, escapedDesc, teeFlag)
+}
+
 func setupSandbox(ctx context.Context, runner *gjoll.Runner, taskName string) error {
 	// Configure git
 	if err := runner.SSH(ctx, taskName, "git config --global user.name Drellabot"); err != nil {
@@ -265,7 +270,7 @@ func setupSandbox(ctx context.Context, runner *gjoll.Runner, taskName string) er
 		return fmt.Errorf("git init: %w", err)
 	}
 
-	// Write CLAUDE.md to a temp file and copy it to the sandbox
+	// Write system prompt to a temp file and copy it to the sandbox
 	tmpFile, err := os.CreateTemp("", "prompt-*.md")
 	if err != nil {
 		return fmt.Errorf("creating temp file: %w", err)
@@ -278,12 +283,12 @@ func setupSandbox(ctx context.Context, runner *gjoll.Runner, taskName string) er
 	}
 	tmpFile.Close()
 
-	if err := runner.Cp(ctx, taskName, tmpFile.Name(), ":~/project/CLAUDE.md"); err != nil {
-		return fmt.Errorf("copying CLAUDE.md: %w", err)
+	if err := runner.Cp(ctx, taskName, tmpFile.Name(), ":~/system-prompt.md"); err != nil {
+		return fmt.Errorf("copying system prompt: %w", err)
 	}
 
-	// Initial commit
-	if err := runner.SSH(ctx, taskName, "cd ~/project && git add -A && git commit -m 'Initial setup'"); err != nil {
+	// Initial commit so the repo starts clean
+	if err := runner.SSH(ctx, taskName, "cd ~/project && git commit --allow-empty -m 'Initial setup'"); err != nil {
 		return fmt.Errorf("initial commit: %w", err)
 	}
 
