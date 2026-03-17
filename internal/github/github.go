@@ -172,6 +172,15 @@ func (r *Runner) CreatePR(ctx context.Context, upstream, forkOwner, branch, base
 	return strings.TrimSpace(out), nil
 }
 
+// CommentOnPR posts a comment on a pull request identified by its URL.
+func (r *Runner) CommentOnPR(ctx context.Context, prURL, body string) error {
+	_, err := r.run(ctx, "", r.bin, "pr", "comment", prURL, "--body", body)
+	if err != nil {
+		return fmt.Errorf("commenting on PR: %w", err)
+	}
+	return nil
+}
+
 func (r *Runner) run(ctx context.Context, dir, name string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	if dir != "" {

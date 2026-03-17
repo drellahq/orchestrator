@@ -30,6 +30,7 @@ type PROpener interface {
 	PushBranch(ctx context.Context, repoDir, forkFullName, branch, sourceRef string) error
 	CreatePR(ctx context.Context, upstream, forkOwner, branch, base, title, body string) (string, error)
 	AddCoAuthorTrailers(ctx context.Context, repoDir, upstream, base, sourceRef, trailer string) error
+	CommentOnPR(ctx context.Context, prURL, body string) error
 }
 
 // OpenPRInput is the input schema for the open_pr tool.
@@ -47,6 +48,12 @@ type UpdatePRInput struct {
 	Path   string `json:"path" jsonschema_description:"Absolute path to the git repo in the sandbox"`
 	Repo   string `json:"repo" jsonschema_description:"Target repository as owner/repo (e.g. osbuild/osbuild)"`
 	Branch string `json:"branch" jsonschema_description:"Branch name to push (must match the existing PR branch)"`
+}
+
+// CommentOnPRInput is the input schema for the comment_on_pr tool.
+type CommentOnPRInput struct {
+	PRURL string `json:"pr_url" jsonschema_description:"URL of the pull request to comment on (must be a PR opened by this task)"`
+	Body  string `json:"body" jsonschema_description:"Comment body (markdown supported)"`
 }
 
 // Server wraps an MCP server that exposes tools for sandbox operations.
@@ -268,6 +275,58 @@ func New(logger *slog.Logger, taskName string, taskDir *task.Dir, puller CodePul
 			return &mcp.CallToolResult{
 				Content: []mcp.Content{
 					&mcp.TextContent{Text: fmt.Sprintf("Branch %s updated on %s", input.Branch, pushTarget)},
+				},
+			}, nil, nil
+		})
+
+		mcp.AddTool(mcpServer, &mcp.Tool{
+			Name:        "comment_on_pr",
+			Description: "Post a comment on a pull request opened by this task",
+		}, func(ctx context.Context, req *mcp.CallToolRequest, input *CommentOnPRInput) (*mcp.CallToolResult, any, error) {
+			logger.Info("PR comment requested", "task", taskName, "pr_url", input.PRURL)
+
+			state, err := taskDir.LoadState()
+			if err != nil {
+				logger.Error("Failed to load task state", "task", taskName, "error", err)
+				return &mcp.CallToolResult{
+					Content: []mcp.Content{
+						&mcp.TextContent{Text: fmt.Sprintf("comment_on_pr failed: %v", err)},
+					},
+					IsError: true,
+				}, nil, nil
+			}
+
+			found := false
+			for _, pr := range state.Resources.GitHub.PRs {
+				if pr.URL == input.PRURL {
+					found = true
+					break
+				}
+			}
+			if !found {
+				logger.Warn("PR comment denied: PR not owned by task", "task", taskName, "pr_url", input.PRURL)
+				return &mcp.CallToolResult{
+					Content: []mcp.Content{
+						&mcp.TextContent{Text: fmt.Sprintf("PR %q was not opened by this task", input.PRURL)},
+					},
+					IsError: true,
+				}, nil, nil
+			}
+
+			if err := prOpener.CommentOnPR(ctx, input.PRURL, input.Body); err != nil {
+				logger.Error("Failed to comment on PR", "task", taskName, "error", err)
+				return &mcp.CallToolResult{
+					Content: []mcp.Content{
+						&mcp.TextContent{Text: fmt.Sprintf("comment_on_pr failed: %v", err)},
+					},
+					IsError: true,
+				}, nil, nil
+			}
+
+			logger.Info("PR comment posted", "task", taskName, "pr_url", input.PRURL)
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{
+					&mcp.TextContent{Text: fmt.Sprintf("Comment posted on %s", input.PRURL)},
 				},
 			}, nil, nil
 		})

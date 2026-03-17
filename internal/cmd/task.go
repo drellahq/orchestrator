@@ -121,12 +121,12 @@ func loadConfigAndSetupLogging() (*config.Config, error) {
 
 func logPreflightWarnings(ctx context.Context, cfg *config.Config) *gh.Runner {
 	if len(cfg.AllowedRepos) == 0 {
-		slog.Warn("allowed_repos is empty; open_pr and update_pr tools will not be available")
+		slog.Warn("allowed_repos is empty; open_pr, update_pr, and comment_on_pr tools will not be available")
 	}
 
 	ghRunner := gh.New("")
 	if _, err := ghRunner.AuthenticatedUser(ctx); err != nil {
-		slog.Warn("GitHub CLI not authenticated; open_pr and update_pr tools will not be available", "error", err)
+		slog.Warn("GitHub CLI not authenticated; open_pr, update_pr, and comment_on_pr tools will not be available", "error", err)
 	}
 
 	return ghRunner

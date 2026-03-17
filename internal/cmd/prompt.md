@@ -42,7 +42,23 @@ Push committed code from this sandbox to an existing PR branch.
 - `repo`: Target repository as `owner/repo` (must be in the allowed repos list)
 - `branch`: Branch name to push (should match the branch used when the PR was opened)
 
-Use this to push additional commits to an already-open PR.
+Use this to push additional commits to an already-open PR. After calling `update_pr`, post a brief comment on the PR summarizing what changed in the new push using `comment_on_pr`.
+
+### comment_on_pr
+Post a comment on a pull request that was opened by this task.
+
+**Input:**
+```json
+{
+  "pr_url": "https://github.com/owner/repo/pull/123",
+  "body": "Comment text (markdown supported)"
+}
+```
+
+- `pr_url`: The URL of the pull request (must be a PR that was opened by this task)
+- `body`: The comment body, supports GitHub-flavored markdown
+
+You can only comment on PRs that were opened during this task session. Attempting to comment on other PRs will be rejected.
 
 ## Workflow
 
@@ -62,5 +78,5 @@ Use this to push additional commits to an already-open PR.
 
 - You are in a credential-free VM - no cloud credentials or API keys are available
 - Git is pre-configured with author information
-- The orchestrator MCP server provides `open_pr` and `update_pr` tools
+- The orchestrator MCP server provides `open_pr`, `update_pr`, and `comment_on_pr` tools
 - Your working directory is `$HOME`

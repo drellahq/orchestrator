@@ -54,6 +54,11 @@ type stubPROpener struct {
 	trailerCalled bool
 	gotTrailer    string
 	gotTrailerBase string
+
+	commentErr    error
+	commentCalled bool
+	gotCommentURL string
+	gotCommentBody string
 }
 
 func (s *stubPROpener) AuthenticatedUser(_ context.Context) (string, error) {
@@ -85,6 +90,13 @@ func (s *stubPROpener) AddCoAuthorTrailers(_ context.Context, repoDir, upstream,
 	s.gotTrailer = trailer
 	s.gotTrailerBase = base
 	return s.trailerErr
+}
+
+func (s *stubPROpener) CommentOnPR(_ context.Context, prURL, body string) error {
+	s.commentCalled = true
+	s.gotCommentURL = prURL
+	s.gotCommentBody = body
+	return s.commentErr
 }
 
 func startTestServer(t *testing.T, puller CodePuller, prOpener PROpener, allowedRepos []string, authors ...string) (*task.Dir, *Server, string) {
@@ -171,7 +183,7 @@ func TestServerListTools(t *testing.T) {
 		t.Fatalf("ListTools() error: %v", err)
 	}
 
-	wantTools := map[string]bool{"open_pr": false, "update_pr": false}
+	wantTools := map[string]bool{"open_pr": false, "update_pr": false, "comment_on_pr": false}
 	for _, tool := range result.Tools {
 		if _, ok := wantTools[tool.Name]; ok {
 			wantTools[tool.Name] = true
@@ -830,6 +842,107 @@ func TestUpdatePRTool(t *testing.T) {
 			// When user owns repo, push target should be the upstream itself
 			if tt.name == "user owns repo skips fork" && tt.opener.gotForkName != "osbuild/osbuild" {
 				t.Errorf("pushTarget = %q, want %q", tt.opener.gotForkName, "osbuild/osbuild")
+			}
+		})
+	}
+}
+
+func TestCommentOnPRTool(t *testing.T) {
+	const ownedPRURL = "https://github.com/osbuild/osbuild/pull/42"
+
+	tests := []struct {
+		name             string
+		opener           *stubPROpener
+		seedPR           bool // whether to add a PR to task state before calling
+		input            map[string]any
+		wantError        bool
+		wantText         string
+		wantCommentCalled bool
+	}{
+		{
+			name:   "successful comment on owned PR",
+			opener: &stubPROpener{user: "testuser"},
+			seedPR: true,
+			input: map[string]any{
+				"pr_url": ownedPRURL,
+				"body":   "Pushed new changes: updated tests",
+			},
+			wantText:          "Comment posted on",
+			wantCommentCalled: true,
+		},
+		{
+			name:   "rejected for unowned PR",
+			opener: &stubPROpener{user: "testuser"},
+			seedPR: false,
+			input: map[string]any{
+				"pr_url": "https://github.com/other/repo/pull/99",
+				"body":   "sneaky comment",
+			},
+			wantError:         true,
+			wantText:          "was not opened by this task",
+			wantCommentCalled: false,
+		},
+		{
+			name:   "gh comment failure",
+			opener: &stubPROpener{user: "testuser", commentErr: fmt.Errorf("forbidden")},
+			seedPR: true,
+			input: map[string]any{
+				"pr_url": ownedPRURL,
+				"body":   "test comment",
+			},
+			wantError:         true,
+			wantText:          "forbidden",
+			wantCommentCalled: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			td, _, endpoint := startTestServer(t, &stubPuller{}, tt.opener, []string{"osbuild/*"})
+
+			if tt.seedPR {
+				if err := td.AddPR(task.PR{
+					URL:    ownedPRURL,
+					Repo:   "osbuild/osbuild",
+					Branch: "fix-bug",
+					Base:   "main",
+				}); err != nil {
+					t.Fatalf("AddPR() error: %v", err)
+				}
+			}
+
+			session := connectClient(t, endpoint)
+			result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+				Name:      "comment_on_pr",
+				Arguments: tt.input,
+			})
+			if err != nil {
+				t.Fatalf("CallTool() protocol error: %v", err)
+			}
+
+			if result.IsError != tt.wantError {
+				t.Errorf("IsError = %v, want %v", result.IsError, tt.wantError)
+			}
+
+			var text string
+			for _, c := range result.Content {
+				if tc, ok := c.(*mcp.TextContent); ok {
+					text = tc.Text
+				}
+			}
+			if !strings.Contains(text, tt.wantText) {
+				t.Errorf("result text %q does not contain %q", text, tt.wantText)
+			}
+
+			if tt.opener.commentCalled != tt.wantCommentCalled {
+				t.Errorf("commentCalled = %v, want %v", tt.opener.commentCalled, tt.wantCommentCalled)
+			}
+
+			if tt.wantCommentCalled && tt.opener.gotCommentURL != tt.input["pr_url"] {
+				t.Errorf("gotCommentURL = %q, want %q", tt.opener.gotCommentURL, tt.input["pr_url"])
+			}
+			if tt.wantCommentCalled && tt.opener.gotCommentBody != tt.input["body"] {
+				t.Errorf("gotCommentBody = %q, want %q", tt.opener.gotCommentBody, tt.input["body"])
 			}
 		})
 	}
