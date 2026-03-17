@@ -33,6 +33,7 @@ type State struct {
 	Name        string    `json:"name"`
 	Description string    `json:"description"`
 	CreatedAt   time.Time `json:"created_at"`
+	Author      string    `json:"author,omitempty"`
 	Resources   Resources `json:"resources"`
 }
 
@@ -126,7 +127,7 @@ func (d *Dir) saveStateLocked(s *State) error {
 }
 
 // SaveMetadata writes task metadata to state.json.
-func (d *Dir) SaveMetadata(name, description string, createdAt time.Time) error {
+func (d *Dir) SaveMetadata(name, description, author string, createdAt time.Time) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -136,6 +137,7 @@ func (d *Dir) SaveMetadata(name, description string, createdAt time.Time) error 
 	}
 	s.Name = name
 	s.Description = description
+	s.Author = author
 	s.CreatedAt = createdAt
 	return d.saveStateLocked(s)
 }

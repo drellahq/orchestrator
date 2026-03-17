@@ -81,7 +81,8 @@ orchestrator task new --author "Jane Doe <jane@example.com>" fix-bug "Fix the ni
 When set, the orchestrator fetches the upstream base branch before pushing and
 rewrites new commits to include the trailer. Commits that already carry the
 trailer are left unchanged. The flag works with both `open_pr` and `update_pr`
-MCP tools.
+MCP tools. The author is persisted in the task state, so `task continue`
+automatically uses the same author without needing to specify it again.
 
 To continue a stopped task with a new prompt (resumes the VM and Claude conversation):
 

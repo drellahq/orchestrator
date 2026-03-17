@@ -504,6 +504,47 @@ echo "Result: $RESULT"`, remotePort, remotePort, remotePort)
 		t.Errorf("trailer = %q, want %q", prOpener.gotTrailer, wantTrailer)
 	}
 
+	// Verify author is persisted in task state so task continue can use it
+	t.Log("Saving author to task state and verifying persistence...")
+	if err := taskDir.SaveMetadata(authorSandboxName, "test task", "Test User <test@example.com>", time.Now()); err != nil {
+		t.Fatalf("SaveMetadata() error: %v", err)
+	}
+	state, err := taskDir.LoadState()
+	if err != nil {
+		t.Fatalf("LoadState() error: %v", err)
+	}
+	if state.Author != "Test User <test@example.com>" {
+		t.Errorf("persisted Author = %q, want %q", state.Author, "Test User <test@example.com>")
+	}
+
+	// Verify a new MCP server created with the persisted author works correctly
+	// (simulates what task continue would do: load author from state, pass to MCP server)
+	prOpener2 := &testPROpener{}
+	mcpSrv2 := mcpserver.New(logger, authorSandboxName, taskDir, runner, prOpener2, []string{"test/*"}, state.Author)
+	if err := mcpSrv2.Start(); err != nil {
+		t.Fatalf("MCP server 2 start: %v", err)
+	}
+	defer func() { _ = mcpSrv2.Stop(ctx) }()
+
+	mcpPort2 := mcpSrv2.Port()
+	mcpTunnel2 := fmt.Sprintf("%d:localhost:%d", mcpserver.MCPRemotePort, mcpPort2)
+	pullScript2 := fmt.Sprintf(`set -e
+HEADERS=$(curl -s -D - -o /dev/null -X POST http://localhost:%d/ -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"0.1.0"}}}')
+SESSION_ID=$(echo "$HEADERS" | grep -i "mcp-session-id" | tr -d '\r' | awk '{print $2}')
+curl -s -X POST http://localhost:%d/ -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -H "Mcp-Session-Id: $SESSION_ID" -d '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+RESULT=$(curl -s -X POST http://localhost:%d/ -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -H "Mcp-Session-Id: $SESSION_ID" -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"open_pr","arguments":{"path":"~","repo":"test/repo","branch":"continue-test","title":"Continue Test","body":"Test"}}}')
+echo "Result: $RESULT"`, remotePort, remotePort, remotePort)
+	if err := runner.SSHProxy(ctx, authorSandboxName, &gjoll.SSHOpts{ReverseTunnels: []string{mcpTunnel2}}, pullScript2); err != nil {
+		t.Fatalf("open_pr via ssh -R (continue simulation): %v", err)
+	}
+
+	if !prOpener2.trailerCalled {
+		t.Error("AddCoAuthorTrailers was not called on continued task")
+	}
+	if prOpener2.gotTrailer != wantTrailer {
+		t.Errorf("continued task trailer = %q, want %q", prOpener2.gotTrailer, wantTrailer)
+	}
+
 	// Tear down
 	t.Log("Tearing down author test sandbox...")
 	if err := runner.Down(ctx, authorSandboxName); err != nil {
