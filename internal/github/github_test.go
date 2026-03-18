@@ -253,7 +253,7 @@ func TestPushBranch(t *testing.T) {
 func initGitRepo(t *testing.T, dir string) {
 	t.Helper()
 	for _, args := range [][]string{
-		{"init"},
+		{"init", "-b", "main"},
 		{"config", "user.name", "Test"},
 		{"config", "user.email", "test@test.com"},
 		{"commit", "--allow-empty", "-m", "Initial commit"},
@@ -321,14 +321,14 @@ func TestAddCoAuthorTrailers(t *testing.T) {
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("remote add: %v\n%s", err, out)
 		}
-		cmd = exec.Command("git", "fetch", "upstream", "master")
+		cmd = exec.Command("git", "fetch", "upstream", "main")
 		cmd.Dir = localDir
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("fetch: %v\n%s", err, out)
 		}
 
-		// Reset local to upstream/master
-		cmd = exec.Command("git", "reset", "--hard", "upstream/master")
+		// Reset local to upstream/main
+		cmd = exec.Command("git", "reset", "--hard", "upstream/main")
 		cmd.Dir = localDir
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("reset: %v\n%s", err, out)
@@ -352,14 +352,14 @@ func TestAddCoAuthorTrailers(t *testing.T) {
 
 		r := New("")
 		trailer := "Co-authored-by: Test Author <test@example.com>"
-		err := r.addCoAuthorTrailers(context.Background(), "git", localDir, upstreamDir, "master", "gjoll-test-task", trailer)
+		err := r.addCoAuthorTrailers(context.Background(), "git", localDir, upstreamDir, "main", "gjoll-test-task", trailer)
 
 		if err != nil {
 			t.Fatalf("addCoAuthorTrailers: %v", err)
 		}
 
 		// Verify trailers were added to new commits
-		msgs := gitLog(t, localDir, "upstream/master..HEAD")
+		msgs := gitLog(t, localDir, "upstream/main..HEAD")
 		if len(msgs) != 2 {
 			t.Fatalf("expected 2 new commits, got %d: %v", len(msgs), msgs)
 		}
@@ -370,7 +370,7 @@ func TestAddCoAuthorTrailers(t *testing.T) {
 		}
 
 		// Verify upstream commits are untouched
-		upstreamMsgs := gitLog(t, localDir, "upstream/master")
+		upstreamMsgs := gitLog(t, localDir, "upstream/main")
 		for _, msg := range upstreamMsgs {
 			if strings.Contains(msg, "Co-authored-by") {
 				t.Errorf("upstream commit should not have trailer: %q", msg)
@@ -390,12 +390,12 @@ func TestAddCoAuthorTrailers(t *testing.T) {
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("remote add: %v\n%s", err, out)
 		}
-		cmd = exec.Command("git", "fetch", "upstream", "master")
+		cmd = exec.Command("git", "fetch", "upstream", "main")
 		cmd.Dir = localDir
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("fetch: %v\n%s", err, out)
 		}
-		cmd = exec.Command("git", "reset", "--hard", "upstream/master")
+		cmd = exec.Command("git", "reset", "--hard", "upstream/main")
 		cmd.Dir = localDir
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("reset: %v\n%s", err, out)
@@ -418,13 +418,13 @@ func TestAddCoAuthorTrailers(t *testing.T) {
 
 		r := New("")
 		trailer := "Co-authored-by: Test Author <test@example.com>"
-		err := r.addCoAuthorTrailers(context.Background(), "git", localDir, upstreamDir, "master", "gjoll-test-task", trailer)
+		err := r.addCoAuthorTrailers(context.Background(), "git", localDir, upstreamDir, "main", "gjoll-test-task", trailer)
 
 		if err != nil {
 			t.Fatalf("addCoAuthorTrailers: %v", err)
 		}
 
-		msgs := gitLog(t, localDir, "upstream/master..HEAD")
+		msgs := gitLog(t, localDir, "upstream/main..HEAD")
 		if len(msgs) != 1 {
 			t.Fatalf("expected 1 commit, got %d", len(msgs))
 		}
@@ -447,12 +447,12 @@ func TestAddCoAuthorTrailers(t *testing.T) {
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("remote add: %v\n%s", err, out)
 		}
-		cmd = exec.Command("git", "fetch", "upstream", "master")
+		cmd = exec.Command("git", "fetch", "upstream", "main")
 		cmd.Dir = localDir
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("fetch: %v\n%s", err, out)
 		}
-		cmd = exec.Command("git", "reset", "--hard", "upstream/master")
+		cmd = exec.Command("git", "reset", "--hard", "upstream/main")
 		cmd.Dir = localDir
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("reset: %v\n%s", err, out)
@@ -470,7 +470,7 @@ func TestAddCoAuthorTrailers(t *testing.T) {
 		}
 
 		r := New("")
-		err := r.addCoAuthorTrailers(context.Background(), "git", localDir, upstreamDir, "master", "gjoll-test-task", "Co-authored-by: X <x@x.com>")
+		err := r.addCoAuthorTrailers(context.Background(), "git", localDir, upstreamDir, "main", "gjoll-test-task", "Co-authored-by: X <x@x.com>")
 		if err != nil {
 			t.Fatalf("addCoAuthorTrailers with no new commits: %v", err)
 		}
