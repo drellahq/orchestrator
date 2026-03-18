@@ -223,8 +223,8 @@ func TestPushBranch(t *testing.T) {
 		t.Fatalf("expected at least 3 git invocations, got %d: %v", len(gitInvocations), gitInvocations)
 	}
 
-	// First: git checkout -B fix-bug main
-	wantCheckout := []string{"checkout", "-B", "fix-bug", "main"}
+	// First: git checkout -B fix-bug refs/heads/main
+	wantCheckout := []string{"checkout", "-B", "fix-bug", "refs/heads/main"}
 	if got := gitInvocations[0]; !equalArgs(got, wantCheckout) {
 		t.Errorf("git invocation 0 = %v, want %v", got, wantCheckout)
 	}

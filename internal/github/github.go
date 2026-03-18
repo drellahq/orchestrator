@@ -76,6 +76,9 @@ func (r *Runner) AddCoAuthorTrailers(ctx context.Context, repoDir, upstream, bas
 }
 
 func (r *Runner) addCoAuthorTrailers(ctx context.Context, gitBin, repoDir, upstreamURL, base, sourceRef, trailer string) error {
+	// Use fully-qualified ref to avoid ambiguity with a remote of the same name.
+	qualifiedRef := "refs/heads/" + sourceRef
+
 	// Add upstream remote (or update URL if it exists)
 	if _, err := r.run(ctx, repoDir, gitBin, "remote", "add", "upstream", upstreamURL); err != nil {
 		if _, err := r.run(ctx, repoDir, gitBin, "remote", "set-url", "upstream", upstreamURL); err != nil {
@@ -89,7 +92,7 @@ func (r *Runner) addCoAuthorTrailers(ctx context.Context, gitBin, repoDir, upstr
 	}
 
 	// Check if there are any new commits
-	out, err := r.run(ctx, repoDir, gitBin, "rev-list", "--count", "upstream/"+base+".."+sourceRef)
+	out, err := r.run(ctx, repoDir, gitBin, "rev-list", "--count", "upstream/"+base+".."+qualifiedRef)
 	if err != nil {
 		return fmt.Errorf("counting new commits: %w", err)
 	}
@@ -97,8 +100,9 @@ func (r *Runner) addCoAuthorTrailers(ctx context.Context, gitBin, repoDir, upstr
 		return nil
 	}
 
-	// Checkout the sourceRef so filter-branch can rewrite it
-	if _, err := r.run(ctx, repoDir, gitBin, "checkout", sourceRef); err != nil {
+	// Checkout the sourceRef so filter-branch can rewrite it.
+	// Use -B with the qualified ref to stay on the branch (not detached).
+	if _, err := r.run(ctx, repoDir, gitBin, "checkout", "-B", sourceRef, qualifiedRef); err != nil {
 		return fmt.Errorf("checking out %s: %w", sourceRef, err)
 	}
 
@@ -126,8 +130,9 @@ func (r *Runner) PushBranch(ctx context.Context, repoDir, forkFullName, branch, 
 }
 
 func (r *Runner) pushBranch(ctx context.Context, gitBin, repoDir, forkFullName, branch, sourceRef string) error {
-	// Create the branch from the source ref
-	if _, err := r.run(ctx, repoDir, gitBin, "checkout", "-B", branch, sourceRef); err != nil {
+	// Use fully-qualified ref to avoid ambiguity with a remote of the same name.
+	qualifiedRef := "refs/heads/" + sourceRef
+	if _, err := r.run(ctx, repoDir, gitBin, "checkout", "-B", branch, qualifiedRef); err != nil {
 		return fmt.Errorf("creating branch %s: %w", branch, err)
 	}
 
