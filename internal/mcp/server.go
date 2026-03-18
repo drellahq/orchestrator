@@ -37,7 +37,7 @@ type PROpener interface {
 type OpenPRInput struct {
 	Path   string `json:"path" jsonschema_description:"Absolute path to the git repo in the sandbox"`
 	Repo   string `json:"repo" jsonschema_description:"Target repository as owner/repo (e.g. osbuild/osbuild)"`
-	Branch string `json:"branch" jsonschema_description:"Branch name to push"`
+	Branch string `json:"branch" jsonschema_description:"Name of the remote branch to push to"`
 	Base   string `json:"base,omitempty" jsonschema_description:"Base branch for the PR (default: main)"`
 	Title  string `json:"title" jsonschema_description:"PR title"`
 	Body   string `json:"body" jsonschema_description:"PR body/description"`
@@ -47,7 +47,7 @@ type OpenPRInput struct {
 type UpdatePRInput struct {
 	Path   string `json:"path" jsonschema_description:"Absolute path to the git repo in the sandbox"`
 	Repo   string `json:"repo" jsonschema_description:"Target repository as owner/repo (e.g. osbuild/osbuild)"`
-	Branch string `json:"branch" jsonschema_description:"Branch name to push (must match the existing PR branch)"`
+	Branch string `json:"branch" jsonschema_description:"Name of the remote branch to push to (must match the existing PR branch)"`
 }
 
 // CommentOnPRInput is the input schema for the comment_on_pr tool.
@@ -116,7 +116,7 @@ func New(logger *slog.Logger, taskName string, taskDir *task.Dir, puller CodePul
 	if prOpener != nil && len(allowedRepos) > 0 {
 		mcp.AddTool(mcpServer, &mcp.Tool{
 			Name:        "open_pr",
-			Description: "Push committed code from the sandbox and open a pull request on GitHub",
+			Description: "Push committed code from the sandbox and open a pull request on GitHub. The tool returns the URL of the created PR.",
 		}, func(ctx context.Context, req *mcp.CallToolRequest, input *OpenPRInput) (*mcp.CallToolResult, any, error) {
 			logger.Info("PR open requested", "task", taskName, "repo", input.Repo)
 
@@ -210,7 +210,7 @@ func New(logger *slog.Logger, taskName string, taskDir *task.Dir, puller CodePul
 
 		mcp.AddTool(mcpServer, &mcp.Tool{
 			Name:        "update_pr",
-			Description: "Push committed code from the sandbox to an existing PR branch",
+			Description: "Push committed code from the sandbox to an existing PR",
 		}, func(ctx context.Context, req *mcp.CallToolRequest, input *UpdatePRInput) (*mcp.CallToolResult, any, error) {
 			logger.Info("PR update requested", "task", taskName, "repo", input.Repo, "branch", input.Branch)
 
@@ -274,7 +274,7 @@ func New(logger *slog.Logger, taskName string, taskDir *task.Dir, puller CodePul
 			logger.Info("Branch updated", "task", taskName, "branch", input.Branch, "target", pushTarget)
 			return &mcp.CallToolResult{
 				Content: []mcp.Content{
-					&mcp.TextContent{Text: fmt.Sprintf("Branch %s updated on %s", input.Branch, pushTarget)},
+					&mcp.TextContent{Text: fmt.Sprintf("Branch %s updated on %s. Use `comment_on_pr` to post a comment about the changes.", input.Branch, pushTarget)},
 				},
 			}, nil, nil
 		})
