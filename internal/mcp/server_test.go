@@ -59,6 +59,11 @@ type stubPROpener struct {
 	commentCalled bool
 	gotCommentURL string
 	gotCommentBody string
+
+	titleErr       error
+	titleCalled    bool
+	gotTitleURL    string
+	gotTitleTitle   string
 }
 
 func (s *stubPROpener) AuthenticatedUser(_ context.Context) (string, error) {
@@ -97,6 +102,13 @@ func (s *stubPROpener) CommentOnPR(_ context.Context, prURL, body string) error 
 	s.gotCommentURL = prURL
 	s.gotCommentBody = body
 	return s.commentErr
+}
+
+func (s *stubPROpener) UpdatePRTitle(_ context.Context, prURL, title string) error {
+	s.titleCalled = true
+	s.gotTitleURL = prURL
+	s.gotTitleTitle = title
+	return s.titleErr
 }
 
 func startTestServer(t *testing.T, puller CodePuller, prOpener PROpener, allowedRepos []string, authors ...string) (*task.Dir, *Server, string) {
@@ -851,13 +863,15 @@ func TestCommentOnPRTool(t *testing.T) {
 	const ownedPRURL = "https://github.com/osbuild/osbuild/pull/42"
 
 	tests := []struct {
-		name             string
-		opener           *stubPROpener
-		seedPR           bool // whether to add a PR to task state before calling
-		input            map[string]any
-		wantError        bool
-		wantText         string
+		name              string
+		opener            *stubPROpener
+		seedPR            bool // whether to add a PR to task state before calling
+		input             map[string]any
+		wantError         bool
+		wantText          string
 		wantCommentCalled bool
+		wantTitleCalled   bool
+		wantTitle         string
 	}{
 		{
 			name:   "successful comment on owned PR",
@@ -869,6 +883,47 @@ func TestCommentOnPRTool(t *testing.T) {
 			},
 			wantText:          "Comment posted on",
 			wantCommentCalled: true,
+		},
+		{
+			name:   "successful comment with title update",
+			opener: &stubPROpener{user: "testuser"},
+			seedPR: true,
+			input: map[string]any{
+				"pr_url": ownedPRURL,
+				"body":   "Updated the PR",
+				"title":  "New PR title",
+			},
+			wantText:          "Comment posted on",
+			wantCommentCalled: true,
+			wantTitleCalled:   true,
+			wantTitle:         "New PR title",
+		},
+		{
+			name:   "title not updated when empty",
+			opener: &stubPROpener{user: "testuser"},
+			seedPR: true,
+			input: map[string]any{
+				"pr_url": ownedPRURL,
+				"body":   "Just a comment",
+			},
+			wantText:          "Comment posted on",
+			wantCommentCalled: true,
+			wantTitleCalled:   false,
+		},
+		{
+			name:   "title update failure",
+			opener: &stubPROpener{user: "testuser", titleErr: fmt.Errorf("title update forbidden")},
+			seedPR: true,
+			input: map[string]any{
+				"pr_url": ownedPRURL,
+				"body":   "comment body",
+				"title":  "New title",
+			},
+			wantError:         true,
+			wantText:          "title update forbidden",
+			wantCommentCalled: true,
+			wantTitleCalled:   true,
+			wantTitle:         "New title",
 		},
 		{
 			name:   "rejected for unowned PR",
@@ -943,6 +998,16 @@ func TestCommentOnPRTool(t *testing.T) {
 			}
 			if tt.wantCommentCalled && tt.opener.gotCommentBody != tt.input["body"] {
 				t.Errorf("gotCommentBody = %q, want %q", tt.opener.gotCommentBody, tt.input["body"])
+			}
+
+			if tt.opener.titleCalled != tt.wantTitleCalled {
+				t.Errorf("titleCalled = %v, want %v", tt.opener.titleCalled, tt.wantTitleCalled)
+			}
+			if tt.wantTitleCalled && tt.opener.gotTitleURL != tt.input["pr_url"] {
+				t.Errorf("gotTitleURL = %q, want %q", tt.opener.gotTitleURL, tt.input["pr_url"])
+			}
+			if tt.wantTitleCalled && tt.opener.gotTitleTitle != tt.wantTitle {
+				t.Errorf("gotTitleTitle = %q, want %q", tt.opener.gotTitleTitle, tt.wantTitle)
 			}
 		})
 	}

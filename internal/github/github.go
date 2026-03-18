@@ -187,6 +187,15 @@ func (r *Runner) CommentOnPR(ctx context.Context, prURL, body string) error {
 	return nil
 }
 
+// UpdatePRTitle changes the title of a pull request identified by its URL.
+func (r *Runner) UpdatePRTitle(ctx context.Context, prURL, title string) error {
+	_, err := r.run(ctx, "", r.bin, "pr", "edit", prURL, "--title", title)
+	if err != nil {
+		return fmt.Errorf("updating PR title: %w", err)
+	}
+	return nil
+}
+
 func (r *Runner) run(ctx context.Context, dir, name string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	if dir != "" {

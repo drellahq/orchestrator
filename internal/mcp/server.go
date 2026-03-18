@@ -31,6 +31,7 @@ type PROpener interface {
 	CreatePR(ctx context.Context, upstream, forkOwner, branch, base, title, body string) (string, error)
 	AddCoAuthorTrailers(ctx context.Context, repoDir, upstream, base, sourceRef, trailer string) error
 	CommentOnPR(ctx context.Context, prURL, body string) error
+	UpdatePRTitle(ctx context.Context, prURL, title string) error
 }
 
 // OpenPRInput is the input schema for the open_pr tool.
@@ -54,6 +55,7 @@ type UpdatePRInput struct {
 type CommentOnPRInput struct {
 	PRURL string `json:"pr_url" jsonschema_description:"URL of the pull request to comment on (must be a PR opened by this task)"`
 	Body  string `json:"body" jsonschema_description:"Comment body (markdown supported)"`
+	Title string `json:"title,omitempty" jsonschema_description:"Optional new title for the pull request. If empty, the title is not changed."`
 }
 
 // Server wraps an MCP server that exposes tools for sandbox operations.
@@ -321,6 +323,18 @@ func New(logger *slog.Logger, taskName string, taskDir *task.Dir, puller CodePul
 					},
 					IsError: true,
 				}, nil, nil
+			}
+
+			if input.Title != "" {
+				if err := prOpener.UpdatePRTitle(ctx, input.PRURL, input.Title); err != nil {
+					logger.Error("Failed to update PR title", "task", taskName, "error", err)
+					return &mcp.CallToolResult{
+						Content: []mcp.Content{
+							&mcp.TextContent{Text: fmt.Sprintf("comment posted but title update failed: %v", err)},
+						},
+						IsError: true,
+					}, nil, nil
+				}
 			}
 
 			logger.Info("PR comment posted", "task", taskName, "pr_url", input.PRURL)

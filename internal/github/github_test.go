@@ -503,6 +503,26 @@ func TestCommentOnPR(t *testing.T) {
 	}
 }
 
+func TestUpdatePRTitle(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not found")
+	}
+
+	script, outFile := writeArgCapture(t, "")
+	r := New(script)
+
+	err := r.UpdatePRTitle(context.Background(), "https://github.com/osbuild/osbuild/pull/42", "New title")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	gotArgs := readArgs(t, outFile)
+	wantArgs := []string{"pr", "edit", "https://github.com/osbuild/osbuild/pull/42", "--title", "New title"}
+	if !equalArgs(gotArgs, wantArgs) {
+		t.Errorf("got args %v, want %v", gotArgs, wantArgs)
+	}
+}
+
 func equalArgs(got, want []string) bool {
 	if len(got) != len(want) {
 		return false

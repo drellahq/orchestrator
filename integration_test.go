@@ -58,6 +58,10 @@ func (t *testPROpener) CommentOnPR(_ context.Context, prURL, body string) error 
 	return nil
 }
 
+func (t *testPROpener) UpdatePRTitle(_ context.Context, prURL, title string) error {
+	return nil
+}
+
 // testTF returns the path to a minimal .tf file for integration testing.
 // It installs git and a mock claude script via init_script.
 func testTF(t *testing.T) string {
