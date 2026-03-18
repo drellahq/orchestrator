@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,6 +21,11 @@ import (
 )
 
 const sandboxName = "orch-integ-test"
+
+// sshPort is the host port that passt forwards to the VM's SSH (port 22).
+// Session-mode VMs use user networking (passt), so the VM's SSH is not
+// directly reachable — it is exposed on localhost via this port.
+const sshPort = 2222
 
 // testPROpener implements mcpserver.PROpener for integration testing.
 type testPROpener struct {
@@ -58,20 +64,89 @@ func (t *testPROpener) CommentOnPR(_ context.Context, prURL, body string) error 
 	return nil
 }
 
+// ensureSessionSocket ensures the session-mode libvirt daemon is running
+// and creates the legacy libvirt-sock symlink that the terraform-libvirt
+// provider expects. On Fedora's modular libvirt the session daemon
+// (virtqemud) auto-starts via socket activation but uses a different
+// socket name; the provider only looks for libvirt-sock.
+func ensureSessionSocket(t *testing.T) {
+	t.Helper()
+	// Wake the session daemon (it may have shut down after idle).
+	cmd := exec.Command("virsh", "-c", "qemu:///session", "version")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("starting session-mode libvirt: %v\n%s", err, out)
+	}
+	sockDir := fmt.Sprintf("/run/user/%d/libvirt", os.Getuid())
+	legacySock := filepath.Join(sockDir, "libvirt-sock")
+	target := filepath.Join(sockDir, "virtqemud-sock")
+	// Remove stale symlink and recreate
+	os.Remove(legacySock)
+	if err := os.Symlink(target, legacySock); err != nil {
+		t.Fatalf("creating libvirt-sock symlink: %v", err)
+	}
+}
+
+// patchSSHConfig adds a Port directive to gjoll's generated SSH config.
+// gjoll always writes HostName without a Port field, but session-mode VMs
+// use passt port forwarding so SSH is on a non-standard port.
+func patchSSHConfig(t *testing.T, name string, port int) {
+	t.Helper()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("UserHomeDir: %v", err)
+	}
+	configPath := filepath.Join(home, ".local", "share", "gjoll", "instances", name, "ssh_config")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("reading SSH config: %v", err)
+	}
+	content := string(data)
+	portLine := fmt.Sprintf("Port %d", port)
+	if strings.Contains(content, portLine) {
+		return // already patched
+	}
+	// Insert Port after HostName line
+	content = strings.Replace(content,
+		"StrictHostKeyChecking no",
+		fmt.Sprintf("Port %d\n    StrictHostKeyChecking no", port),
+		1)
+	if err := os.WriteFile(configPath, []byte(content), 0644); err != nil {
+		t.Fatalf("writing SSH config: %v", err)
+	}
+}
+
+// waitForSSH polls the forwarded SSH port until it is reachable.
+func waitForSSH(t *testing.T, port int, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
+		if err == nil {
+			conn.Close()
+			return
+		}
+		time.Sleep(3 * time.Second)
+	}
+	t.Fatalf("SSH not reachable at %s after %s", addr, timeout)
+}
+
 // testTF returns the path to a minimal .tf file for integration testing.
-// It installs git and a mock claude script via init_script.
+// It uses qemu:///session with passt user networking so the tests run
+// fully rootless — no libvirt group membership, sudo, or polkit rules
+// required.
 func testTF(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	tfPath := filepath.Join(dir, "test-sandbox.tf")
 
-	content := `terraform {
+	content := fmt.Sprintf(`terraform {
   required_providers {
     libvirt = { source = "dmacvicar/libvirt", version = "~> 0.9" }
   }
 }
 
-provider "libvirt" { uri = "qemu:///system" }
+provider "libvirt" { uri = "qemu:///session" }
 
 resource "libvirt_volume" "base" {
   name   = "fedora-base-${var.gjoll_name}.qcow2"
@@ -106,6 +181,8 @@ resource "libvirt_cloudinit_disk" "init" {
         shell: /bin/bash
         ssh_authorized_keys:
           - ${var.gjoll_ssh_pubkey}
+    packages:
+      - git-core
   EOF
 }
 
@@ -136,9 +213,15 @@ resource "libvirt_domain" "sandbox" {
     ]
     interfaces = [
       {
-        source      = { network = { network = "default" } }
-        model       = { type = "virtio" }
-        wait_for_ip = var.gjoll_instance_state == "running" ? { source = "lease" } : null
+        source       = { user = {} }
+        backend      = { type = "passt" }
+        model        = { type = "virtio" }
+        port_forward = [
+          {
+            proto  = "tcp"
+            ranges = [{ start = %d, to = 22 }]
+          },
+        ]
       },
     ]
     consoles = [
@@ -147,25 +230,11 @@ resource "libvirt_domain" "sandbox" {
   }
 }
 
-data "libvirt_domain_interface_addresses" "sandbox" {
-  count  = var.gjoll_instance_state == "running" ? 1 : 0
-  domain = libvirt_domain.sandbox.name
-  source = "lease"
-}
-
-output "public_ip" {
-  value = var.gjoll_instance_state == "running" ? data.libvirt_domain_interface_addresses.sandbox[0].interfaces[0].addrs[0].addr : ""
-}
-output "instance_id" { value = tostring(libvirt_domain.sandbox.id) }
-output "ssh_user"    { value = "fedora" }
-output "init_script" {
-  value = <<-EOT
-    #!/bin/bash
-    set -euo pipefail
-    sudo dnf install -y git-core
-  EOT
-}
-`
+output "public_ip"    { value = "127.0.0.1" }
+output "instance_id"  { value = tostring(libvirt_domain.sandbox.id) }
+output "ssh_user"     { value = "fedora" }
+output "init_script"  { value = "" }
+`, sshPort)
 	if err := os.WriteFile(tfPath, []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -175,6 +244,7 @@ output "init_script" {
 func TestIntegration(t *testing.T) {
 	ctx := context.Background()
 	runner := gjoll.New("")
+	ensureSessionSocket(t)
 
 	tfPath := testTF(t)
 
@@ -195,6 +265,10 @@ func TestIntegration(t *testing.T) {
 			t.Logf("cleanup down failed: %v\n%s", err, out)
 		}
 	})
+
+	// Patch SSH config for the forwarded port and wait for SSH
+	patchSSHConfig(t, sandboxName, sshPort)
+	waitForSSH(t, sshPort, 5*time.Minute)
 
 	// 2. Set up git inside the VM (using $HOME as the working directory)
 	t.Log("Setting up git in sandbox...")
@@ -403,6 +477,10 @@ echo "$RESULT" | grep -q "was not opened by this task"`, remotePort, remotePort,
 		t.Fatalf("gjoll start (resume) failed: %v", err)
 	}
 
+	// Start() regenerates the SSH config without Port, so patch it again
+	patchSSHConfig(t, sandboxName, sshPort)
+	waitForSSH(t, sshPort, 5*time.Minute)
+
 	t.Log("Verifying state persisted after resume...")
 	if err := runner.SSH(ctx, sandboxName, "test -f ~/hello.txt"); err != nil {
 		t.Fatalf("hello.txt does not exist after resume: %v", err)
@@ -427,6 +505,7 @@ echo "$RESULT" | grep -q "was not opened by this task"`, remotePort, remotePort,
 func TestIntegrationWithAuthor(t *testing.T) {
 	ctx := context.Background()
 	runner := gjoll.New("")
+	ensureSessionSocket(t)
 
 	tfPath := testTF(t)
 
@@ -448,6 +527,10 @@ func TestIntegrationWithAuthor(t *testing.T) {
 			t.Logf("cleanup down failed: %v\n%s", err, out)
 		}
 	})
+
+	// Patch SSH config for the forwarded port and wait for SSH
+	patchSSHConfig(t, authorSandboxName, sshPort)
+	waitForSSH(t, sshPort, 5*time.Minute)
 
 	// Set up git inside the VM
 	t.Log("Setting up git in sandbox...")
