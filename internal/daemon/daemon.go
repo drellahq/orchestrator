@@ -27,13 +27,17 @@ type PRRef struct {
 type ContinueFunc func(ctx context.Context, taskName, prompt string) error
 
 // Daemon polls GitHub PRs for new comments and triggers task continue.
+// It also monitors a tasks repo for new specs in in-progress/ and spawns
+// new tasks for them.
 type Daemon struct {
 	gh                *gh.Runner
 	interval          time.Duration
 	configPath        string
 	outputDir         string
 	allowedCommenters []string
+	tasksRepo         string
 	continueFunc      ContinueFunc
+	newTaskFunc       NewTaskFunc
 	mu                sync.Mutex
 	running           map[string]bool
 }
@@ -49,13 +53,23 @@ func New(ghRunner *gh.Runner, interval time.Duration, configPath, outputDir stri
 		running:           make(map[string]bool),
 	}
 	d.continueFunc = d.defaultContinueFunc
+	d.newTaskFunc = d.defaultNewTaskFunc
 	return d
 }
 
+// SetTasksRepo sets the tasks repo to monitor for new specs.
+func (d *Daemon) SetTasksRepo(repo string) {
+	d.tasksRepo = repo
+}
+
 // Run is the main polling loop. It discovers PRs, iterates through them
-// round-robin, and re-discovers after each full cycle.
+// round-robin, and re-discovers after each full cycle. It also checks
+// the tasks repo for new specs in in-progress/.
 func (d *Daemon) Run(ctx context.Context) error {
 	for {
+		// Check for new specs in the tasks repo
+		d.checkForNewSpecs(ctx)
+
 		refs := DiscoverPRs(d.outputDir)
 		if len(refs) == 0 {
 			slog.Info("No open PRs found, waiting before re-discovery", "interval", d.interval)
@@ -300,6 +314,24 @@ func (d *Daemon) defaultContinueFunc(ctx context.Context, taskName, prompt strin
 	return nil
 }
 
+func (d *Daemon) defaultNewTaskFunc(ctx context.Context, taskName, description string) error {
+	exe, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("getting executable path: %w", err)
+	}
+
+	args := []string{"task", "new", "--config", d.configPath, taskName, description}
+	cmd := exec.CommandContext(ctx, exe, args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	slog.Info("Launching task new", "task", taskName)
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("task new %s: %w", taskName, err)
+	}
+	return nil
+}
+
 // ListTaskDirs returns the names of all task directories in outputDir.
 func ListTaskDirs(outputDir string) ([]string, error) {
 	entries, err := os.ReadDir(outputDir)
@@ -403,6 +435,11 @@ func (d *Daemon) SetTaskRunning(taskName string, running bool) {
 // SetContinueFunc overrides the function used to launch task continue (for testing).
 func (d *Daemon) SetContinueFunc(fn ContinueFunc) {
 	d.continueFunc = fn
+}
+
+// SetNewTaskFunc overrides the function used to launch new tasks (for testing).
+func (d *Daemon) SetNewTaskFunc(fn NewTaskFunc) {
+	d.newTaskFunc = fn
 }
 
 // ProcessPR is an exported wrapper for testing.
