@@ -196,6 +196,31 @@ func (r *Runner) UpdatePRTitle(ctx context.Context, prURL, title string) error {
 	return nil
 }
 
+// ListRepoFiles lists files in a directory of a repo on a given branch.
+// It returns a slice of file paths relative to the directory.
+func (r *Runner) ListRepoFiles(ctx context.Context, repo, branch, dir string) ([]string, error) {
+	endpoint := fmt.Sprintf("/repos/%s/contents/%s?ref=%s", repo, dir, branch)
+	out, err := r.run(ctx, "", r.bin, "api", "--paginate", endpoint, "--jq", ".[].name")
+	if err != nil {
+		return nil, fmt.Errorf("listing repo files: %w", err)
+	}
+	out = strings.TrimSpace(out)
+	if out == "" {
+		return nil, nil
+	}
+	return strings.Split(out, "\n"), nil
+}
+
+// GetFileContent fetches the raw content of a file from a repo.
+func (r *Runner) GetFileContent(ctx context.Context, repo, branch, path string) (string, error) {
+	endpoint := fmt.Sprintf("/repos/%s/contents/%s?ref=%s", repo, path, branch)
+	out, err := r.run(ctx, "", r.bin, "api", endpoint, "--jq", ".content")
+	if err != nil {
+		return "", fmt.Errorf("getting file content: %w", err)
+	}
+	return strings.TrimSpace(out), nil
+}
+
 func (r *Runner) run(ctx context.Context, dir, name string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	if dir != "" {

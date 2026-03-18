@@ -523,6 +523,73 @@ func TestUpdatePRTitle(t *testing.T) {
 	}
 }
 
+func TestListRepoFiles(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not found")
+	}
+
+	script, outFile := writeArgCapture(t, "spec-a.md\nspec-b.md\n")
+	r := New(script)
+
+	files, err := r.ListRepoFiles(context.Background(), "org/tasks", "main", "in-progress")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(files) != 2 {
+		t.Fatalf("got %d files, want 2: %v", len(files), files)
+	}
+	if files[0] != "spec-a.md" || files[1] != "spec-b.md" {
+		t.Errorf("files = %v, want [spec-a.md spec-b.md]", files)
+	}
+
+	gotArgs := readArgs(t, outFile)
+	wantArgs := []string{"api", "--paginate", "/repos/org/tasks/contents/in-progress?ref=main", "--jq", ".[].name"}
+	if !equalArgs(gotArgs, wantArgs) {
+		t.Errorf("args = %v, want %v", gotArgs, wantArgs)
+	}
+}
+
+func TestListRepoFiles_Empty(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not found")
+	}
+
+	script, _ := writeArgCapture(t, "")
+	r := New(script)
+
+	files, err := r.ListRepoFiles(context.Background(), "org/tasks", "main", "in-progress")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if files != nil {
+		t.Errorf("expected nil files, got %v", files)
+	}
+}
+
+func TestGetFileContent(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not found")
+	}
+
+	script, outFile := writeArgCapture(t, "SGVsbG8gV29ybGQ=\n")
+	r := New(script)
+
+	content, err := r.GetFileContent(context.Background(), "org/tasks", "main", "in-progress/spec.md")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if content != "SGVsbG8gV29ybGQ=" {
+		t.Errorf("content = %q, want base64 encoded value", content)
+	}
+
+	gotArgs := readArgs(t, outFile)
+	wantArgs := []string{"api", "/repos/org/tasks/contents/in-progress/spec.md?ref=main", "--jq", ".content"}
+	if !equalArgs(gotArgs, wantArgs) {
+		t.Errorf("args = %v, want %v", gotArgs, wantArgs)
+	}
+}
+
 func equalArgs(got, want []string) bool {
 	if len(got) != len(want) {
 		return false

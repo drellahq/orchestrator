@@ -67,6 +67,11 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 
 	d := daemon.New(ghRunner, interval, configPath, cfg.OutputDir, cfg.Daemon.AllowedCommenters)
 
+	if cfg.Daemon.TasksRepo != "" {
+		d.SetTasksRepo(cfg.Daemon.TasksRepo)
+		slog.Info("Tasks repo monitoring enabled", "tasks_repo", cfg.Daemon.TasksRepo)
+	}
+
 	slog.Info("Daemon starting", "interval", interval, "output_dir", cfg.OutputDir, "allowed_commenters", cfg.Daemon.AllowedCommenters)
 	return d.Run(ctx)
 }
