@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DRELLA</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header id="header">
+    <a href="#" class="logo">drella<span class="cursor">_</span></a>
+    <div class="status-bar">
+      <span id="status-text"></span>
+      <button id="refresh-btn" title="Refresh">[refresh]</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="task-list" class="view"></section>
+
+    <section id="task-detail" class="view hidden">
+      <nav class="detail-nav">
+        <a href="#" class="back-link">&lt; tasks</a>
+        <span id="detail-task-name"></span>
+      </nav>
+      <div id="task-meta"></div>
+      <div id="transcript-container">
+        <div id="transcript"></div>
+        <div id="transcript-loading" class="loading hidden">loading transcript<span class="blink">_</span></div>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

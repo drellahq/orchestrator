@@ -150,6 +150,40 @@ Host                              Sandbox VM
 +-----------+
 ```
 
+## Dashboard
+
+A lightweight web UI for browsing tasks and reading transcripts. The dashboard is a static HTML/CSS/JS app (no build step) served alongside the task output directory by [Caddy](https://caddyserver.com/).
+
+### Running
+
+Copy and adjust the example Caddyfile, then start Caddy:
+
+```bash
+cp Caddyfile.example Caddyfile
+caddy run
+```
+
+The dashboard is available at `http://localhost:2080`. Caddy serves the `dashboard/` directory for the UI and the `tasks/` directory (your `output_dir`) as a file-based API with directory browsing enabled.
+
+### Features
+
+- **Task list** — auto-refreshes every 30 seconds, shows name, description, author, and linked PRs
+- **Transcript viewer** — renders Claude session transcripts with syntax-highlighted tool calls, collapsible thinking blocks, and sub-agent progress
+- **Live tailing** — polls the transcript every 5 seconds via HTTP Range requests, so you can watch a running task in the browser
+- **Keyboard shortcuts** — `Escape` to return to the task list, `r` to refresh
+
+### How it works
+
+The dashboard has no backend of its own. Caddy's file server acts as the API:
+
+| Endpoint | Source | Purpose |
+|---|---|---|
+| `GET /tasks/` | `output_dir` directory listing | Discover tasks |
+| `GET /tasks/<name>/state.json` | Task state file | Task metadata |
+| `GET /tasks/<name>/transcript.jsonl` | Transcript file | Session transcript |
+
+Make sure the Caddyfile `root` for `/tasks/*` points at the same directory as `output_dir` in `orchestrator.yaml` (default `./tasks`).
+
 ## Running Tests
 
 ### Unit tests
