@@ -1,0 +1,11 @@
+:2080 {
+	handle_path /tasks/* {
+		header Cache-Control "no-cache"
+		root * ./tasks
+		file_server browse
+	}
+	handle {
+		root * ./dashboard
+		file_server
+	}
+}
