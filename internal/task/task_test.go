@@ -167,6 +167,98 @@ func TestSaveMetadata(t *testing.T) {
 	}
 }
 
+func TestSaveMetadataSetsUpdatedAt(t *testing.T) {
+	outputDir := t.TempDir()
+	td, err := Create(outputDir, "updated-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now().Truncate(time.Second)
+	if err := td.SaveMetadata("updated-test", "desc", "", now); err != nil {
+		t.Fatalf("SaveMetadata() error: %v", err)
+	}
+
+	s, err := td.LoadState()
+	if err != nil {
+		t.Fatalf("LoadState() error: %v", err)
+	}
+
+	if !s.UpdatedAt.Equal(now) {
+		t.Errorf("UpdatedAt = %v, want %v", s.UpdatedAt, now)
+	}
+}
+
+func TestTouchUpdatedAt(t *testing.T) {
+	outputDir := t.TempDir()
+	td, err := Create(outputDir, "touch-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	created := time.Now().Add(-time.Hour).Truncate(time.Second)
+	if err := td.SaveMetadata("touch-test", "desc", "", created); err != nil {
+		t.Fatal(err)
+	}
+
+	updated := time.Now().Truncate(time.Second)
+	if err := td.TouchUpdatedAt(updated); err != nil {
+		t.Fatalf("TouchUpdatedAt() error: %v", err)
+	}
+
+	s, err := td.LoadState()
+	if err != nil {
+		t.Fatalf("LoadState() error: %v", err)
+	}
+
+	if !s.CreatedAt.Equal(created) {
+		t.Errorf("CreatedAt changed: got %v, want %v", s.CreatedAt, created)
+	}
+	if !s.UpdatedAt.Equal(updated) {
+		t.Errorf("UpdatedAt = %v, want %v", s.UpdatedAt, updated)
+	}
+}
+
+func TestTouchUpdatedAtPreservesState(t *testing.T) {
+	outputDir := t.TempDir()
+	td, err := Create(outputDir, "touch-preserve")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now().Truncate(time.Second)
+	if err := td.SaveMetadata("touch-preserve", "my desc", "author", now); err != nil {
+		t.Fatal(err)
+	}
+	pr := PR{URL: "https://github.com/org/repo/pull/1", Repo: "org/repo", Branch: "fix", Base: "main"}
+	if err := td.AddPR(pr); err != nil {
+		t.Fatal(err)
+	}
+
+	later := now.Add(time.Hour)
+	if err := td.TouchUpdatedAt(later); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := td.LoadState()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if s.Name != "touch-preserve" {
+		t.Errorf("Name = %q, want %q", s.Name, "touch-preserve")
+	}
+	if s.Description != "my desc" {
+		t.Errorf("Description changed")
+	}
+	if s.Author != "author" {
+		t.Errorf("Author changed")
+	}
+	if len(s.Resources.GitHub.PRs) != 1 {
+		t.Errorf("PRs lost: got %d, want 1", len(s.Resources.GitHub.PRs))
+	}
+}
+
 func TestSaveMetadataWithAuthor(t *testing.T) {
 	outputDir := t.TempDir()
 	td, err := Create(outputDir, "author-test")

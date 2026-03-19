@@ -253,6 +253,11 @@ func executeTask(ctx context.Context, taskName, taskDescription string, taskDir 
 	}
 
 	slog.Info("Claude finished", "task", taskName)
+
+	if err := taskDir.TouchUpdatedAt(time.Now()); err != nil {
+		slog.Warn("Failed to update updated_at", "task", taskName, "error", err)
+	}
+
 	slog.Info("Task completed", "task", taskName)
 	return nil
 }
