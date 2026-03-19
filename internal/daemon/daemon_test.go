@@ -9,6 +9,7 @@ import (
 	"time"
 
 	gh "github.com/drellabot/orchestrator/internal/github"
+	"github.com/drellabot/orchestrator/internal/prompts"
 	"github.com/drellabot/orchestrator/internal/task"
 )
 
@@ -134,7 +135,7 @@ func TestFormatCommentsAsPrompt(t *testing.T) {
 			comments: []gh.Comment{
 				{ID: 1, Body: "Please fix this", User: gh.CommentUser{Login: "alice"}, CreatedAt: "2025-01-01T00:00:00Z", Type: gh.IssueComment},
 			},
-			want: commentPrompt + "\n@alice at 2025-01-01T00:00:00Z:\n\nPlease fix this\n",
+			want: prompts.OnPRComment + "\n@alice at 2025-01-01T00:00:00Z:\n\nPlease fix this\n",
 		},
 		{
 			name: "multiple comments with review",
@@ -142,7 +143,7 @@ func TestFormatCommentsAsPrompt(t *testing.T) {
 				{ID: 1, Body: "First", User: gh.CommentUser{Login: "alice"}, CreatedAt: "2025-01-01T00:00:00Z", Type: gh.IssueComment},
 				{ID: 2, Body: "Nit here", User: gh.CommentUser{Login: "bob"}, CreatedAt: "2025-01-01T01:00:00Z", Type: gh.ReviewComment, Path: "main.go"},
 			},
-			want: commentPrompt + "\n@alice at 2025-01-01T00:00:00Z:\n\nFirst\n\n---\n\n@bob at 2025-01-01T01:00:00Z on main.go:\n\nNit here\n",
+			want: prompts.OnPRComment + "\n@alice at 2025-01-01T00:00:00Z:\n\nFirst\n\n---\n\n@bob at 2025-01-01T01:00:00Z on main.go:\n\nNit here\n",
 		},
 	}
 
