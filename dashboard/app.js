@@ -126,6 +126,7 @@
       name: d.name || name,
       description: d.description || '',
       created_at: d.created_at || '',
+      updated_at: d.updated_at || '',
       author: d.author || '',
       prs: (d.resources && d.resources.github && d.resources.github.prs) || [],
     };
@@ -203,7 +204,7 @@
     container.innerHTML = '';
 
     const sorted = [...state.tasks.values()].sort((a, b) => {
-      return new Date(b.created_at || 0) - new Date(a.created_at || 0);
+      return new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0);
     });
 
     if (sorted.length === 0) {
@@ -227,7 +228,7 @@
         '<div class="task-name">' + escapeHtml(task.name) + '</div>' +
         '<div class="task-desc">' + escapeHtml(task.description) + '</div>' +
         '<div class="task-footer">' +
-          '<span class="task-time">' + timeAgo(task.created_at) + '</span>' +
+          '<span class="task-time">' + timeAgo(task.updated_at || task.created_at) + '</span>' +
           prs +
         '</div>';
       card.addEventListener('click', () => {
@@ -252,7 +253,9 @@
 
     let html =
       '<div><span class="meta-label">created:</span><span class="task-time">' +
-      timeAgo(task.created_at) + ' (' + escapeHtml(task.created_at || '') + ')</span></div>';
+      timeAgo(task.created_at) + ' (' + escapeHtml(task.created_at || '') + ')</span></div>' +
+      '<div><span class="meta-label">updated:</span><span class="task-time">' +
+      timeAgo(task.updated_at || task.created_at) + ' (' + escapeHtml(task.updated_at || task.created_at || '') + ')</span></div>';
 
     if (task.author) {
       html += '<div><span class="meta-label">author:</span>' + escapeHtml(task.author) + '</div>';

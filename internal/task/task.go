@@ -59,6 +59,7 @@ type State struct {
 	Name        string    `json:"name"`
 	Description string    `json:"description"`
 	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 	Author      string    `json:"author,omitempty"`
 	Resources   Resources `json:"resources"`
 }
@@ -165,6 +166,20 @@ func (d *Dir) SaveMetadata(name, description, author string, createdAt time.Time
 	s.Description = description
 	s.Author = author
 	s.CreatedAt = createdAt
+	s.UpdatedAt = createdAt
+	return d.saveStateLocked(s)
+}
+
+// TouchUpdatedAt sets UpdatedAt to the given time and persists it.
+func (d *Dir) TouchUpdatedAt(t time.Time) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	s, err := d.loadStateLocked()
+	if err != nil {
+		return err
+	}
+	s.UpdatedAt = t
 	return d.saveStateLocked(s)
 }
 
