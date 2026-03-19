@@ -189,6 +189,7 @@ func TestCreatePR(t *testing.T) {
 		"--base", "main",
 		"--title", "Fix bug",
 		"--body", "This fixes the bug",
+		"--draft",
 	}
 	if len(gotArgs) != len(wantArgs) {
 		t.Fatalf("got %d args %v, want %d args %v", len(gotArgs), gotArgs, len(wantArgs), wantArgs)

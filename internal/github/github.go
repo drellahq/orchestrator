@@ -168,6 +168,7 @@ func (r *Runner) CreatePR(ctx context.Context, upstream, forkOwner, branch, base
 		"--base", base,
 		"--title", title,
 		"--body", body,
+		"--draft",
 	)
 	if err != nil {
 		return "", fmt.Errorf("creating PR: %w", err)
