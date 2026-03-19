@@ -1,12 +1,16 @@
 name: CI
 
 on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '*.md'
+      - 'orchestrator.yaml.example'
   pull_request:
     branches: [main]
     paths-ignore:
       - '*.md'
       - 'orchestrator.yaml.example'
-  merge_group:
 
 jobs:
   build:
