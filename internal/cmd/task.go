@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -230,8 +231,23 @@ func executeTask(ctx context.Context, taskName, taskDescription string, taskDir 
 		ReverseTunnels: []string{mcpTunnel},
 	}
 
+	// Write the raw JSONL transcript to the host file in real-time so the
+	// dashboard can poll it while the task is still running.
+	var transcriptFlags int
+	if continueSession {
+		transcriptFlags = os.O_WRONLY | os.O_CREATE | os.O_APPEND
+	} else {
+		transcriptFlags = os.O_WRONLY | os.O_CREATE | os.O_TRUNC
+	}
+	transcriptFile, err := os.OpenFile(taskDir.TranscriptPath(), transcriptFlags, 0644)
+	if err != nil {
+		return fmt.Errorf("opening transcript file: %w", err)
+	}
+	defer transcriptFile.Close()
+
 	tw := newTranscriptWriter(os.Stdout, verbose)
-	if err := runner.SSHProxyOutput(ctx, taskName, tw, sshOpts, "/tmp/run-claude.sh"); err != nil {
+	w := io.MultiWriter(tw, transcriptFile)
+	if err := runner.SSHProxyOutput(ctx, taskName, w, sshOpts, "/tmp/run-claude.sh"); err != nil {
 		slog.Error("Claude exited with error", "task", taskName, "error", err)
 		// Don't return error - still want to archive results
 	}
