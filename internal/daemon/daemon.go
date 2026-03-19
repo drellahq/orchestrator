@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"context"
-	_ "embed"
 	"fmt"
 	"log/slog"
 	"os"
@@ -13,11 +12,9 @@ import (
 	"time"
 
 	gh "github.com/drellabot/orchestrator/internal/github"
+	"github.com/drellabot/orchestrator/internal/prompts"
 	"github.com/drellabot/orchestrator/internal/task"
 )
-
-//go:embed on_pr_comment_prompt.md
-var commentPrompt string
 
 // PRRef ties a task name to one of its PRs.
 type PRRef struct {
@@ -268,7 +265,7 @@ func FormatCommentsAsPrompt(comments []gh.Comment) string {
 	sort.Slice(comments, func(i, j int) bool { return comments[i].ID < comments[j].ID })
 
 	var sb strings.Builder
-	sb.WriteString(commentPrompt)
+	sb.WriteString(prompts.OnPRComment)
 	sb.WriteString("\n")
 	for i, c := range comments {
 		if i > 0 {

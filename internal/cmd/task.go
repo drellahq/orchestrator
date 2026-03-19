@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"context"
-	_ "embed"
 	"fmt"
 	"io"
 	"log/slog"
@@ -17,12 +16,10 @@ import (
 	"github.com/drellabot/orchestrator/internal/gjoll"
 	"github.com/drellabot/orchestrator/internal/logging"
 	mcpserver "github.com/drellabot/orchestrator/internal/mcp"
+	"github.com/drellabot/orchestrator/internal/prompts"
 	"github.com/drellabot/orchestrator/internal/task"
 	"github.com/spf13/cobra"
 )
-
-//go:embed prompt.md
-var promptContent string
 
 var author string
 
@@ -297,7 +294,7 @@ func setupSandbox(ctx context.Context, runner *gjoll.Runner, taskName string) er
 	}
 	defer os.Remove(tmpFile.Name())
 
-	if _, err := tmpFile.WriteString(promptContent); err != nil {
+	if _, err := tmpFile.WriteString(prompts.OnInit); err != nil {
 		tmpFile.Close()
 		return fmt.Errorf("writing prompt: %w", err)
 	}
