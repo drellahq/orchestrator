@@ -116,7 +116,7 @@ func New(logger *slog.Logger, taskName string, taskDir *task.Dir, puller CodePul
 	if prOpener != nil && len(allowedRepos) > 0 {
 		mcp.AddTool(mcpServer, &mcp.Tool{
 			Name:        "open_pr",
-			Description: "Push committed code from the sandbox and open a pull request on GitHub. The tool returns the URL of the created PR.",
+			Description: "Push committed code from the sandbox and open a draft pull request on GitHub. The tool returns the URL of the created PR.",
 		}, func(ctx context.Context, req *mcp.CallToolRequest, input *OpenPRInput) (*mcp.CallToolResult, any, error) {
 			logger.Info("PR open requested", "task", taskName, "repo", input.Repo)
 
