@@ -6,7 +6,7 @@ The orchestrator bridges untrusted sandbox execution with trusted host operation
 
 ## Prerequisites
 
-- **Go** (1.24+)
+- **Node.js** (22+)
 - **gjoll**: `go install github.com/ondrejbudai/gjoll/cmd/gjoll@latest`
 - **libvirt**: `virsh version` must work
 - **OpenTofu**: `tofu version` must work
@@ -16,15 +16,10 @@ The orchestrator bridges untrusted sandbox execution with trusted host operation
 ## Installation
 
 ```bash
-go install github.com/drellabot/orchestrator/cmd/orchestrator@latest
-```
-
-Or build from source:
-
-```bash
 git clone https://github.com/drellabot/orchestrator.git
 cd orchestrator
-go build -o orchestrator ./cmd/orchestrator
+npm install
+npm run build
 ```
 
 ## Setup
@@ -186,16 +181,8 @@ Make sure the Caddyfile `root` for `/tasks/*` points at the same directory as `o
 
 ## Running Tests
 
-### Unit tests
-
 ```bash
-go test ./...
-```
-
-### Integration test (requires libvirt)
-
-```bash
-go test -tags integration -v -timeout 30m
+npm test
 ```
 
 See [HACKING.md](HACKING.md) for detailed setup instructions.
