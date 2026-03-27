@@ -67,8 +67,9 @@ func (d *Daemon) SetTasksRepo(repo string) {
 // the tasks repo for new specs in in-progress/.
 func (d *Daemon) Run(ctx context.Context) error {
 	for {
-		// Check for new specs in the tasks repo
+		// Check for new specs and issues in the tasks repo
 		d.checkForNewSpecs(ctx)
+		d.checkForNewIssues(ctx)
 
 		refs := DiscoverPRs(d.outputDir)
 		if len(refs) == 0 {

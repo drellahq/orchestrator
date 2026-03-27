@@ -3,6 +3,7 @@ package github
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -219,6 +220,59 @@ func (r *Runner) GetFileContent(ctx context.Context, repo, branch, path string) 
 		return "", fmt.Errorf("getting file content: %w", err)
 	}
 	return strings.TrimSpace(out), nil
+}
+
+// Issue represents a GitHub issue (not a pull request).
+type Issue struct {
+	Number int    `json:"number"`
+	Title  string `json:"title"`
+	Body   string `json:"body"`
+}
+
+// ListIssues returns open issues (excluding pull requests) for a repo.
+func (r *Runner) ListIssues(ctx context.Context, repo string) ([]Issue, error) {
+	endpoint := fmt.Sprintf("/repos/%s/issues?state=open&per_page=100", repo)
+	out, err := r.run(ctx, "", r.bin, "api", "--paginate", endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("listing issues: %w", err)
+	}
+	out = strings.TrimSpace(out)
+	if out == "" || out == "[]" {
+		return nil, nil
+	}
+
+	// gh api --paginate may concatenate JSON arrays.
+	type rawIssue struct {
+		Number      int    `json:"number"`
+		Title       string `json:"title"`
+		Body        string `json:"body"`
+		PullRequest *struct {
+			URL string `json:"url"`
+		} `json:"pull_request"`
+	}
+
+	var all []rawIssue
+	dec := json.NewDecoder(strings.NewReader(out))
+	for dec.More() {
+		var page []rawIssue
+		if err := dec.Decode(&page); err != nil {
+			return nil, fmt.Errorf("parsing issues JSON: %w", err)
+		}
+		all = append(all, page...)
+	}
+
+	var issues []Issue
+	for _, ri := range all {
+		if ri.PullRequest != nil {
+			continue
+		}
+		issues = append(issues, Issue{
+			Number: ri.Number,
+			Title:  ri.Title,
+			Body:   ri.Body,
+		})
+	}
+	return issues, nil
 }
 
 func (r *Runner) run(ctx context.Context, dir, name string, args ...string) (string, error) {
