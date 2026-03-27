@@ -590,6 +590,85 @@ func TestGetFileContent(t *testing.T) {
 	}
 }
 
+func TestListIssues(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not found")
+	}
+
+	tests := []struct {
+		name      string
+		stdout    string
+		wantCount int
+		wantArgs  []string
+	}{
+		{
+			name:      "empty result",
+			stdout:    "[]",
+			wantCount: 0,
+			wantArgs:  []string{"api", "--paginate", "/repos/org/repo/issues?state=open&per_page=100"},
+		},
+		{
+			name:      "issues only",
+			stdout:    `[{"number":1,"title":"Bug report","body":"Something broke"},{"number":2,"title":"Feature request","body":"Add dark mode"}]`,
+			wantCount: 2,
+			wantArgs:  []string{"api", "--paginate", "/repos/org/repo/issues?state=open&per_page=100"},
+		},
+		{
+			name:      "filters out pull requests",
+			stdout:    `[{"number":1,"title":"Bug report","body":"Something broke"},{"number":2,"title":"Fix bug","body":"","pull_request":{"url":"https://api.github.com/repos/org/repo/pulls/2"}}]`,
+			wantCount: 1,
+			wantArgs:  []string{"api", "--paginate", "/repos/org/repo/issues?state=open&per_page=100"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			script, outFile := writeArgCapture(t, tt.stdout)
+			r := New(script)
+
+			issues, err := r.ListIssues(context.Background(), "org/repo")
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(issues) != tt.wantCount {
+				t.Errorf("got %d issues, want %d", len(issues), tt.wantCount)
+			}
+
+			gotArgs := readArgs(t, outFile)
+			if !equalArgs(gotArgs, tt.wantArgs) {
+				t.Errorf("args = %v, want %v", gotArgs, tt.wantArgs)
+			}
+		})
+	}
+}
+
+func TestListIssues_FieldValues(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not found")
+	}
+
+	stdout := `[{"number":42,"title":"Bug report","body":"Something broke"}]`
+	script, _ := writeArgCapture(t, stdout)
+	r := New(script)
+
+	issues, err := r.ListIssues(context.Background(), "org/repo")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(issues) != 1 {
+		t.Fatalf("got %d issues, want 1", len(issues))
+	}
+	if issues[0].Number != 42 {
+		t.Errorf("Number = %d, want 42", issues[0].Number)
+	}
+	if issues[0].Title != "Bug report" {
+		t.Errorf("Title = %q, want %q", issues[0].Title, "Bug report")
+	}
+	if issues[0].Body != "Something broke" {
+		t.Errorf("Body = %q, want %q", issues[0].Body, "Something broke")
+	}
+}
+
 func equalArgs(got, want []string) bool {
 	if len(got) != len(want) {
 		return false

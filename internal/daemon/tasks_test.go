@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -551,5 +552,488 @@ func TestCheckForNewSpecs_IdempotentAcrossCalls(t *testing.T) {
 	defer mu.Unlock()
 	if callCount != 1 {
 		t.Errorf("expected newTaskFunc to be called once, got %d", callCount)
+	}
+}
+
+// --- Issue intake tests ---
+
+// writeIssuesScript creates a fake gh that returns canned JSON for the issues API.
+// issues is the JSON-encoded list of issues to return.
+func writeIssuesScript(t *testing.T, issuesJSON string) string {
+	t.Helper()
+
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not found")
+	}
+
+	dir := t.TempDir()
+	script := filepath.Join(dir, "gh")
+
+	content := fmt.Sprintf(`#!/bin/sh
+printf '%%s' '%s'
+`, issuesJSON)
+
+	if err := os.WriteFile(script, []byte(content), 0755); err != nil {
+		t.Fatal(err)
+	}
+	return script
+}
+
+func makeIssuesJSON(t *testing.T, issues []gh.Issue) string {
+	t.Helper()
+	data, err := json.Marshal(issues)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
+func TestTaskNameFromIssue(t *testing.T) {
+	tests := []struct {
+		repo   string
+		number int
+		want   string
+	}{
+		{"org/tasks", 42, "tasks-42"},
+		{"org/my-repo", 1, "my-repo-1"},
+		{"simple", 10, "simple-10"},
+	}
+
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("%s-%d", tt.repo, tt.number), func(t *testing.T) {
+			got := taskNameFromIssue(tt.repo, tt.number)
+			if got != tt.want {
+				t.Errorf("taskNameFromIssue(%q, %d) = %q, want %q", tt.repo, tt.number, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadSaveProcessedIssues(t *testing.T) {
+	dir := t.TempDir()
+
+	// Loading from non-existent file returns empty map
+	pi, err := loadProcessedIssues(dir)
+	if err != nil {
+		t.Fatalf("loadProcessedIssues() error: %v", err)
+	}
+	if len(pi.Issues) != 0 {
+		t.Errorf("expected empty issues, got %d", len(pi.Issues))
+	}
+
+	// Save some issues
+	pi.Issues[1] = true
+	pi.Issues[42] = true
+	if err := saveProcessedIssues(dir, pi); err != nil {
+		t.Fatalf("saveProcessedIssues() error: %v", err)
+	}
+
+	// Reload and verify
+	pi2, err := loadProcessedIssues(dir)
+	if err != nil {
+		t.Fatalf("loadProcessedIssues() error: %v", err)
+	}
+	if !pi2.Issues[1] {
+		t.Error("expected issue 1 to be processed")
+	}
+	if !pi2.Issues[42] {
+		t.Error("expected issue 42 to be processed")
+	}
+	if pi2.Issues[99] {
+		t.Error("expected issue 99 to NOT be processed")
+	}
+}
+
+func TestLoadProcessedIssues_InvalidJSON(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, processedIssuesFile), []byte("not json"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := loadProcessedIssues(dir)
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+func TestLoadProcessedIssues_NullIssues(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, processedIssuesFile), []byte(`{}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	pi, err := loadProcessedIssues(dir)
+	if err != nil {
+		t.Fatalf("loadProcessedIssues() error: %v", err)
+	}
+	if pi.Issues == nil {
+		t.Fatal("expected non-nil Issues map")
+	}
+}
+
+func TestCheckForNewIssues_NoTasksRepo(t *testing.T) {
+	dir := t.TempDir()
+	d := New(gh.New("echo"), time.Minute, "", dir, nil)
+	// tasksRepo is empty, should be a no-op
+	d.checkForNewIssues(context.Background())
+	// No crash, no state file created
+	if _, err := os.Stat(filepath.Join(dir, processedIssuesFile)); !os.IsNotExist(err) {
+		t.Error("expected no processed issues file when tasksRepo is empty")
+	}
+}
+
+func TestCheckForNewIssues_PicksUpNewIssue(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not found")
+	}
+
+	dir := t.TempDir()
+
+	issues := []gh.Issue{
+		{Number: 7, Title: "Add dark mode", Body: "Please add a dark mode toggle."},
+	}
+	script := writeIssuesScript(t, makeIssuesJSON(t, issues))
+
+	d := New(gh.New(script), time.Minute, "", dir, nil)
+	d.SetTasksRepo("org/tasks")
+
+	var mu sync.Mutex
+	var capturedTasks []struct{ name, desc string }
+	done := make(chan struct{}, 1)
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description string) error {
+		mu.Lock()
+		capturedTasks = append(capturedTasks, struct{ name, desc string }{taskName, description})
+		mu.Unlock()
+		done <- struct{}{}
+		return nil
+	})
+
+	d.checkForNewIssues(context.Background())
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for newTaskFunc")
+	}
+
+	time.Sleep(50 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if len(capturedTasks) != 1 {
+		t.Fatalf("expected 1 task, got %d", len(capturedTasks))
+	}
+	if capturedTasks[0].name != "tasks-7" {
+		t.Errorf("task name = %q, want %q", capturedTasks[0].name, "tasks-7")
+	}
+	if capturedTasks[0].desc != "Please add a dark mode toggle." {
+		t.Errorf("task description = %q, want %q", capturedTasks[0].desc, "Please add a dark mode toggle.")
+	}
+
+	// Verify issue is marked as processed
+	pi, err := loadProcessedIssues(dir)
+	if err != nil {
+		t.Fatalf("loadProcessedIssues() error: %v", err)
+	}
+	if !pi.Issues[7] {
+		t.Error("expected issue 7 to be marked as processed")
+	}
+}
+
+func TestCheckForNewIssues_FallsBackToTitle(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not found")
+	}
+
+	dir := t.TempDir()
+
+	issues := []gh.Issue{
+		{Number: 3, Title: "Fix the login bug", Body: ""},
+	}
+	script := writeIssuesScript(t, makeIssuesJSON(t, issues))
+
+	d := New(gh.New(script), time.Minute, "", dir, nil)
+	d.SetTasksRepo("org/tasks")
+
+	var capturedDesc string
+	done := make(chan struct{}, 1)
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description string) error {
+		capturedDesc = description
+		done <- struct{}{}
+		return nil
+	})
+
+	d.checkForNewIssues(context.Background())
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out")
+	}
+
+	if capturedDesc != "Fix the login bug" {
+		t.Errorf("description = %q, want title fallback %q", capturedDesc, "Fix the login bug")
+	}
+}
+
+func TestCheckForNewIssues_SkipsAlreadyProcessed(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not found")
+	}
+
+	dir := t.TempDir()
+
+	// Pre-mark issue as processed
+	pi := &ProcessedIssues{Issues: map[int]bool{7: true}}
+	if err := saveProcessedIssues(dir, pi); err != nil {
+		t.Fatal(err)
+	}
+
+	issues := []gh.Issue{
+		{Number: 7, Title: "Add dark mode", Body: "content"},
+	}
+	script := writeIssuesScript(t, makeIssuesJSON(t, issues))
+
+	d := New(gh.New(script), time.Minute, "", dir, nil)
+	d.SetTasksRepo("org/tasks")
+
+	called := false
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description string) error {
+		called = true
+		return nil
+	})
+
+	d.checkForNewIssues(context.Background())
+	time.Sleep(50 * time.Millisecond)
+
+	if called {
+		t.Error("newTaskFunc should not have been called for already processed issue")
+	}
+}
+
+func TestCheckForNewIssues_SkipsRunningTask(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not found")
+	}
+
+	dir := t.TempDir()
+
+	issues := []gh.Issue{
+		{Number: 7, Title: "Add dark mode", Body: "content"},
+	}
+	script := writeIssuesScript(t, makeIssuesJSON(t, issues))
+
+	d := New(gh.New(script), time.Minute, "", dir, nil)
+	d.SetTasksRepo("org/tasks")
+	d.SetTaskRunning("tasks-7", true)
+
+	called := false
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description string) error {
+		called = true
+		return nil
+	})
+
+	d.checkForNewIssues(context.Background())
+	time.Sleep(50 * time.Millisecond)
+
+	if called {
+		t.Error("newTaskFunc should not have been called for already running task")
+	}
+
+	// Issue should not be marked as processed (so it's retried next cycle)
+	pi, err := loadProcessedIssues(dir)
+	if err != nil {
+		t.Fatalf("loadProcessedIssues() error: %v", err)
+	}
+	if pi.Issues[7] {
+		t.Error("issue should not be marked as processed when task is already running")
+	}
+}
+
+func TestCheckForNewIssues_FiltersPullRequests(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not found")
+	}
+
+	dir := t.TempDir()
+
+	// Simulate the raw GitHub API response which includes PRs with pull_request field
+	rawJSON := `[{"number":1,"title":"Real issue","body":"Fix this"},{"number":2,"title":"A PR","body":"","pull_request":{"url":"https://api.github.com/repos/org/tasks/pulls/2"}}]`
+	script := writeIssuesScript(t, rawJSON)
+
+	d := New(gh.New(script), time.Minute, "", dir, nil)
+	d.SetTasksRepo("org/tasks")
+
+	var mu sync.Mutex
+	var capturedNames []string
+	done := make(chan struct{}, 2)
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description string) error {
+		mu.Lock()
+		capturedNames = append(capturedNames, taskName)
+		mu.Unlock()
+		done <- struct{}{}
+		return nil
+	})
+
+	d.checkForNewIssues(context.Background())
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out")
+	}
+
+	time.Sleep(50 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if len(capturedNames) != 1 {
+		t.Fatalf("expected 1 task (PR should be filtered), got %d: %v", len(capturedNames), capturedNames)
+	}
+	if capturedNames[0] != "tasks-1" {
+		t.Errorf("task name = %q, want %q", capturedNames[0], "tasks-1")
+	}
+}
+
+func TestCheckForNewIssues_MultipleIssues(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not found")
+	}
+
+	dir := t.TempDir()
+
+	issues := []gh.Issue{
+		{Number: 1, Title: "Issue A", Body: "Body A"},
+		{Number: 2, Title: "Issue B", Body: "Body B"},
+	}
+	script := writeIssuesScript(t, makeIssuesJSON(t, issues))
+
+	d := New(gh.New(script), time.Minute, "", dir, nil)
+	d.SetTasksRepo("org/tasks")
+
+	var mu sync.Mutex
+	var capturedNames []string
+	done := make(chan struct{}, 2)
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description string) error {
+		mu.Lock()
+		capturedNames = append(capturedNames, taskName)
+		mu.Unlock()
+		done <- struct{}{}
+		return nil
+	})
+
+	d.checkForNewIssues(context.Background())
+
+	for i := 0; i < 2; i++ {
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("timed out waiting for newTaskFunc (got %d of 2)", i)
+		}
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if len(capturedNames) != 2 {
+		t.Fatalf("expected 2 tasks, got %d", len(capturedNames))
+	}
+
+	// Both should be processed
+	pi, err := loadProcessedIssues(dir)
+	if err != nil {
+		t.Fatalf("loadProcessedIssues() error: %v", err)
+	}
+	if !pi.Issues[1] || !pi.Issues[2] {
+		t.Error("expected both issues to be marked as processed")
+	}
+}
+
+func TestCheckForNewIssues_IdempotentAcrossCalls(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not found")
+	}
+
+	dir := t.TempDir()
+
+	issues := []gh.Issue{
+		{Number: 42, Title: "Feature", Body: "Description"},
+	}
+	script := writeIssuesScript(t, makeIssuesJSON(t, issues))
+
+	d := New(gh.New(script), time.Minute, "", dir, nil)
+	d.SetTasksRepo("org/tasks")
+
+	var mu sync.Mutex
+	callCount := 0
+	done := make(chan struct{}, 2)
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description string) error {
+		mu.Lock()
+		callCount++
+		mu.Unlock()
+		done <- struct{}{}
+		return nil
+	})
+
+	// First call should spawn
+	d.checkForNewIssues(context.Background())
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out")
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	// Second call should NOT spawn (already processed)
+	d.checkForNewIssues(context.Background())
+	time.Sleep(100 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if callCount != 1 {
+		t.Errorf("expected newTaskFunc to be called once, got %d", callCount)
+	}
+}
+
+func TestCheckForNewIssues_SetsRunningState(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not found")
+	}
+
+	dir := t.TempDir()
+
+	issues := []gh.Issue{
+		{Number: 5, Title: "My task", Body: "content"},
+	}
+	script := writeIssuesScript(t, makeIssuesJSON(t, issues))
+
+	d := New(gh.New(script), time.Minute, "", dir, nil)
+	d.SetTasksRepo("org/tasks")
+
+	started := make(chan struct{})
+	finish := make(chan struct{})
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description string) error {
+		close(started)
+		<-finish
+		return nil
+	})
+
+	d.checkForNewIssues(context.Background())
+
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for task to start")
+	}
+
+	if !d.IsTaskRunning("tasks-5") {
+		t.Error("expected task to be marked as running")
+	}
+
+	close(finish)
+	time.Sleep(50 * time.Millisecond)
+
+	if d.IsTaskRunning("tasks-5") {
+		t.Error("expected task to no longer be running")
 	}
 }
