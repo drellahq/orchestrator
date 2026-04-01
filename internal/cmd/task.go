@@ -231,17 +231,25 @@ func executeTask(ctx context.Context, taskName, taskDescription string, taskDir 
 }
 
 // executePipeline runs a multi-step pipeline with iteration support.
+//
+// The pipeline assumes the last step is a reviewing role that produces a
+// structured VERDICT (pass/fail). When the verdict is "fail", the pipeline
+// re-runs all steps from the beginning with the reviewer's feedback
+// appended to the first step's prompt. This loop repeats until the
+// reviewer passes or max_iterations (configured on the last step) is
+// reached.
 func executePipeline(ctx context.Context, runner *gjoll.Runner, taskName, taskDescription string, taskDir *task.Dir, cfg *config.Config, ghRunner *gh.Runner, sshOpts *gjoll.SSHOpts, steps []config.PipelineStep) error {
 	pipelineState := pipeline.NewState("default", steps)
 	if err := taskDir.SavePipelineState(pipelineState); err != nil {
 		return fmt.Errorf("saving pipeline state: %w", err)
 	}
 
-	// Track validator findings across iterations for escalation comments.
-	var validatorFindings []string
+	// Track findings from the reviewing step (last step) across iterations
+	// for the escalation comment if max iterations is reached.
+	var reviewFindings []string
 
-	// The iteration loop: producer runs, then validator reviews. If the
-	// validator fails, we loop back with feedback.
+	// The iteration loop: all steps run in order. If the last step's
+	// verdict is "fail", we loop back with its feedback.
 	maxIter := steps[len(steps)-1].MaxIterations
 	for iteration := 1; iteration <= maxIter; iteration++ {
 		for stepIdx, step := range steps {
@@ -272,8 +280,8 @@ func executePipeline(ctx context.Context, runner *gjoll.Runner, taskName, taskDe
 				// First producer run: just the task description.
 				userPrompt = taskDescription
 			} else if stepIdx == 0 && iteration > 1 {
-				// Producer re-run after validator failure.
-				lastFindings := validatorFindings[len(validatorFindings)-1]
+				// First step re-run after the reviewing step's failure.
+				lastFindings := reviewFindings[len(reviewFindings)-1]
 				userPrompt = pipeline.BuildFeedbackPrompt(taskDescription, lastFindings)
 			} else {
 				// Non-first step (e.g. validator): build handoff prompt.
@@ -292,7 +300,7 @@ func executePipeline(ctx context.Context, runner *gjoll.Runner, taskName, taskDe
 
 			pipelineState.Steps[stepIdx].Status = "completed"
 
-			// For the last step in the pipeline, parse the verdict.
+			// The last step is expected to produce a VERDICT line.
 			if stepIdx == len(steps)-1 {
 				transcript, err := os.ReadFile(transcriptFile)
 				if err != nil {
@@ -320,7 +328,7 @@ func executePipeline(ctx context.Context, runner *gjoll.Runner, taskName, taskDe
 				}
 
 				// Verdict is fail — record findings for potential escalation.
-				validatorFindings = append(validatorFindings, findings)
+				reviewFindings = append(reviewFindings, findings)
 			}
 
 			if err := taskDir.SavePipelineState(pipelineState); err != nil {
@@ -331,7 +339,7 @@ func executePipeline(ctx context.Context, runner *gjoll.Runner, taskName, taskDe
 
 	// Max iterations reached without passing — escalate.
 	slog.Warn("Pipeline max iterations reached", "task", taskName, "iterations", maxIter)
-	return finalizePipeline(ctx, taskDir, ghRunner, taskName, false, validatorFindings)
+	return finalizePipeline(ctx, taskDir, ghRunner, taskName, false, reviewFindings)
 }
 
 // finalizePipeline handles PR readiness signaling after pipeline completion.

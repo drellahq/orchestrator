@@ -24,11 +24,21 @@
 # Pipeline definitions. A pipeline is an ordered sequence of agent roles.
 # The "default" pipeline is used unless overridden. If no pipelines are
 # configured, a single "producer" step runs (backward-compatible behavior).
+#
+# The last step in a multi-step pipeline is treated as the reviewing role:
+# it must produce a structured "VERDICT: pass" or "VERDICT: fail" line in
+# its output. On failure, the orchestrator re-runs the pipeline from the
+# first step with the reviewer's findings as feedback. This loop repeats
+# until the reviewer passes or max_iterations is reached.
+#
+# max_iterations is configured on the last step and controls how many
+# full pipeline cycles run before escalation (default: 3).
+#
 # pipelines:
 #   default:
 #     - role: producer
 #     - role: validator
-#       max_iterations: 3     # producer-validator round-trips before escalation
+#       max_iterations: 3     # full pipeline cycles before escalation
 #       handoff:
 #         include_diff: true
 #         include_prior_transcript: false
