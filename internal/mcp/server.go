@@ -32,6 +32,8 @@ type PROpener interface {
 	AddCoAuthorTrailers(ctx context.Context, repoDir, upstream, base, sourceRef, trailer string) error
 	CommentOnPR(ctx context.Context, prURL, body string) error
 	UpdatePRTitle(ctx context.Context, prURL, title string) error
+	MarkPRReady(ctx context.Context, prURL string) error
+	AddLabelToPR(ctx context.Context, prURL, label string) error
 }
 
 // OpenPRInput is the input schema for the open_pr tool.

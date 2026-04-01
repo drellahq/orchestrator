@@ -16,6 +16,7 @@ import (
 	"github.com/drellabot/orchestrator/internal/gjoll"
 	"github.com/drellabot/orchestrator/internal/logging"
 	mcpserver "github.com/drellabot/orchestrator/internal/mcp"
+	"github.com/drellabot/orchestrator/internal/pipeline"
 	"github.com/drellabot/orchestrator/internal/prompts"
 	"github.com/drellabot/orchestrator/internal/task"
 	"github.com/spf13/cobra"
@@ -195,13 +196,190 @@ func executeTask(ctx context.Context, taskName, taskDescription string, taskDir 
 	slog.Info("Sandbox provisioned", "task", taskName)
 
 	if !continueSession {
-		if err := setupSandbox(ctx, runner, taskName); err != nil {
+		// For continue sessions, sandbox is already set up; we only need
+		// to write the system prompt for the current pipeline step below.
+		if err := setupSandboxBase(ctx, runner, taskName); err != nil {
 			return fmt.Errorf("setting up sandbox: %w", err)
 		}
 		slog.Debug("Sandbox setup complete", "task", taskName)
 	}
 
-	// Build the Claude run script
+	sshOpts := &gjoll.SSHOpts{
+		Proxy:          true,
+		ReverseTunnels: []string{mcpTunnel},
+	}
+
+	// For continue sessions, run a single Claude session (no pipeline).
+	if continueSession {
+		return runSingleSession(ctx, runner, taskName, taskDescription, taskDir, sshOpts, true)
+	}
+
+	// Load the pipeline and execute it.
+	steps := cfg.Pipeline("")
+	multiStep := pipeline.IsMultiStep(steps)
+
+	if !multiStep {
+		// Single-step pipeline: backward-compatible behavior.
+		if err := writeSystemPrompt(ctx, runner, taskName, cfg.AgentsDir, steps[0].Role); err != nil {
+			return err
+		}
+		return runSingleSession(ctx, runner, taskName, taskDescription, taskDir, sshOpts, false)
+	}
+
+	// Multi-step pipeline execution.
+	return executePipeline(ctx, runner, taskName, taskDescription, taskDir, cfg, ghRunner, sshOpts, steps)
+}
+
+// executePipeline runs a multi-step pipeline with iteration support.
+func executePipeline(ctx context.Context, runner *gjoll.Runner, taskName, taskDescription string, taskDir *task.Dir, cfg *config.Config, ghRunner *gh.Runner, sshOpts *gjoll.SSHOpts, steps []config.PipelineStep) error {
+	pipelineState := pipeline.NewState("default", steps)
+	if err := taskDir.SavePipelineState(pipelineState); err != nil {
+		return fmt.Errorf("saving pipeline state: %w", err)
+	}
+
+	// Track validator findings across iterations for escalation comments.
+	var validatorFindings []string
+
+	// The iteration loop: producer runs, then validator reviews. If the
+	// validator fails, we loop back with feedback.
+	maxIter := steps[len(steps)-1].MaxIterations
+	for iteration := 1; iteration <= maxIter; iteration++ {
+		for stepIdx, step := range steps {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+
+			slog.Info("Pipeline step", "task", taskName, "role", step.Role,
+				"step", stepIdx+1, "of", len(steps), "iteration", iteration)
+
+			// Update pipeline state.
+			pipelineState.CurrentStep = stepIdx
+			pipelineState.Iteration = iteration
+			pipelineState.Steps[stepIdx].Status = "running"
+			pipelineState.Steps[stepIdx].Iterations = iteration
+			if err := taskDir.SavePipelineState(pipelineState); err != nil {
+				slog.Warn("Failed to save pipeline state", "error", err)
+			}
+
+			// Write the system prompt for this role.
+			if err := writeSystemPrompt(ctx, runner, taskName, cfg.AgentsDir, step.Role); err != nil {
+				return err
+			}
+
+			// Build the user prompt.
+			var userPrompt string
+			if stepIdx == 0 && iteration == 1 {
+				// First producer run: just the task description.
+				userPrompt = taskDescription
+			} else if stepIdx == 0 && iteration > 1 {
+				// Producer re-run after validator failure.
+				lastFindings := validatorFindings[len(validatorFindings)-1]
+				userPrompt = pipeline.BuildFeedbackPrompt(taskDescription, lastFindings)
+			} else {
+				// Non-first step (e.g. validator): build handoff prompt.
+				diff, err := getDiff(ctx, runner, taskName)
+				if err != nil {
+					slog.Warn("Failed to get diff for handoff", "error", err)
+				}
+				userPrompt = pipeline.BuildHandoffPrompt(taskDescription, diff, "", step.Handoff)
+			}
+
+			// Run Claude for this step.
+			transcriptFile := taskDir.IterationTranscriptPath(step.Role, iteration, true)
+			if err := runClaudeSession(ctx, runner, taskName, userPrompt, transcriptFile, sshOpts); err != nil {
+				slog.Error("Claude exited with error", "task", taskName, "role", step.Role, "error", err)
+			}
+
+			pipelineState.Steps[stepIdx].Status = "completed"
+
+			// For the last step in the pipeline, parse the verdict.
+			if stepIdx == len(steps)-1 {
+				transcript, err := os.ReadFile(transcriptFile)
+				if err != nil {
+					slog.Error("Failed to read transcript for verdict", "error", err)
+					pipelineState.Steps[stepIdx].Verdict = pipeline.VerdictFail
+					break
+				}
+
+				verdict, findings, err := pipeline.ParseVerdict(transcript)
+				if err != nil {
+					slog.Warn("Failed to parse verdict, treating as fail", "error", err)
+					verdict = pipeline.VerdictFail
+					findings = fmt.Sprintf("Could not parse verdict: %v", err)
+				}
+
+				pipelineState.Steps[stepIdx].Verdict = verdict
+				slog.Info("Validator verdict", "task", taskName, "verdict", verdict, "iteration", iteration)
+
+				if verdict == pipeline.VerdictPass {
+					if err := taskDir.SavePipelineState(pipelineState); err != nil {
+						slog.Warn("Failed to save pipeline state", "error", err)
+					}
+					// Pipeline succeeded — mark PR as ready.
+					return finalizePipeline(ctx, taskDir, ghRunner, taskName, true, nil)
+				}
+
+				// Verdict is fail — record findings for potential escalation.
+				validatorFindings = append(validatorFindings, findings)
+			}
+
+			if err := taskDir.SavePipelineState(pipelineState); err != nil {
+				slog.Warn("Failed to save pipeline state", "error", err)
+			}
+		}
+	}
+
+	// Max iterations reached without passing — escalate.
+	slog.Warn("Pipeline max iterations reached", "task", taskName, "iterations", maxIter)
+	return finalizePipeline(ctx, taskDir, ghRunner, taskName, false, validatorFindings)
+}
+
+// finalizePipeline handles PR readiness signaling after pipeline completion.
+func finalizePipeline(ctx context.Context, taskDir *task.Dir, ghRunner *gh.Runner, taskName string, passed bool, findings []string) error {
+	if err := taskDir.TouchUpdatedAt(time.Now()); err != nil {
+		slog.Warn("Failed to update updated_at", "task", taskName, "error", err)
+	}
+
+	state, err := taskDir.LoadState()
+	if err != nil {
+		slog.Warn("Failed to load state for PR finalization", "error", err)
+		return nil
+	}
+
+	for _, pr := range state.Resources.GitHub.PRs {
+		if pr.Closed {
+			continue
+		}
+
+		if passed {
+			slog.Info("Marking PR as ready", "task", taskName, "pr", pr.URL)
+			if err := ghRunner.MarkPRReady(ctx, pr.URL); err != nil {
+				slog.Warn("Failed to mark PR ready", "pr", pr.URL, "error", err)
+			}
+		} else {
+			slog.Info("Adding needs-human-input label", "task", taskName, "pr", pr.URL)
+			if err := ghRunner.AddLabelToPR(ctx, pr.URL, "needs-human-input"); err != nil {
+				slog.Warn("Failed to add label", "pr", pr.URL, "error", err)
+			}
+
+			comment := pipeline.EscalationComment(len(findings), findings)
+			if err := ghRunner.CommentOnPR(ctx, pr.URL, comment); err != nil {
+				slog.Warn("Failed to post escalation comment", "pr", pr.URL, "error", err)
+			}
+		}
+	}
+
+	if passed {
+		slog.Info("Pipeline completed successfully", "task", taskName)
+	} else {
+		slog.Info("Pipeline escalated to human review", "task", taskName)
+	}
+	return nil
+}
+
+// runSingleSession runs a single Claude session (used for single-step
+// pipelines and continue sessions).
+func runSingleSession(ctx context.Context, runner *gjoll.Runner, taskName, taskDescription string, taskDir *task.Dir, sshOpts *gjoll.SSHOpts, continueSession bool) error {
 	slog.Info("Running Claude", "task", taskName)
 	runScript := buildRunScript(taskDescription, continueSession)
 
@@ -221,11 +399,6 @@ func executeTask(ctx context.Context, taskName, taskDescription string, taskDir 
 	}
 	if err := runner.SSH(ctx, taskName, "chmod +x /tmp/run-claude.sh"); err != nil {
 		return fmt.Errorf("making run script executable: %w", err)
-	}
-
-	sshOpts := &gjoll.SSHOpts{
-		Proxy:          true,
-		ReverseTunnels: []string{mcpTunnel},
 	}
 
 	// Write the raw JSONL transcript to the host file in real-time so the
@@ -259,6 +432,78 @@ func executeTask(ctx context.Context, taskName, taskDescription string, taskDir 
 	return nil
 }
 
+// runClaudeSession runs a single Claude session for a pipeline step,
+// writing output to the specified transcript file.
+func runClaudeSession(ctx context.Context, runner *gjoll.Runner, taskName, userPrompt, transcriptPath string, sshOpts *gjoll.SSHOpts) error {
+	runScript := buildRunScript(userPrompt, false)
+
+	tmpRun, err := os.CreateTemp("", "run-claude-*.sh")
+	if err != nil {
+		return fmt.Errorf("creating run script: %w", err)
+	}
+	defer os.Remove(tmpRun.Name())
+	if _, err := tmpRun.WriteString(runScript); err != nil {
+		tmpRun.Close()
+		return fmt.Errorf("writing run script: %w", err)
+	}
+	tmpRun.Close()
+
+	if err := runner.Cp(ctx, taskName, tmpRun.Name(), ":/tmp/run-claude.sh"); err != nil {
+		return fmt.Errorf("copying run script: %w", err)
+	}
+	if err := runner.SSH(ctx, taskName, "chmod +x /tmp/run-claude.sh"); err != nil {
+		return fmt.Errorf("making run script executable: %w", err)
+	}
+
+	transcriptFile, err := os.OpenFile(transcriptPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	if err != nil {
+		return fmt.Errorf("opening transcript file: %w", err)
+	}
+	defer transcriptFile.Close()
+
+	tw := newTranscriptWriter(os.Stdout, verbose)
+	w := io.MultiWriter(tw, transcriptFile)
+
+	return runner.SSHProxyOutput(ctx, taskName, w, sshOpts, "/tmp/run-claude.sh")
+}
+
+// writeSystemPrompt writes the assembled system prompt for a role to the sandbox.
+func writeSystemPrompt(ctx context.Context, runner *gjoll.Runner, taskName, agentsDir, role string) error {
+	systemPrompt, err := pipeline.BuildAgentSystemPrompt(agentsDir, role)
+	if err != nil {
+		return fmt.Errorf("building system prompt for %s: %w", role, err)
+	}
+
+	tmpFile, err := os.CreateTemp("", "prompt-*.md")
+	if err != nil {
+		return fmt.Errorf("creating temp file: %w", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	if _, err := tmpFile.WriteString(systemPrompt); err != nil {
+		tmpFile.Close()
+		return fmt.Errorf("writing prompt: %w", err)
+	}
+	tmpFile.Close()
+
+	if err := runner.Cp(ctx, taskName, tmpFile.Name(), ":~/system-prompt.md"); err != nil {
+		return fmt.Errorf("copying system prompt: %w", err)
+	}
+	return nil
+}
+
+// getDiff returns the git diff of uncommitted + committed changes in the sandbox.
+func getDiff(ctx context.Context, runner *gjoll.Runner, taskName string) (string, error) {
+	// Get diff of all committed changes vs the base branch.
+	// We try common base branch names; the actual diff command will
+	// succeed even if the range is empty.
+	diff, err := runner.SSHOutput(ctx, taskName, "cd ~/project 2>/dev/null && git diff origin/main...HEAD 2>/dev/null || git diff HEAD~10 2>/dev/null || echo '(no diff available)'")
+	if err != nil {
+		return "", err
+	}
+	return diff, nil
+}
+
 func buildRunScript(taskDescription string, continueSession bool) string {
 	escapedDesc := strings.ReplaceAll(taskDescription, "'", "'\\''")
 
@@ -278,7 +523,9 @@ stdbuf -oL claude --dangerously-skip-permissions -p --verbose \
 `, claudeFlags, escapedDesc, teeFlag)
 }
 
-func setupSandbox(ctx context.Context, runner *gjoll.Runner, taskName string) error {
+// setupSandboxBase configures git and registers the MCP server in the sandbox.
+// It does NOT write the system prompt — that is done per-pipeline-step.
+func setupSandboxBase(ctx context.Context, runner *gjoll.Runner, taskName string) error {
 	// Configure git
 	if err := runner.SSH(ctx, taskName, "git config --global user.name Drellabot"); err != nil {
 		return fmt.Errorf("git config user.name: %w", err)
@@ -287,7 +534,7 @@ func setupSandbox(ctx context.Context, runner *gjoll.Runner, taskName string) er
 		return fmt.Errorf("git config user.email: %w", err)
 	}
 
-	// Write system prompt to a temp file and copy it to the sandbox
+	// Write a default system prompt (will be overwritten by pipeline steps).
 	tmpFile, err := os.CreateTemp("", "prompt-*.md")
 	if err != nil {
 		return fmt.Errorf("creating temp file: %w", err)

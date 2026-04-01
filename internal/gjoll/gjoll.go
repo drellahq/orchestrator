@@ -95,6 +95,19 @@ func (r *Runner) Stop(ctx context.Context, name string) error {
 	return r.run(ctx, nil, "stop", name)
 }
 
+// SSHOutput runs a command inside the sandbox and returns its stdout as a string.
+func (r *Runner) SSHOutput(ctx context.Context, name string, command ...string) (string, error) {
+	args := []string{"ssh", name, "--"}
+	args = append(args, command...)
+	cmd := exec.CommandContext(ctx, r.bin, args...)
+	cmd.Stderr = os.Stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return string(out), fmt.Errorf("gjoll ssh: %w", err)
+	}
+	return string(out), nil
+}
+
 // SSHProxyOutput runs a command inside the sandbox with the given SSH options,
 // writing the command's stdout to w instead of os.Stdout.
 func (r *Runner) SSHProxyOutput(ctx context.Context, name string, w io.Writer, opts *SSHOpts, command ...string) error {

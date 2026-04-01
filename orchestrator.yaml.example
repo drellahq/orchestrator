@@ -17,6 +17,23 @@
 #   - myorg/myrepo
 #   - myorg/*
 
+# Directory containing agent role prompt files (default: "agents").
+# Each file defines one agent role; the filename (minus .md) is the role ID.
+# agents_dir: "./agents"
+
+# Pipeline definitions. A pipeline is an ordered sequence of agent roles.
+# The "default" pipeline is used unless overridden. If no pipelines are
+# configured, a single "producer" step runs (backward-compatible behavior).
+# pipelines:
+#   default:
+#     - role: producer
+#     - role: validator
+#       max_iterations: 3     # producer-validator round-trips before escalation
+#       handoff:
+#         include_diff: true
+#         include_prior_transcript: false
+#         include_prior_summary: false
+
 # Daemon configuration for automatic PR comment polling.
 # daemon:
 #   # How often the daemon completes a full cycle across all PRs.

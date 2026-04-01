@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/drellabot/orchestrator/internal/pipeline"
 )
 
 // PR records a pull request opened by the task.
@@ -56,12 +58,13 @@ type Resources struct {
 
 // State holds task metadata and mutable state persisted to state.json.
 type State struct {
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
-	Author      string    `json:"author,omitempty"`
-	Resources   Resources `json:"resources"`
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	CreatedAt   time.Time       `json:"created_at"`
+	UpdatedAt   time.Time       `json:"updated_at"`
+	Author      string          `json:"author,omitempty"`
+	Resources   Resources       `json:"resources"`
+	Pipeline    *pipeline.State `json:"pipeline,omitempty"`
 }
 
 // Dir represents a per-task directory structure.
@@ -201,6 +204,34 @@ func (d *Dir) AddPR(pr PR) error {
 	}
 	s.Resources.GitHub.PRs = append(s.Resources.GitHub.PRs, pr)
 	return d.saveStateLocked(s)
+}
+
+// SavePipelineState persists the pipeline execution state.
+func (d *Dir) SavePipelineState(ps *pipeline.State) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	s, err := d.loadStateLocked()
+	if err != nil {
+		return err
+	}
+	s.Pipeline = ps
+	return d.saveStateLocked(s)
+}
+
+// LoadPipelineState returns the current pipeline state, or nil if not set.
+func (d *Dir) LoadPipelineState() (*pipeline.State, error) {
+	s, err := d.LoadState()
+	if err != nil {
+		return nil, err
+	}
+	return s.Pipeline, nil
+}
+
+// IterationTranscriptPath returns the path for an iteration-indexed
+// transcript file (e.g., transcript-producer-1.jsonl).
+func (d *Dir) IterationTranscriptPath(role string, iteration int, multiStep bool) string {
+	return filepath.Join(d.root, pipeline.TranscriptName(role, iteration, multiStep))
 }
 
 // UpdatePR finds the PR with the given URL and applies the mutation function.

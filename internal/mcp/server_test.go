@@ -64,6 +64,15 @@ type stubPROpener struct {
 	titleCalled    bool
 	gotTitleURL    string
 	gotTitleTitle   string
+
+	readyErr    error
+	readyCalled bool
+	gotReadyURL string
+
+	labelErr    error
+	labelCalled bool
+	gotLabelURL   string
+	gotLabelLabel string
 }
 
 func (s *stubPROpener) AuthenticatedUser(_ context.Context) (string, error) {
@@ -109,6 +118,19 @@ func (s *stubPROpener) UpdatePRTitle(_ context.Context, prURL, title string) err
 	s.gotTitleURL = prURL
 	s.gotTitleTitle = title
 	return s.titleErr
+}
+
+func (s *stubPROpener) MarkPRReady(_ context.Context, prURL string) error {
+	s.readyCalled = true
+	s.gotReadyURL = prURL
+	return s.readyErr
+}
+
+func (s *stubPROpener) AddLabelToPR(_ context.Context, prURL, label string) error {
+	s.labelCalled = true
+	s.gotLabelURL = prURL
+	s.gotLabelLabel = label
+	return s.labelErr
 }
 
 func startTestServer(t *testing.T, puller CodePuller, prOpener PROpener, allowedRepos []string, authors ...string) (*task.Dir, *Server, string) {

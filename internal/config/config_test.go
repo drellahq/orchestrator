@@ -23,6 +23,7 @@ func TestLoad(t *testing.T) {
 				SlackWebhook: "https://hooks.slack.com/test",
 				OutputDir:    "/tmp/tasks",
 				GjollEnv:     "/path/to/sandbox.tf",
+				AgentsDir:    "./agents",
 			},
 		},
 		{
@@ -33,6 +34,7 @@ func TestLoad(t *testing.T) {
 				SlackWebhook: "https://hooks.slack.com/test",
 				OutputDir:    "./tasks",
 				GjollEnv:     "./configs/sandbox.tf",
+				AgentsDir:    "./agents",
 			},
 		},
 		{
@@ -42,6 +44,7 @@ func TestLoad(t *testing.T) {
 			want: Config{
 				OutputDir: "./tasks",
 				GjollEnv:  "./configs/sandbox.tf",
+				AgentsDir: "./agents",
 			},
 		},
 		{
@@ -51,6 +54,7 @@ func TestLoad(t *testing.T) {
 			want: Config{
 				OutputDir:    "./tasks",
 				GjollEnv:     "./configs/sandbox.tf",
+				AgentsDir:    "./agents",
 				AllowedRepos: []string{"osbuild/osbuild", "drellabot/*"},
 			},
 		},
@@ -61,6 +65,7 @@ func TestLoad(t *testing.T) {
 			want: Config{
 				OutputDir: "./tasks",
 				GjollEnv:  "./configs/sandbox.tf",
+				AgentsDir: "./agents",
 				Daemon: DaemonConfig{
 					PollInterval:      "30s",
 					AllowedCommenters: []string{"alice", "bob"},

@@ -196,6 +196,24 @@ func (r *Runner) UpdatePRTitle(ctx context.Context, prURL, title string) error {
 	return nil
 }
 
+// MarkPRReady converts a draft PR to ready-for-review.
+func (r *Runner) MarkPRReady(ctx context.Context, prURL string) error {
+	_, err := r.run(ctx, "", r.bin, "pr", "ready", prURL)
+	if err != nil {
+		return fmt.Errorf("marking PR ready: %w", err)
+	}
+	return nil
+}
+
+// AddLabelToPR adds a label to a pull request.
+func (r *Runner) AddLabelToPR(ctx context.Context, prURL, label string) error {
+	_, err := r.run(ctx, "", r.bin, "pr", "edit", prURL, "--add-label", label)
+	if err != nil {
+		return fmt.Errorf("adding label to PR: %w", err)
+	}
+	return nil
+}
+
 // ListRepoFiles lists files in a directory of a repo on a given branch.
 // It returns a slice of file paths relative to the directory.
 func (r *Runner) ListRepoFiles(ctx context.Context, repo, branch, dir string) ([]string, error) {
