@@ -276,6 +276,7 @@ func buildRunScript(taskDescription string, continueSession bool) string {
 	return fmt.Sprintf(`#!/bin/bash
 source ~/.bashrc
 stdbuf -oL claude --dangerously-skip-permissions -p --verbose \
+  --effort max \
   --output-format stream-json --append-system-prompt-file ~/system-prompt.md \
   %s '%s' \
   </dev/null | stdbuf -oL tee %s ~/transcript.jsonl
