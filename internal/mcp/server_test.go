@@ -64,6 +64,13 @@ type stubPROpener struct {
 	titleCalled    bool
 	gotTitleURL    string
 	gotTitleTitle   string
+
+	reviewErr    error
+	reviewCalled bool
+	gotReviewRepo  string
+	gotReviewPR    int
+	gotReviewEvent string
+	gotReviewBody  string
 }
 
 func (s *stubPROpener) AuthenticatedUser(_ context.Context) (string, error) {
@@ -109,6 +116,15 @@ func (s *stubPROpener) UpdatePRTitle(_ context.Context, prURL, title string) err
 	s.gotTitleURL = prURL
 	s.gotTitleTitle = title
 	return s.titleErr
+}
+
+func (s *stubPROpener) PostReview(_ context.Context, repo string, pr int, event, body string) error {
+	s.reviewCalled = true
+	s.gotReviewRepo = repo
+	s.gotReviewPR = pr
+	s.gotReviewEvent = event
+	s.gotReviewBody = body
+	return s.reviewErr
 }
 
 func startTestServer(t *testing.T, puller CodePuller, prOpener PROpener, allowedRepos []string, authors ...string) (*task.Dir, *Server, string) {
@@ -195,7 +211,7 @@ func TestServerListTools(t *testing.T) {
 		t.Fatalf("ListTools() error: %v", err)
 	}
 
-	wantTools := map[string]bool{"open_pr": false, "update_pr": false, "comment_on_pr": false}
+	wantTools := map[string]bool{"open_pr": false, "update_pr": false, "comment_on_pr": false, "post_review": false}
 	for _, tool := range result.Tools {
 		if _, ok := wantTools[tool.Name]; ok {
 			wantTools[tool.Name] = true
@@ -1008,6 +1024,116 @@ func TestCommentOnPRTool(t *testing.T) {
 			}
 			if tt.wantTitleCalled && tt.opener.gotTitleTitle != tt.wantTitle {
 				t.Errorf("gotTitleTitle = %q, want %q", tt.opener.gotTitleTitle, tt.wantTitle)
+			}
+		})
+	}
+}
+
+func TestPostReviewTool(t *testing.T) {
+	tests := []struct {
+		name             string
+		opener           *stubPROpener
+		allowedRepos     []string
+		input            map[string]any
+		wantError        bool
+		wantText         string
+		wantReviewCalled bool
+	}{
+		{
+			name:         "successful review",
+			opener:       &stubPROpener{user: "testuser"},
+			allowedRepos: []string{"osbuild/*"},
+			input: map[string]any{
+				"repo":  "osbuild/osbuild",
+				"pr":    42,
+				"event": "APPROVE",
+				"body":  "LGTM!",
+			},
+			wantText:         "Review posted on osbuild/osbuild#42 (APPROVE)",
+			wantReviewCalled: true,
+		},
+		{
+			name:         "repo not allowed",
+			opener:       &stubPROpener{user: "testuser"},
+			allowedRepos: []string{"osbuild/*"},
+			input: map[string]any{
+				"repo":  "evil/repo",
+				"pr":    1,
+				"event": "APPROVE",
+				"body":  "sneaky",
+			},
+			wantError:        true,
+			wantText:         "not in the allowed repos list",
+			wantReviewCalled: false,
+		},
+		{
+			name:         "invalid event",
+			opener:       &stubPROpener{user: "testuser", reviewErr: fmt.Errorf("invalid review event \"INVALID\": must be APPROVE, REQUEST_CHANGES, or COMMENT")},
+			allowedRepos: []string{"osbuild/*"},
+			input: map[string]any{
+				"repo":  "osbuild/osbuild",
+				"pr":    1,
+				"event": "INVALID",
+				"body":  "bad event",
+			},
+			wantError:        true,
+			wantText:         "invalid review event",
+			wantReviewCalled: true,
+		},
+		{
+			name:         "gh command failure",
+			opener:       &stubPROpener{user: "testuser", reviewErr: fmt.Errorf("gh command failed")},
+			allowedRepos: []string{"osbuild/*"},
+			input: map[string]any{
+				"repo":  "osbuild/osbuild",
+				"pr":    1,
+				"event": "COMMENT",
+				"body":  "test",
+			},
+			wantError:        true,
+			wantText:         "gh command failed",
+			wantReviewCalled: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, endpoint := startTestServer(t, &stubPuller{}, tt.opener, tt.allowedRepos)
+			session := connectClient(t, endpoint)
+
+			result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+				Name:      "post_review",
+				Arguments: tt.input,
+			})
+			if err != nil {
+				t.Fatalf("CallTool() protocol error: %v", err)
+			}
+
+			if result.IsError != tt.wantError {
+				t.Errorf("IsError = %v, want %v", result.IsError, tt.wantError)
+			}
+
+			var text string
+			for _, c := range result.Content {
+				if tc, ok := c.(*mcp.TextContent); ok {
+					text = tc.Text
+				}
+			}
+			if !strings.Contains(text, tt.wantText) {
+				t.Errorf("result text %q does not contain %q", text, tt.wantText)
+			}
+
+			if tt.opener.reviewCalled != tt.wantReviewCalled {
+				t.Errorf("reviewCalled = %v, want %v", tt.opener.reviewCalled, tt.wantReviewCalled)
+			}
+
+			if tt.wantReviewCalled {
+				if tt.opener.gotReviewRepo != tt.input["repo"] {
+					t.Errorf("gotReviewRepo = %q, want %q", tt.opener.gotReviewRepo, tt.input["repo"])
+				}
+				if tt.opener.gotReviewBody != tt.input["body"] {
+					t.Errorf("gotReviewBody = %q, want %q", tt.opener.gotReviewBody, tt.input["body"])
+				}
 			}
 		})
 	}

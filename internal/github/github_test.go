@@ -669,6 +669,52 @@ func TestListIssues_FieldValues(t *testing.T) {
 	}
 }
 
+func TestPostReview(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not found")
+	}
+
+	tests := []struct {
+		name     string
+		event    string
+		wantFlag string
+		wantErr  bool
+	}{
+		{name: "approve", event: "APPROVE", wantFlag: "--approve"},
+		{name: "request changes", event: "REQUEST_CHANGES", wantFlag: "--request-changes"},
+		{name: "comment", event: "COMMENT", wantFlag: "--comment"},
+		{name: "case insensitive", event: "approve", wantFlag: "--approve"},
+		{name: "invalid event", event: "INVALID", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			script, outFile := writeArgCapture(t, "")
+			r := New(script)
+
+			err := r.PostReview(context.Background(), "osbuild/osbuild", 42, tt.event, "Looks good")
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				if !strings.Contains(err.Error(), "invalid review event") {
+					t.Errorf("error = %q, want mention of invalid review event", err.Error())
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			gotArgs := readArgs(t, outFile)
+			wantArgs := []string{"pr", "review", "42", "--repo", "osbuild/osbuild", tt.wantFlag, "--body", "Looks good"}
+			if !equalArgs(gotArgs, wantArgs) {
+				t.Errorf("got args %v, want %v", gotArgs, wantArgs)
+			}
+		})
+	}
+}
+
 func equalArgs(got, want []string) bool {
 	if len(got) != len(want) {
 		return false
