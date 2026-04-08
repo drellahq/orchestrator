@@ -32,6 +32,7 @@ type PROpener interface {
 	AddCoAuthorTrailers(ctx context.Context, repoDir, upstream, base, sourceRef, trailer string) error
 	CommentOnPR(ctx context.Context, prURL, body string) error
 	UpdatePRTitle(ctx context.Context, prURL, title string) error
+	PostReview(ctx context.Context, repo string, pr int, event, body string) error
 }
 
 // OpenPRInput is the input schema for the open_pr tool.
@@ -56,6 +57,14 @@ type CommentOnPRInput struct {
 	PRURL string `json:"pr_url" jsonschema_description:"URL of the pull request to comment on (must be a PR opened by this task)"`
 	Body  string `json:"body" jsonschema_description:"Comment body (markdown supported)"`
 	Title string `json:"title,omitempty" jsonschema_description:"Optional new title for the pull request. If empty, the title is not changed."`
+}
+
+// PostReviewInput is the input schema for the post_review tool.
+type PostReviewInput struct {
+	Repo  string `json:"repo" jsonschema_description:"Target repository as owner/repo (e.g. osbuild/osbuild)"`
+	PR    int    `json:"pr" jsonschema_description:"Pull request number"`
+	Event string `json:"event" jsonschema_description:"Review action: APPROVE, REQUEST_CHANGES, or COMMENT"`
+	Body  string `json:"body" jsonschema_description:"Review body text (markdown supported)"`
 }
 
 // Server wraps an MCP server that exposes tools for sandbox operations.
@@ -341,6 +350,40 @@ func New(logger *slog.Logger, taskName string, taskDir *task.Dir, puller CodePul
 			return &mcp.CallToolResult{
 				Content: []mcp.Content{
 					&mcp.TextContent{Text: fmt.Sprintf("Comment posted on %s", input.PRURL)},
+				},
+			}, nil, nil
+		})
+
+		mcp.AddTool(mcpServer, &mcp.Tool{
+			Name:        "post_review",
+			Description: "Submit a review on a GitHub pull request",
+		}, func(ctx context.Context, req *mcp.CallToolRequest, input *PostReviewInput) (*mcp.CallToolResult, any, error) {
+			logger.Info("PR review requested", "task", taskName, "repo", input.Repo, "pr", input.PR)
+
+			if !isRepoAllowed(input.Repo, allowedRepos) {
+				logger.Warn("PR review denied: repo not allowed", "task", taskName, "repo", input.Repo)
+				return &mcp.CallToolResult{
+					Content: []mcp.Content{
+						&mcp.TextContent{Text: fmt.Sprintf("repo %q is not in the allowed repos list", input.Repo)},
+					},
+					IsError: true,
+				}, nil, nil
+			}
+
+			if err := prOpener.PostReview(ctx, input.Repo, input.PR, input.Event, input.Body); err != nil {
+				logger.Error("Failed to post review", "task", taskName, "error", err)
+				return &mcp.CallToolResult{
+					Content: []mcp.Content{
+						&mcp.TextContent{Text: fmt.Sprintf("post_review failed: %v", err)},
+					},
+					IsError: true,
+				}, nil, nil
+			}
+
+			logger.Info("PR review posted", "task", taskName, "repo", input.Repo, "pr", input.PR, "event", input.Event)
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{
+					&mcp.TextContent{Text: fmt.Sprintf("Review posted on %s#%d (%s)", input.Repo, input.PR, input.Event)},
 				},
 			}, nil, nil
 		})

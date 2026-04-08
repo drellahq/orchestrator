@@ -197,6 +197,28 @@ func (r *Runner) UpdatePRTitle(ctx context.Context, prURL, title string) error {
 	return nil
 }
 
+// PostReview submits a review on a pull request.
+// event must be one of APPROVE, REQUEST_CHANGES, or COMMENT (case-insensitive).
+func (r *Runner) PostReview(ctx context.Context, repo string, pr int, event, body string) error {
+	var flag string
+	switch strings.ToUpper(event) {
+	case "APPROVE":
+		flag = "--approve"
+	case "REQUEST_CHANGES":
+		flag = "--request-changes"
+	case "COMMENT":
+		flag = "--comment"
+	default:
+		return fmt.Errorf("invalid review event %q: must be APPROVE, REQUEST_CHANGES, or COMMENT", event)
+	}
+
+	_, err := r.run(ctx, "", r.bin, "pr", "review", fmt.Sprintf("%d", pr), "--repo", repo, flag, "--body", body)
+	if err != nil {
+		return fmt.Errorf("posting review: %w", err)
+	}
+	return nil
+}
+
 // ListRepoFiles lists files in a directory of a repo on a given branch.
 // It returns a slice of file paths relative to the directory.
 func (r *Runner) ListRepoFiles(ctx context.Context, repo, branch, dir string) ([]string, error) {
