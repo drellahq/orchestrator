@@ -21,6 +21,7 @@ func TestBuildRunScript(t *testing.T) {
 				"#!/bin/bash",
 				"source ~/.bashrc",
 				"--dangerously-skip-permissions",
+				"--effort max",
 				"--output-format stream-json",
 				"--append-system-prompt-file ~/system-prompt.md",
 				"'Fix the bug in handler.go'",
