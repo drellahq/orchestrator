@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -284,6 +285,153 @@ func TestProcessPR_SkipsClosedPR(t *testing.T) {
 	if !state.Resources.GitHub.PRs[0].Closed {
 		t.Error("expected PR to be marked closed")
 	}
+}
+
+func TestBuildNewTaskArgs_WithFrontMatter(t *testing.T) {
+	description := "---\nprofile: code-review\nrepo: org/repo\npr: 42\n---\n\nReview this pull request."
+
+	args := buildNewTaskArgs("/etc/config.yaml", "my-task", description)
+
+	// Should have: task new --config <path> --profile code-review --var ... --var ... <name> <desc>
+	assertContains(t, args, "--config", "/etc/config.yaml")
+	assertContains(t, args, "--profile", "code-review")
+
+	// Vars should be present (order may vary for map iteration)
+	varArgs := collectVarArgs(args)
+	if varArgs["PROFILE_REPO"] != "org/repo" {
+		t.Errorf("expected PROFILE_REPO=org/repo, got %q", varArgs["PROFILE_REPO"])
+	}
+	if varArgs["PROFILE_PR"] != "42" {
+		t.Errorf("expected PROFILE_PR=42, got %q", varArgs["PROFILE_PR"])
+	}
+
+	// Last two args should be task name and stripped description
+	if args[len(args)-2] != "my-task" {
+		t.Errorf("expected task name as second-to-last arg, got %q", args[len(args)-2])
+	}
+	if args[len(args)-1] != "Review this pull request." {
+		t.Errorf("expected stripped description as last arg, got %q", args[len(args)-1])
+	}
+}
+
+func TestBuildNewTaskArgs_NoFrontMatter(t *testing.T) {
+	description := "Just a regular task description."
+
+	args := buildNewTaskArgs("/etc/config.yaml", "my-task", description)
+
+	// Should have: task new --config <path> <name> <desc>
+	if len(args) != 6 {
+		t.Fatalf("expected 6 args, got %d: %v", len(args), args)
+	}
+	assertContains(t, args, "--config", "/etc/config.yaml")
+
+	// Should NOT have --profile or --var
+	for _, a := range args {
+		if a == "--profile" {
+			t.Error("unexpected --profile flag")
+		}
+		if a == "--var" {
+			t.Error("unexpected --var flag")
+		}
+	}
+
+	if args[len(args)-2] != "my-task" {
+		t.Errorf("expected task name, got %q", args[len(args)-2])
+	}
+	if args[len(args)-1] != description {
+		t.Errorf("expected original description, got %q", args[len(args)-1])
+	}
+}
+
+func TestBuildNewTaskArgs_MalformedFrontMatter(t *testing.T) {
+	description := "---\n{{invalid yaml\n---\n\nBody."
+
+	args := buildNewTaskArgs("/etc/config.yaml", "my-task", description)
+
+	// Should fall back to raw description
+	if args[len(args)-1] != description {
+		t.Errorf("expected raw description on parse error, got %q", args[len(args)-1])
+	}
+
+	// Should NOT have --profile or --var
+	for _, a := range args {
+		if a == "--profile" {
+			t.Error("unexpected --profile flag")
+		}
+		if a == "--var" {
+			t.Error("unexpected --var flag")
+		}
+	}
+}
+
+func TestBuildNewTaskArgs_ProfileOnly(t *testing.T) {
+	description := "---\nprofile: deploy\n---\n\nDeploy the service."
+
+	args := buildNewTaskArgs("/etc/config.yaml", "my-task", description)
+
+	assertContains(t, args, "--profile", "deploy")
+
+	// No --var flags expected
+	for _, a := range args {
+		if a == "--var" {
+			t.Error("unexpected --var flag when only profile is set")
+		}
+	}
+
+	if args[len(args)-1] != "Deploy the service." {
+		t.Errorf("expected stripped description, got %q", args[len(args)-1])
+	}
+}
+
+func TestBuildNewTaskArgs_VarsOnly(t *testing.T) {
+	description := "---\nrepo: org/repo\n---\n\nBody."
+
+	args := buildNewTaskArgs("/etc/config.yaml", "my-task", description)
+
+	// No --profile flag expected
+	for _, a := range args {
+		if a == "--profile" {
+			t.Error("unexpected --profile flag when no profile key")
+		}
+	}
+
+	varArgs := collectVarArgs(args)
+	if varArgs["PROFILE_REPO"] != "org/repo" {
+		t.Errorf("expected PROFILE_REPO=org/repo, got %q", varArgs["PROFILE_REPO"])
+	}
+
+	if args[len(args)-1] != "Body." {
+		t.Errorf("expected stripped description, got %q", args[len(args)-1])
+	}
+}
+
+// assertContains checks that args contains a flag followed by its value.
+func assertContains(t *testing.T, args []string, flag, value string) {
+	t.Helper()
+	for i, a := range args {
+		if a == flag {
+			if i+1 < len(args) && args[i+1] == value {
+				return
+			}
+			t.Errorf("flag %s found but value %q doesn't match (got %q)", flag, value, args[i+1])
+			return
+		}
+	}
+	t.Errorf("flag %s not found in args: %v", flag, args)
+}
+
+// collectVarArgs collects --var KEY=VALUE pairs into a map.
+func collectVarArgs(args []string) map[string]string {
+	result := make(map[string]string)
+	for i, a := range args {
+		if a == "--var" && i+1 < len(args) {
+			parts := strings.SplitN(args[i+1], "=", 2)
+			if len(parts) == 2 {
+				result[parts[0]] = parts[1]
+			}
+		}
+	}
+	return result
 }
 
 func ghNew(bin string) *gh.Runner {

@@ -25,6 +25,7 @@ import (
 
 var author string
 var profileName string
+var profileVars []string
 
 var taskCmd = &cobra.Command{
 	Use:   "task",
@@ -52,6 +53,7 @@ with --continue to resume the previous conversation with a new prompt.`,
 func init() {
 	taskNewCmd.Flags().StringVar(&author, "author", "", "co-author to add to PR commits (e.g. \"Jane Doe <jane@example.com>\")")
 	taskNewCmd.Flags().StringVar(&profileName, "profile", "", "profile to apply to the sandbox (e.g. \"code-review\")")
+	taskNewCmd.Flags().StringSliceVar(&profileVars, "var", nil, "profile variables as KEY=VALUE (e.g. --var PROFILE_PR=42)")
 	taskCmd.AddCommand(taskNewCmd)
 	taskCmd.AddCommand(taskContinueCmd)
 	taskCmd.AddCommand(taskWatchCmd)
@@ -82,7 +84,7 @@ func runTask(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("saving metadata: %w", err)
 	}
 
-	return executeTask(ctx, taskName, taskDescription, taskDir, cfg, ghRunner, false, author, profileName)
+	return executeTask(ctx, taskName, taskDescription, taskDir, cfg, ghRunner, false, author, profileName, profileVars)
 }
 
 func continueTask(cmd *cobra.Command, args []string) error {
@@ -111,7 +113,7 @@ func continueTask(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("loading task state: %w", err)
 	}
 
-	return executeTask(ctx, taskName, taskDescription, taskDir, cfg, ghRunner, true, state.Author, "")
+	return executeTask(ctx, taskName, taskDescription, taskDir, cfg, ghRunner, true, state.Author, "", nil)
 }
 
 func loadConfigAndSetupLogging() (*config.Config, error) {
@@ -139,7 +141,7 @@ func logPreflightWarnings(ctx context.Context, cfg *config.Config) *gh.Runner {
 	return ghRunner
 }
 
-func executeTask(ctx context.Context, taskName, taskDescription string, taskDir *task.Dir, cfg *config.Config, ghRunner *gh.Runner, continueSession bool, author string, profileName string) error {
+func executeTask(ctx context.Context, taskName, taskDescription string, taskDir *task.Dir, cfg *config.Config, ghRunner *gh.Runner, continueSession bool, author string, profileName string, profileVars []string) error {
 	runner := gjoll.New("")
 
 	logger := slog.Default()
@@ -199,7 +201,7 @@ func executeTask(ctx context.Context, taskName, taskDescription string, taskDir 
 	slog.Info("Sandbox provisioned", "task", taskName)
 
 	if !continueSession {
-		if err := setupSandbox(ctx, runner, taskName, taskDir, cfg, profileName); err != nil {
+		if err := setupSandbox(ctx, runner, taskName, taskDir, cfg, profileName, profileVars); err != nil {
 			return fmt.Errorf("setting up sandbox: %w", err)
 		}
 		slog.Debug("Sandbox setup complete", "task", taskName)
@@ -283,7 +285,7 @@ stdbuf -oL claude --dangerously-skip-permissions -p --verbose \
 `, claudeFlags, escapedDesc, teeFlag)
 }
 
-func setupSandbox(ctx context.Context, runner *gjoll.Runner, taskName string, taskDir *task.Dir, cfg *config.Config, profileName string) error {
+func setupSandbox(ctx context.Context, runner *gjoll.Runner, taskName string, taskDir *task.Dir, cfg *config.Config, profileName string, profileVars []string) error {
 	// Always: configure git
 	if err := runner.SSH(ctx, taskName, "git config --global user.name Drellabot"); err != nil {
 		return fmt.Errorf("git config user.name: %w", err)
@@ -299,13 +301,13 @@ func setupSandbox(ctx context.Context, runner *gjoll.Runner, taskName string, ta
 	}
 
 	if profileName != "" {
-		return setupSandboxWithProfile(ctx, runner, taskName, taskDir, cfg, profileName)
+		return setupSandboxWithProfile(ctx, runner, taskName, taskDir, cfg, profileName, profileVars)
 	}
 	return setupSandboxDefault(ctx, runner, taskName)
 }
 
 // setupSandboxWithProfile applies a profile's configuration to the sandbox.
-func setupSandboxWithProfile(ctx context.Context, runner *gjoll.Runner, taskName string, taskDir *task.Dir, cfg *config.Config, profileName string) error {
+func setupSandboxWithProfile(ctx context.Context, runner *gjoll.Runner, taskName string, taskDir *task.Dir, cfg *config.Config, profileName string, profileVars []string) error {
 	profileSource, cleanup, err := resolveProfileSource(ctx, cfg)
 	if err != nil {
 		return err
@@ -321,7 +323,8 @@ func setupSandboxWithProfile(ctx context.Context, runner *gjoll.Runner, taskName
 
 	slog.Info("Applying profile", "profile", profileName, "task", taskName)
 
-	if err := profile.Apply(ctx, p, runner, taskName, taskDir.Path(), prompts.Base, nil); err != nil {
+	vars := parseVarFlags(profileVars)
+	if err := profile.Apply(ctx, p, runner, taskName, taskDir.Path(), prompts.Base, vars); err != nil {
 		return fmt.Errorf("applying profile: %w", err)
 	}
 
@@ -366,6 +369,21 @@ func setupSandboxDefault(ctx context.Context, runner *gjoll.Runner, taskName str
 	}
 
 	return nil
+}
+
+// parseVarFlags parses --var KEY=VALUE flags into a map.
+func parseVarFlags(flags []string) map[string]string {
+	if len(flags) == 0 {
+		return nil
+	}
+	vars := make(map[string]string, len(flags))
+	for _, f := range flags {
+		k, v, ok := strings.Cut(f, "=")
+		if ok {
+			vars[k] = v
+		}
+	}
+	return vars
 }
 
 // resolveProfileSource returns the directory containing profiles.
