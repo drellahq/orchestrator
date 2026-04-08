@@ -68,6 +68,17 @@ func TestLoad(t *testing.T) {
 			},
 		},
 		{
+			name:      "profiles config parsed",
+			writeFile: true,
+			yaml:      "profiles_repo: drellabot/profiles\nprofiles_dir: /tmp/profiles\n",
+			want: Config{
+				OutputDir:    "./tasks",
+				GjollEnv:     "./configs/sandbox.tf",
+				ProfilesRepo: "drellabot/profiles",
+				ProfilesDir:  "/tmp/profiles",
+			},
+		},
+		{
 			name:      "invalid yaml",
 			writeFile: true,
 			yaml:      "{{invalid",

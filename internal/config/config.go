@@ -20,6 +20,8 @@ type Config struct {
 	OutputDir    string       `yaml:"output_dir"`
 	GjollEnv     string       `yaml:"gjoll_env"`
 	AllowedRepos []string     `yaml:"allowed_repos"`
+	ProfilesRepo string       `yaml:"profiles_repo"`
+	ProfilesDir  string       `yaml:"profiles_dir"`
 	Daemon       DaemonConfig `yaml:"daemon"`
 }
 

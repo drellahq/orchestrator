@@ -53,6 +53,8 @@ The `orchestrator.yaml` file supports:
 | `output_dir`    | `./tasks`            | Directory for task output                  |
 | `gjoll_env`     | `./configs/sandbox.tf` | Path to gjoll .tf environment file       |
 | `allowed_repos` | `[]` (deny all)      | Repos allowed for `open_pr`/`update_pr`/`comment_on_pr` (glob patterns)|
+| `profiles_repo` | (empty)              | GitHub repo containing profile directories (e.g. `myorg/profiles`) |
+| `profiles_dir`  | (empty)              | Local directory override for profiles (takes precedence over `profiles_repo`) |
 
 ## Usage
 
@@ -71,6 +73,16 @@ Use `-v` for verbose output including debug logging and model reasoning:
 ```bash
 orchestrator task new -v fix-bug "Fix the nil pointer dereference in handler.go"
 ```
+
+Use `--profile` to apply a task-type-specific profile to the sandbox:
+
+```bash
+orchestrator task new --profile code-review review-pr-42 "Review PR #42 in org/repo"
+```
+
+Profiles provide custom CLAUDE.md instructions, setup scripts, MCP servers, and
+Claude Code settings. They are loaded from `profiles_dir` (if set) or cloned from
+`profiles_repo`. See [Profiles](#profiles) for details.
 
 Use `--author` to add a `Co-authored-by` trailer to every PR commit:
 
@@ -183,6 +195,84 @@ The dashboard has no backend of its own. Caddy's file server acts as the API:
 | `GET /tasks/<name>/transcript.jsonl` | Transcript file | Session transcript |
 
 Make sure the Caddyfile `root` for `/tasks/*` points at the same directory as `output_dir` in `orchestrator.yaml` (default `./tasks`).
+
+## Profiles
+
+Profiles let each task type carry its own Claude configuration — `CLAUDE.md` instructions, setup scripts, MCP servers, and settings — in a separate profiles repository.
+
+### Profile directory structure
+
+Each profile is a directory containing some combination of:
+
+```
+profiles-repo/
+  default/
+    CLAUDE.md           # Workflow instructions (required)
+  code-review/
+    CLAUDE.md           # Review instructions (required)
+    setup.sh            # Workspace setup script (optional, runs on host)
+    mcp.yaml            # Additional MCP servers (optional)
+    settings.json       # Claude Code settings (optional)
+```
+
+Only `CLAUDE.md` is required. All other files are optional and processed only if present.
+
+### How profiles are applied
+
+When `--profile <name>` is specified on `task new`:
+
+1. The profile is loaded from `profiles_dir` (local, for development) or cloned from `profiles_repo`
+2. A base environment prompt + the profile's `CLAUDE.md` are written to `~/.claude/CLAUDE.md` in the sandbox
+3. `settings.json` is copied to `~/.claude/settings.json` (if present)
+4. MCP servers from `mcp.yaml` are registered via `claude mcp add` (if present)
+5. `setup.sh` runs **on the host** with helper commands on PATH (if present)
+
+When no `--profile` is specified, existing behavior is preserved (system prompt via `--append-system-prompt-file`).
+
+### setup.sh environment
+
+The orchestrator provides these environment variables to `setup.sh`:
+
+| Variable | Description |
+|----------|-------------|
+| `SANDBOX` | Sandbox name (for gjoll operations) |
+| `TASK_DIR` | Task output directory on host |
+| `PROFILE_*` | Front matter key-value pairs (keys uppercased, hyphens → underscores) |
+
+Two helper commands are available on PATH:
+
+- **`sandbox-cp <local-path> <sandbox-path>`** — copy files to the sandbox
+- **`sandbox-ssh <command>`** — run a command inside the sandbox
+
+### mcp.yaml format
+
+```yaml
+servers:
+  - name: my-tool
+    transport: stdio        # "stdio" or "http"
+    command: npx             # stdio: command to run
+    args: ["-y", "pkg@latest"] # stdio: command arguments
+  - name: web-tool
+    transport: http
+    url: http://localhost:8080/mcp
+    scope: user              # optional
+```
+
+### Issue front matter
+
+When processing issues, YAML front matter can specify a profile and pass variables to `setup.sh`:
+
+```markdown
+---
+profile: code-review
+repo: org/repo
+pr: 42
+---
+
+Review this pull request.
+```
+
+The `profile` key selects the profile. Other keys become `PROFILE_*` environment variables.
 
 ## Running Tests
 
