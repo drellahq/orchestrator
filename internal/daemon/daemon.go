@@ -12,6 +12,7 @@ import (
 	"time"
 
 	gh "github.com/drellabot/orchestrator/internal/github"
+	"github.com/drellabot/orchestrator/internal/profile"
 	"github.com/drellabot/orchestrator/internal/prompts"
 	"github.com/drellabot/orchestrator/internal/task"
 )
@@ -321,7 +322,8 @@ func (d *Daemon) defaultNewTaskFunc(ctx context.Context, taskName, description s
 		return fmt.Errorf("getting executable path: %w", err)
 	}
 
-	args := []string{"task", "new", "--config", d.configPath, taskName, description}
+	args := buildNewTaskArgs(d.configPath, taskName, description)
+
 	cmd := exec.CommandContext(ctx, exe, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -331,6 +333,28 @@ func (d *Daemon) defaultNewTaskFunc(ctx context.Context, taskName, description s
 		return fmt.Errorf("task new %s: %w", taskName, err)
 	}
 	return nil
+}
+
+// buildNewTaskArgs parses front matter from the description and returns
+// the argument list for "task new". If front matter contains a profile,
+// --profile is added. Non-profile keys become --var KEY=VALUE flags.
+func buildNewTaskArgs(configPath, taskName, description string) []string {
+	args := []string{"task", "new", "--config", configPath}
+
+	profileName, vars, strippedDesc, fmErr := profile.ParseFrontMatter(description)
+	if fmErr != nil {
+		slog.Warn("Failed to parse front matter, using raw description", "task", taskName, "error", fmErr)
+		strippedDesc = description
+	}
+	if profileName != "" {
+		args = append(args, "--profile", profileName)
+	}
+	for k, v := range vars {
+		args = append(args, "--var", k+"="+v)
+	}
+
+	args = append(args, taskName, strippedDesc)
+	return args
 }
 
 // ListTaskDirs returns the names of all task directories in outputDir.
