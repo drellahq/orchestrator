@@ -7,3 +7,6 @@ var OnInit string
 
 //go:embed on_pr_comment.md
 var OnPRComment string
+
+//go:embed base.md
+var Base string

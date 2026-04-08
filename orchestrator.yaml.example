@@ -17,6 +17,16 @@
 #   - myorg/myrepo
 #   - myorg/*
 
+# Profile configuration. Profiles provide task-type-specific Claude
+# configuration (CLAUDE.md, setup scripts, MCP servers, settings).
+# Use --profile <name> on "task new" to apply a profile.
+#
+# GitHub repo containing profile directories (cloned via gh).
+# profiles_repo: "myorg/profiles"
+#
+# Local directory override for development (takes precedence over profiles_repo).
+# profiles_dir: ""
+
 # Daemon configuration for automatic PR comment polling.
 # daemon:
 #   # How often the daemon completes a full cycle across all PRs.

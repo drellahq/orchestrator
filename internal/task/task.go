@@ -97,6 +97,11 @@ func Open(outputDir, taskName string) (*Dir, error) {
 	return &Dir{root: root}, nil
 }
 
+// Path returns the root path of the task directory.
+func (d *Dir) Path() string {
+	return d.root
+}
+
 // RepoPath returns the path to the repo subdirectory.
 func (d *Dir) RepoPath() string {
 	return filepath.Join(d.root, "repo")

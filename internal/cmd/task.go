@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -16,12 +17,14 @@ import (
 	"github.com/drellabot/orchestrator/internal/gjoll"
 	"github.com/drellabot/orchestrator/internal/logging"
 	mcpserver "github.com/drellabot/orchestrator/internal/mcp"
+	"github.com/drellabot/orchestrator/internal/profile"
 	"github.com/drellabot/orchestrator/internal/prompts"
 	"github.com/drellabot/orchestrator/internal/task"
 	"github.com/spf13/cobra"
 )
 
 var author string
+var profileName string
 
 var taskCmd = &cobra.Command{
 	Use:   "task",
@@ -48,6 +51,7 @@ with --continue to resume the previous conversation with a new prompt.`,
 
 func init() {
 	taskNewCmd.Flags().StringVar(&author, "author", "", "co-author to add to PR commits (e.g. \"Jane Doe <jane@example.com>\")")
+	taskNewCmd.Flags().StringVar(&profileName, "profile", "", "profile to apply to the sandbox (e.g. \"code-review\")")
 	taskCmd.AddCommand(taskNewCmd)
 	taskCmd.AddCommand(taskContinueCmd)
 	taskCmd.AddCommand(taskWatchCmd)
@@ -78,7 +82,7 @@ func runTask(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("saving metadata: %w", err)
 	}
 
-	return executeTask(ctx, taskName, taskDescription, taskDir, cfg, ghRunner, false, author)
+	return executeTask(ctx, taskName, taskDescription, taskDir, cfg, ghRunner, false, author, profileName)
 }
 
 func continueTask(cmd *cobra.Command, args []string) error {
@@ -107,7 +111,7 @@ func continueTask(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("loading task state: %w", err)
 	}
 
-	return executeTask(ctx, taskName, taskDescription, taskDir, cfg, ghRunner, true, state.Author)
+	return executeTask(ctx, taskName, taskDescription, taskDir, cfg, ghRunner, true, state.Author, "")
 }
 
 func loadConfigAndSetupLogging() (*config.Config, error) {
@@ -135,7 +139,7 @@ func logPreflightWarnings(ctx context.Context, cfg *config.Config) *gh.Runner {
 	return ghRunner
 }
 
-func executeTask(ctx context.Context, taskName, taskDescription string, taskDir *task.Dir, cfg *config.Config, ghRunner *gh.Runner, continueSession bool, author string) error {
+func executeTask(ctx context.Context, taskName, taskDescription string, taskDir *task.Dir, cfg *config.Config, ghRunner *gh.Runner, continueSession bool, author string, profileName string) error {
 	runner := gjoll.New("")
 
 	logger := slog.Default()
@@ -195,7 +199,7 @@ func executeTask(ctx context.Context, taskName, taskDescription string, taskDir 
 	slog.Info("Sandbox provisioned", "task", taskName)
 
 	if !continueSession {
-		if err := setupSandbox(ctx, runner, taskName); err != nil {
+		if err := setupSandbox(ctx, runner, taskName, taskDir, cfg, profileName); err != nil {
 			return fmt.Errorf("setting up sandbox: %w", err)
 		}
 		slog.Debug("Sandbox setup complete", "task", taskName)
@@ -278,8 +282,8 @@ stdbuf -oL claude --dangerously-skip-permissions -p --verbose \
 `, claudeFlags, escapedDesc, teeFlag)
 }
 
-func setupSandbox(ctx context.Context, runner *gjoll.Runner, taskName string) error {
-	// Configure git
+func setupSandbox(ctx context.Context, runner *gjoll.Runner, taskName string, taskDir *task.Dir, cfg *config.Config, profileName string) error {
+	// Always: configure git
 	if err := runner.SSH(ctx, taskName, "git config --global user.name Drellabot"); err != nil {
 		return fmt.Errorf("git config user.name: %w", err)
 	}
@@ -287,6 +291,62 @@ func setupSandbox(ctx context.Context, runner *gjoll.Runner, taskName string) er
 		return fmt.Errorf("git config user.email: %w", err)
 	}
 
+	// Always: register orchestrator MCP server
+	mcpURL := fmt.Sprintf("http://localhost:%d/mcp", mcpserver.MCPRemotePort)
+	if err := runner.SSH(ctx, taskName, fmt.Sprintf("claude mcp add --transport http orchestrator %s --scope user", mcpURL)); err != nil {
+		return fmt.Errorf("registering MCP server: %w", err)
+	}
+
+	if profileName != "" {
+		return setupSandboxWithProfile(ctx, runner, taskName, taskDir, cfg, profileName)
+	}
+	return setupSandboxDefault(ctx, runner, taskName)
+}
+
+// setupSandboxWithProfile applies a profile's configuration to the sandbox.
+func setupSandboxWithProfile(ctx context.Context, runner *gjoll.Runner, taskName string, taskDir *task.Dir, cfg *config.Config, profileName string) error {
+	profileSource, cleanup, err := resolveProfileSource(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	if cleanup != nil {
+		defer cleanup()
+	}
+
+	p, err := profile.Load(profileSource, profileName)
+	if err != nil {
+		return fmt.Errorf("loading profile: %w", err)
+	}
+
+	slog.Info("Applying profile", "profile", profileName, "task", taskName)
+
+	if err := profile.Apply(ctx, p, runner, taskName, taskDir.Path(), prompts.Base, nil); err != nil {
+		return fmt.Errorf("applying profile: %w", err)
+	}
+
+	// Write the base prompt as system-prompt.md for --append-system-prompt-file
+	// (profile CLAUDE.md is in ~/.claude/CLAUDE.md, picked up automatically)
+	tmpFile, err := os.CreateTemp("", "prompt-*.md")
+	if err != nil {
+		return fmt.Errorf("creating temp file: %w", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	if _, err := tmpFile.WriteString(prompts.OnInit); err != nil {
+		tmpFile.Close()
+		return fmt.Errorf("writing prompt: %w", err)
+	}
+	tmpFile.Close()
+
+	if err := runner.Cp(ctx, taskName, tmpFile.Name(), ":~/system-prompt.md"); err != nil {
+		return fmt.Errorf("copying system prompt: %w", err)
+	}
+
+	return nil
+}
+
+// setupSandboxDefault preserves the existing behavior when no profile is specified.
+func setupSandboxDefault(ctx context.Context, runner *gjoll.Runner, taskName string) error {
 	// Write system prompt to a temp file and copy it to the sandbox
 	tmpFile, err := os.CreateTemp("", "prompt-*.md")
 	if err != nil {
@@ -304,11 +364,36 @@ func setupSandbox(ctx context.Context, runner *gjoll.Runner, taskName string) er
 		return fmt.Errorf("copying system prompt: %w", err)
 	}
 
-	// Register MCP server with Claude
-	mcpURL := fmt.Sprintf("http://localhost:%d/mcp", mcpserver.MCPRemotePort)
-	if err := runner.SSH(ctx, taskName, fmt.Sprintf("claude mcp add --transport http orchestrator %s --scope user", mcpURL)); err != nil {
-		return fmt.Errorf("registering MCP server: %w", err)
+	return nil
+}
+
+// resolveProfileSource returns the directory containing profiles.
+// If profiles_dir is set, it's used directly. Otherwise, profiles_repo
+// is shallow-cloned to a temp directory (returned cleanup removes it).
+func resolveProfileSource(ctx context.Context, cfg *config.Config) (dir string, cleanup func(), err error) {
+	if cfg.ProfilesDir != "" {
+		return cfg.ProfilesDir, nil, nil
 	}
 
-	return nil
+	if cfg.ProfilesRepo == "" {
+		return "", nil, fmt.Errorf("--profile requires profiles_repo or profiles_dir in config")
+	}
+
+	tmpDir, err := os.MkdirTemp("", "profiles-*")
+	if err != nil {
+		return "", nil, fmt.Errorf("creating temp dir for profiles: %w", err)
+	}
+
+	cloneDir := filepath.Join(tmpDir, "profiles")
+	slog.Debug("Cloning profiles repo", "repo", cfg.ProfilesRepo, "dest", cloneDir)
+
+	cmd := exec.CommandContext(ctx, "gh", "repo", "clone", cfg.ProfilesRepo, cloneDir, "--", "--depth=1")
+	cmd.Stdout = os.Stderr
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		os.RemoveAll(tmpDir)
+		return "", nil, fmt.Errorf("cloning profiles repo %q: %w", cfg.ProfilesRepo, err)
+	}
+
+	return cloneDir, func() { os.RemoveAll(tmpDir) }, nil
 }
