@@ -688,11 +688,11 @@ func TestCheckForNewIssues_PicksUpNewIssue(t *testing.T) {
 	dir := t.TempDir()
 
 	issues := []gh.Issue{
-		{Number: 7, Title: "Add dark mode", Body: "Please add a dark mode toggle."},
+		{Number: 7, Title: "Add dark mode", Body: "Please add a dark mode toggle.", User: gh.CommentUser{Login: "alice"}},
 	}
 	script := writeIssuesScript(t, makeIssuesJSON(t, issues))
 
-	d := New(gh.New(script), time.Minute, "", dir, nil)
+	d := New(gh.New(script), time.Minute, "", dir, []string{"alice"})
 	d.SetTasksRepo("org/tasks")
 
 	var mu sync.Mutex
@@ -747,11 +747,11 @@ func TestCheckForNewIssues_FallsBackToTitle(t *testing.T) {
 	dir := t.TempDir()
 
 	issues := []gh.Issue{
-		{Number: 3, Title: "Fix the login bug", Body: ""},
+		{Number: 3, Title: "Fix the login bug", Body: "", User: gh.CommentUser{Login: "alice"}},
 	}
 	script := writeIssuesScript(t, makeIssuesJSON(t, issues))
 
-	d := New(gh.New(script), time.Minute, "", dir, nil)
+	d := New(gh.New(script), time.Minute, "", dir, []string{"alice"})
 	d.SetTasksRepo("org/tasks")
 
 	var capturedDesc string
@@ -775,6 +775,45 @@ func TestCheckForNewIssues_FallsBackToTitle(t *testing.T) {
 	}
 }
 
+func TestCheckForNewIssues_SkipsUnallowedAuthor(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not found")
+	}
+
+	dir := t.TempDir()
+
+	issues := []gh.Issue{
+		{Number: 7, Title: "Add dark mode", Body: "content", User: gh.CommentUser{Login: "stranger"}},
+	}
+	script := writeIssuesScript(t, makeIssuesJSON(t, issues))
+
+	d := New(gh.New(script), time.Minute, "", dir, []string{"alice", "bob"})
+	d.SetTasksRepo("org/tasks")
+
+	called := false
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description string) error {
+		called = true
+		return nil
+	})
+
+	d.checkForNewIssues(context.Background())
+	time.Sleep(50 * time.Millisecond)
+
+	if called {
+		t.Error("newTaskFunc should not have been called for issue from unallowed author")
+	}
+
+	// Issue should NOT be marked as processed so it can be picked up if the
+	// user is later added to the allowlist.
+	pi, err := loadProcessedIssues(dir)
+	if err != nil {
+		t.Fatalf("loadProcessedIssues() error: %v", err)
+	}
+	if pi.Issues[7] {
+		t.Error("issue should not be marked as processed when author is not allowed")
+	}
+}
+
 func TestCheckForNewIssues_SkipsAlreadyProcessed(t *testing.T) {
 	if _, err := exec.LookPath("sh"); err != nil {
 		t.Skip("sh not found")
@@ -789,11 +828,11 @@ func TestCheckForNewIssues_SkipsAlreadyProcessed(t *testing.T) {
 	}
 
 	issues := []gh.Issue{
-		{Number: 7, Title: "Add dark mode", Body: "content"},
+		{Number: 7, Title: "Add dark mode", Body: "content", User: gh.CommentUser{Login: "alice"}},
 	}
 	script := writeIssuesScript(t, makeIssuesJSON(t, issues))
 
-	d := New(gh.New(script), time.Minute, "", dir, nil)
+	d := New(gh.New(script), time.Minute, "", dir, []string{"alice"})
 	d.SetTasksRepo("org/tasks")
 
 	called := false
@@ -818,11 +857,11 @@ func TestCheckForNewIssues_SkipsRunningTask(t *testing.T) {
 	dir := t.TempDir()
 
 	issues := []gh.Issue{
-		{Number: 7, Title: "Add dark mode", Body: "content"},
+		{Number: 7, Title: "Add dark mode", Body: "content", User: gh.CommentUser{Login: "alice"}},
 	}
 	script := writeIssuesScript(t, makeIssuesJSON(t, issues))
 
-	d := New(gh.New(script), time.Minute, "", dir, nil)
+	d := New(gh.New(script), time.Minute, "", dir, []string{"alice"})
 	d.SetTasksRepo("org/tasks")
 	d.SetTaskRunning("tasks-7", true)
 
@@ -857,10 +896,10 @@ func TestCheckForNewIssues_FiltersPullRequests(t *testing.T) {
 	dir := t.TempDir()
 
 	// Simulate the raw GitHub API response which includes PRs with pull_request field
-	rawJSON := `[{"number":1,"title":"Real issue","body":"Fix this"},{"number":2,"title":"A PR","body":"","pull_request":{"url":"https://api.github.com/repos/org/tasks/pulls/2"}}]`
+	rawJSON := `[{"number":1,"title":"Real issue","body":"Fix this","user":{"login":"alice"}},{"number":2,"title":"A PR","body":"","user":{"login":"alice"},"pull_request":{"url":"https://api.github.com/repos/org/tasks/pulls/2"}}]`
 	script := writeIssuesScript(t, rawJSON)
 
-	d := New(gh.New(script), time.Minute, "", dir, nil)
+	d := New(gh.New(script), time.Minute, "", dir, []string{"alice"})
 	d.SetTasksRepo("org/tasks")
 
 	var mu sync.Mutex
@@ -903,12 +942,12 @@ func TestCheckForNewIssues_MultipleIssues(t *testing.T) {
 	dir := t.TempDir()
 
 	issues := []gh.Issue{
-		{Number: 1, Title: "Issue A", Body: "Body A"},
-		{Number: 2, Title: "Issue B", Body: "Body B"},
+		{Number: 1, Title: "Issue A", Body: "Body A", User: gh.CommentUser{Login: "alice"}},
+		{Number: 2, Title: "Issue B", Body: "Body B", User: gh.CommentUser{Login: "alice"}},
 	}
 	script := writeIssuesScript(t, makeIssuesJSON(t, issues))
 
-	d := New(gh.New(script), time.Minute, "", dir, nil)
+	d := New(gh.New(script), time.Minute, "", dir, []string{"alice"})
 	d.SetTasksRepo("org/tasks")
 
 	var mu sync.Mutex
@@ -957,11 +996,11 @@ func TestCheckForNewIssues_IdempotentAcrossCalls(t *testing.T) {
 	dir := t.TempDir()
 
 	issues := []gh.Issue{
-		{Number: 42, Title: "Feature", Body: "Description"},
+		{Number: 42, Title: "Feature", Body: "Description", User: gh.CommentUser{Login: "alice"}},
 	}
 	script := writeIssuesScript(t, makeIssuesJSON(t, issues))
 
-	d := New(gh.New(script), time.Minute, "", dir, nil)
+	d := New(gh.New(script), time.Minute, "", dir, []string{"alice"})
 	d.SetTasksRepo("org/tasks")
 
 	var mu sync.Mutex
@@ -1003,11 +1042,11 @@ func TestCheckForNewIssues_SetsRunningState(t *testing.T) {
 	dir := t.TempDir()
 
 	issues := []gh.Issue{
-		{Number: 5, Title: "My task", Body: "content"},
+		{Number: 5, Title: "My task", Body: "content", User: gh.CommentUser{Login: "alice"}},
 	}
 	script := writeIssuesScript(t, makeIssuesJSON(t, issues))
 
-	d := New(gh.New(script), time.Minute, "", dir, nil)
+	d := New(gh.New(script), time.Minute, "", dir, []string{"alice"})
 	d.SetTasksRepo("org/tasks")
 
 	started := make(chan struct{})
