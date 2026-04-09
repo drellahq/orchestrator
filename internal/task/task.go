@@ -54,6 +54,13 @@ type Resources struct {
 	GitHub GitHubResources `json:"github"`
 }
 
+// Task status constants.
+const (
+	StatusInProgress = "in-progress" // agent is actively running
+	StatusWaiting    = "waiting"     // has open PRs, waiting for human review
+	StatusDone       = "done"        // no agent running, all PRs closed
+)
+
 // State holds task metadata and mutable state persisted to state.json.
 type State struct {
 	Name        string    `json:"name"`
@@ -61,7 +68,18 @@ type State struct {
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 	Author      string    `json:"author,omitempty"`
+	Status      string    `json:"status,omitempty"`
 	Resources   Resources `json:"resources"`
+}
+
+// HasOpenPRs reports whether the task has any non-closed PRs.
+func (s *State) HasOpenPRs() bool {
+	for _, pr := range s.Resources.GitHub.PRs {
+		if !pr.Closed {
+			return true
+		}
+	}
+	return false
 }
 
 // Dir represents a per-task directory structure.
@@ -205,6 +223,19 @@ func (d *Dir) AddPR(pr PR) error {
 		return err
 	}
 	s.Resources.GitHub.PRs = append(s.Resources.GitHub.PRs, pr)
+	return d.saveStateLocked(s)
+}
+
+// SetStatus sets the task status and persists it to disk.
+func (d *Dir) SetStatus(status string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	s, err := d.loadStateLocked()
+	if err != nil {
+		return err
+	}
+	s.Status = status
 	return d.saveStateLocked(s)
 }
 

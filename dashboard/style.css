@@ -138,6 +138,13 @@ main {
   box-shadow: 0 0 12px rgba(57, 255, 20, 0.05);
 }
 
+.task-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
 .task-name {
   font-size: 1rem;
   font-weight: 600;
@@ -189,6 +196,35 @@ main {
 .pr-closed {
   color: var(--red);
   border-color: #6e2d28;
+}
+
+/* --- Status badges --- */
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.1rem 0.5rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border: 1px solid;
+  white-space: nowrap;
+}
+.status-in-progress {
+  color: var(--amber);
+  border-color: var(--amber);
+  background: rgba(227, 179, 65, 0.08);
+}
+.status-waiting {
+  color: var(--cyan);
+  border-color: var(--cyan);
+  background: rgba(88, 166, 255, 0.08);
+}
+.status-done {
+  color: var(--text-dim);
+  border-color: var(--border);
+  background: rgba(84, 110, 122, 0.08);
 }
 
 /* --- Task Detail --- */

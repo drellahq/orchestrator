@@ -12,6 +12,7 @@ import (
 	"time"
 
 	gh "github.com/drellabot/orchestrator/internal/github"
+	"github.com/drellabot/orchestrator/internal/gjoll"
 	"github.com/drellabot/orchestrator/internal/profile"
 	"github.com/drellabot/orchestrator/internal/prompts"
 	"github.com/drellabot/orchestrator/internal/task"
@@ -29,9 +30,11 @@ type ContinueFunc func(ctx context.Context, taskName, prompt string) error
 
 // Daemon polls GitHub PRs for new comments and triggers task continue.
 // It also monitors a tasks repo for new specs in in-progress/ and spawns
-// new tasks for them.
+// new tasks for them. Sandboxes for completed tasks are periodically
+// destroyed via gjoll down.
 type Daemon struct {
 	gh                *gh.Runner
+	gjoll             *gjoll.Runner
 	interval          time.Duration
 	configPath        string
 	outputDir         string
@@ -39,14 +42,20 @@ type Daemon struct {
 	tasksRepo         string
 	continueFunc      ContinueFunc
 	newTaskFunc       NewTaskFunc
+	downFunc          DownFunc
 	mu                sync.Mutex
 	running           map[string]bool
 }
 
+// DownFunc is the function signature for destroying a sandbox.
+type DownFunc func(ctx context.Context, name string) error
+
 // New creates a Daemon.
 func New(ghRunner *gh.Runner, interval time.Duration, configPath, outputDir string, allowedCommenters []string) *Daemon {
+	gjollRunner := gjoll.New("")
 	d := &Daemon{
 		gh:                ghRunner,
+		gjoll:             gjollRunner,
 		interval:          interval,
 		configPath:        configPath,
 		outputDir:         outputDir,
@@ -55,6 +64,7 @@ func New(ghRunner *gh.Runner, interval time.Duration, configPath, outputDir stri
 	}
 	d.continueFunc = d.defaultContinueFunc
 	d.newTaskFunc = d.defaultNewTaskFunc
+	d.downFunc = gjollRunner.Down
 	return d
 }
 
@@ -71,6 +81,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 		// Check for new specs and issues in the tasks repo
 		d.checkForNewSpecs(ctx)
 		d.checkForNewIssues(ctx)
+
+		// Destroy sandboxes for completed tasks
+		d.cleanupSandboxes(ctx)
 
 		refs := DiscoverPRs(d.outputDir)
 		if len(refs) == 0 {
@@ -182,6 +195,16 @@ func (d *Daemon) processPR(ctx context.Context, ref PRRef) {
 			pr.Closed = true
 		}); err != nil {
 			log.Warn("Failed to mark PR as closed", "error", err)
+		}
+
+		// If all PRs are now closed and task isn't running, mark as done.
+		state, err := td.LoadState()
+		if err != nil {
+			log.Warn("Failed to load state for status update", "error", err)
+		} else if !state.HasOpenPRs() && !d.IsTaskRunning(ref.TaskName) {
+			if err := td.SetStatus(task.StatusDone); err != nil {
+				log.Warn("Failed to set status to done", "error", err)
+			}
 		}
 		return
 	}
@@ -465,6 +488,47 @@ func (d *Daemon) SetContinueFunc(fn ContinueFunc) {
 // SetNewTaskFunc overrides the function used to launch new tasks (for testing).
 func (d *Daemon) SetNewTaskFunc(fn NewTaskFunc) {
 	d.newTaskFunc = fn
+}
+
+// SetDownFunc overrides the function used to destroy sandboxes (for testing).
+func (d *Daemon) SetDownFunc(fn DownFunc) {
+	d.downFunc = fn
+}
+
+// cleanupSandboxes destroys sandboxes for tasks that are done:
+// not currently running and with no open PRs.
+func (d *Daemon) cleanupSandboxes(ctx context.Context) {
+	names, err := ListTaskDirs(d.outputDir)
+	if err != nil {
+		slog.Debug("Cannot list task dirs for cleanup", "error", err)
+		return
+	}
+
+	for _, name := range names {
+		if d.IsTaskRunning(name) {
+			continue
+		}
+
+		td, err := task.Open(d.outputDir, name)
+		if err != nil {
+			continue
+		}
+		state, err := td.LoadState()
+		if err != nil {
+			continue
+		}
+
+		if state.Status != task.StatusDone {
+			continue
+		}
+
+		slog.Info("Cleaning up sandbox", "task", name)
+		if err := d.downFunc(ctx, name); err != nil {
+			slog.Warn("Failed to destroy sandbox", "task", name, "error", err)
+			continue
+		}
+		slog.Info("Sandbox destroyed", "task", name)
+	}
 }
 
 // ProcessPR is an exported wrapper for testing.

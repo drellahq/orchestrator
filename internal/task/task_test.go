@@ -516,6 +516,122 @@ func TestAddPR_PopulatesNumber(t *testing.T) {
 	}
 }
 
+func TestSetStatus(t *testing.T) {
+	outputDir := t.TempDir()
+	td, err := Create(outputDir, "status-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := td.SaveMetadata("status-test", "desc", "", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := td.SetStatus(StatusInProgress); err != nil {
+		t.Fatalf("SetStatus() error: %v", err)
+	}
+
+	s, err := td.LoadState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Status != StatusInProgress {
+		t.Errorf("Status = %q, want %q", s.Status, StatusInProgress)
+	}
+
+	// Update status
+	if err := td.SetStatus(StatusDone); err != nil {
+		t.Fatalf("SetStatus() error: %v", err)
+	}
+
+	s, err = td.LoadState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Status != StatusDone {
+		t.Errorf("Status = %q, want %q", s.Status, StatusDone)
+	}
+}
+
+func TestSetStatusPreservesState(t *testing.T) {
+	outputDir := t.TempDir()
+	td, err := Create(outputDir, "status-preserve")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now().Truncate(time.Second)
+	if err := td.SaveMetadata("status-preserve", "my desc", "author", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := td.AddPR(PR{URL: "https://github.com/org/repo/pull/1", Repo: "org/repo", Branch: "fix", Base: "main"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := td.SetStatus(StatusWaiting); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := td.LoadState()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if s.Name != "status-preserve" {
+		t.Errorf("Name changed: %q", s.Name)
+	}
+	if s.Description != "my desc" {
+		t.Errorf("Description changed: %q", s.Description)
+	}
+	if s.Author != "author" {
+		t.Errorf("Author changed: %q", s.Author)
+	}
+	if len(s.Resources.GitHub.PRs) != 1 {
+		t.Errorf("PRs lost: got %d", len(s.Resources.GitHub.PRs))
+	}
+	if s.Status != StatusWaiting {
+		t.Errorf("Status = %q, want %q", s.Status, StatusWaiting)
+	}
+}
+
+func TestHasOpenPRs(t *testing.T) {
+	tests := []struct {
+		name string
+		prs  []PR
+		want bool
+	}{
+		{
+			name: "no PRs",
+			prs:  nil,
+			want: false,
+		},
+		{
+			name: "one open PR",
+			prs:  []PR{{URL: "u", Closed: false}},
+			want: true,
+		},
+		{
+			name: "all closed",
+			prs:  []PR{{URL: "u", Closed: true}},
+			want: false,
+		},
+		{
+			name: "mixed",
+			prs:  []PR{{URL: "u1", Closed: true}, {URL: "u2", Closed: false}},
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &State{Resources: Resources{GitHub: GitHubResources{PRs: tt.prs}}}
+			if got := s.HasOpenPRs(); got != tt.want {
+				t.Errorf("HasOpenPRs() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestAddPR(t *testing.T) {
 	outputDir := t.TempDir()
 	td, err := Create(outputDir, "pr-test")

@@ -434,6 +434,123 @@ func collectVarArgs(args []string) map[string]string {
 	return result
 }
 
+func TestCleanupSandboxes_DestroysCompletedTasks(t *testing.T) {
+	dir := t.TempDir()
+
+	// Task that is done — should be cleaned up
+	createTaskWithPRs(t, dir, "done-task", []task.PR{
+		{URL: "https://github.com/org/repo/pull/1", Repo: "org/repo", Branch: "fix", Base: "main", Closed: true},
+	})
+	td, err := task.Open(dir, "done-task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := td.SetStatus(task.StatusDone); err != nil {
+		t.Fatal(err)
+	}
+
+	// Task that is waiting — should NOT be cleaned up
+	createTaskWithPRs(t, dir, "waiting-task", []task.PR{
+		{URL: "https://github.com/org/repo/pull/2", Repo: "org/repo", Branch: "feat", Base: "main"},
+	})
+	tdWaiting, err := task.Open(dir, "waiting-task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tdWaiting.SetStatus(task.StatusWaiting); err != nil {
+		t.Fatal(err)
+	}
+
+	// Task that is in-progress — should NOT be cleaned up
+	createTaskWithPRs(t, dir, "running-task", nil)
+	tdRunning, err := task.Open(dir, "running-task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tdRunning.SetStatus(task.StatusInProgress); err != nil {
+		t.Fatal(err)
+	}
+
+	var destroyed []string
+	d := New(ghNew(writeOpenPRScript(t)), time.Minute, "", dir, nil)
+	d.SetDownFunc(func(ctx context.Context, name string) error {
+		destroyed = append(destroyed, name)
+		return nil
+	})
+	d.SetTaskRunning("running-task", true)
+
+	d.cleanupSandboxes(context.Background())
+
+	if len(destroyed) != 1 {
+		t.Fatalf("expected 1 sandbox destroyed, got %d: %v", len(destroyed), destroyed)
+	}
+	if destroyed[0] != "done-task" {
+		t.Errorf("expected done-task destroyed, got %q", destroyed[0])
+	}
+}
+
+func TestCleanupSandboxes_SkipsRunningTask(t *testing.T) {
+	dir := t.TempDir()
+
+	// Task marked done but still tracked as running (edge case)
+	createTaskWithPRs(t, dir, "edge-task", nil)
+	td, err := task.Open(dir, "edge-task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := td.SetStatus(task.StatusDone); err != nil {
+		t.Fatal(err)
+	}
+
+	var destroyed []string
+	d := New(ghNew(writeOpenPRScript(t)), time.Minute, "", dir, nil)
+	d.SetDownFunc(func(ctx context.Context, name string) error {
+		destroyed = append(destroyed, name)
+		return nil
+	})
+	d.SetTaskRunning("edge-task", true)
+
+	d.cleanupSandboxes(context.Background())
+
+	if len(destroyed) != 0 {
+		t.Errorf("expected no sandboxes destroyed for running task, got %v", destroyed)
+	}
+}
+
+func TestProcessPR_SetsStatusDoneWhenAllPRsClosed(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not found")
+	}
+
+	dir := t.TempDir()
+	createTaskWithPRs(t, dir, "close-test", []task.PR{
+		{URL: "https://github.com/org/repo/pull/1", Repo: "org/repo", Branch: "fix", Base: "main", Number: 1},
+	})
+
+	script := writeClosedPRScript(t)
+	d := New(ghNew(script), time.Minute, "", dir, []string{"alice"})
+
+	ref := PRRef{
+		TaskName:  "close-test",
+		OutputDir: dir,
+		PR:        task.PR{URL: "https://github.com/org/repo/pull/1", Repo: "org/repo", Number: 1},
+	}
+
+	d.ProcessPR(context.Background(), ref)
+
+	td, err := task.Open(dir, "close-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := td.LoadState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Status != task.StatusDone {
+		t.Errorf("Status = %q, want %q", state.Status, task.StatusDone)
+	}
+}
+
 func ghNew(bin string) *gh.Runner {
 	return gh.New(bin)
 }

@@ -84,6 +84,10 @@ func runTask(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("saving metadata: %w", err)
 	}
 
+	if err := taskDir.SetStatus(task.StatusInProgress); err != nil {
+		return fmt.Errorf("setting status: %w", err)
+	}
+
 	return executeTask(ctx, taskName, taskDescription, taskDir, cfg, ghRunner, false, author, profileName, profileVars)
 }
 
@@ -111,6 +115,10 @@ func continueTask(cmd *cobra.Command, args []string) error {
 	state, err := taskDir.LoadState()
 	if err != nil {
 		return fmt.Errorf("loading task state: %w", err)
+	}
+
+	if err := taskDir.SetStatus(task.StatusInProgress); err != nil {
+		slog.Warn("Failed to set status to in-progress", "task", taskName, "error", err)
 	}
 
 	return executeTask(ctx, taskName, taskDescription, taskDir, cfg, ghRunner, true, state.Author, "", nil)
@@ -259,6 +267,20 @@ func executeTask(ctx context.Context, taskName, taskDescription string, taskDir 
 
 	if err := taskDir.TouchUpdatedAt(time.Now()); err != nil {
 		slog.Warn("Failed to update updated_at", "task", taskName, "error", err)
+	}
+
+	// Set final status based on PR state.
+	state, err := taskDir.LoadState()
+	if err != nil {
+		slog.Warn("Failed to load state for status update", "task", taskName, "error", err)
+	} else {
+		finalStatus := task.StatusDone
+		if state.HasOpenPRs() {
+			finalStatus = task.StatusWaiting
+		}
+		if err := taskDir.SetStatus(finalStatus); err != nil {
+			slog.Warn("Failed to set final status", "task", taskName, "error", err)
+		}
 	}
 
 	slog.Info("Task completed", "task", taskName)
