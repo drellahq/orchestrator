@@ -92,15 +92,35 @@ func saveProcessedIssues(outputDir string, pi *ProcessedIssues) error {
 	return os.WriteFile(path, data, 0644)
 }
 
-// taskNameFromIssue derives a task name from an issue number.
-func taskNameFromIssue(repo string, number int) string {
-	// Use the repo name and issue number, e.g. "tasks-42"
+// taskNameFromIssue derives a task name from a repo, issue number, and title.
+// Format: REPO_NAME-ISSUE_NUMBER-snake_case_title, e.g. "tasks-42-add_dark_mode".
+func taskNameFromIssue(repo string, number int, title string) string {
 	parts := strings.SplitN(repo, "/", 2)
 	repoName := repo
 	if len(parts) == 2 {
 		repoName = parts[1]
 	}
-	return fmt.Sprintf("%s-%d", repoName, number)
+	return fmt.Sprintf("%s-%d-%s", repoName, number, toSnakeCase(title))
+}
+
+// toSnakeCase converts a string to snake_case: lowercased, non-alphanumeric
+// characters replaced with underscores, leading/trailing/consecutive underscores
+// collapsed.
+func toSnakeCase(s string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(s) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		} else {
+			b.WriteRune('_')
+		}
+	}
+	// Collapse consecutive underscores and trim edges
+	result := b.String()
+	for strings.Contains(result, "__") {
+		result = strings.ReplaceAll(result, "__", "_")
+	}
+	return strings.Trim(result, "_")
 }
 
 // taskNameFromSpec derives a task name from a spec filename.
@@ -258,7 +278,7 @@ func (d *Daemon) checkForNewIssues(ctx context.Context) {
 			continue
 		}
 
-		taskName := taskNameFromIssue(d.tasksRepo, issue.Number)
+		taskName := taskNameFromIssue(d.tasksRepo, issue.Number, issue.Title)
 
 		// Check if task is already running — skip but don't mark as
 		// processed so it is retried next cycle.
