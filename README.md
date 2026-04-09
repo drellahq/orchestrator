@@ -55,6 +55,9 @@ The `orchestrator.yaml` file supports:
 | `allowed_repos` | `[]` (deny all)      | Repos allowed for `open_pr`/`update_pr`/`comment_on_pr` (glob patterns)|
 | `profiles_repo` | (empty)              | GitHub repo containing profile directories (e.g. `myorg/profiles`) |
 | `profiles_dir`  | (empty)              | Local directory override for profiles (takes precedence over `profiles_repo`) |
+| `daemon.poll_interval` | `60s`         | How often the daemon polls for new PR comments and tasks |
+| `daemon.allowed_commenters` | `[]`    | GitHub usernames allowed to trigger `task continue` via PR comments and to create tasks via `tasks_repo` issues |
+| `daemon.tasks_repo` | (empty)          | GitHub repo to monitor for task specs and issues (e.g. `myorg/tasks`) |
 
 ## Usage
 
