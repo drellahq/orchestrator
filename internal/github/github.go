@@ -246,9 +246,10 @@ func (r *Runner) GetFileContent(ctx context.Context, repo, branch, path string) 
 
 // Issue represents a GitHub issue (not a pull request).
 type Issue struct {
-	Number int    `json:"number"`
-	Title  string `json:"title"`
-	Body   string `json:"body"`
+	Number int         `json:"number"`
+	Title  string      `json:"title"`
+	Body   string      `json:"body"`
+	User   CommentUser `json:"user"`
 }
 
 // ListIssues returns open issues (excluding pull requests) for a repo.
@@ -265,9 +266,10 @@ func (r *Runner) ListIssues(ctx context.Context, repo string) ([]Issue, error) {
 
 	// gh api --paginate may concatenate JSON arrays.
 	type rawIssue struct {
-		Number      int    `json:"number"`
-		Title       string `json:"title"`
-		Body        string `json:"body"`
+		Number      int         `json:"number"`
+		Title       string      `json:"title"`
+		Body        string      `json:"body"`
+		User        CommentUser `json:"user"`
 		PullRequest *struct {
 			URL string `json:"url"`
 		} `json:"pull_request"`
@@ -292,6 +294,7 @@ func (r *Runner) ListIssues(ctx context.Context, repo string) ([]Issue, error) {
 			Number: ri.Number,
 			Title:  ri.Title,
 			Body:   ri.Body,
+			User:   ri.User,
 		})
 	}
 	return issues, nil

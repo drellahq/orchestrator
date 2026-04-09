@@ -243,8 +243,18 @@ func (d *Daemon) checkForNewIssues(ctx context.Context) {
 		return
 	}
 
+	allowed := make(map[string]bool, len(d.allowedCommenters))
+	for _, u := range d.allowedCommenters {
+		allowed[u] = true
+	}
+
 	for _, issue := range issues {
 		if processed.Issues[issue.Number] {
+			continue
+		}
+
+		if !allowed[issue.User.Login] {
+			log.Debug("Issue author not in allowed_commenters, skipping", "issue", issue.Number, "author", issue.User.Login)
 			continue
 		}
 
