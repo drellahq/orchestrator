@@ -590,6 +590,29 @@ func TestGetFileContent(t *testing.T) {
 	}
 }
 
+func TestGetFileAuthor(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not found")
+	}
+
+	script, outFile := writeArgCapture(t, "Jane Doe <jane@example.com>\n")
+	r := New(script)
+
+	author, err := r.GetFileAuthor(context.Background(), "org/tasks", "main", "in-progress/spec.md")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if author != "Jane Doe <jane@example.com>" {
+		t.Errorf("author = %q, want %q", author, "Jane Doe <jane@example.com>")
+	}
+
+	gotArgs := readArgs(t, outFile)
+	wantArgs := []string{"api", "/repos/org/tasks/commits?path=in-progress/spec.md&sha=main&per_page=100", "--jq", `.[-1] | .commit.author.name + " <" + .commit.author.email + ">"`}
+	if !equalArgs(gotArgs, wantArgs) {
+		t.Errorf("args = %v, want %v", gotArgs, wantArgs)
+	}
+}
+
 func TestListIssues(t *testing.T) {
 	if _, err := exec.LookPath("sh"); err != nil {
 		t.Skip("sh not found")

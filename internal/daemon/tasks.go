@@ -12,7 +12,7 @@ import (
 )
 
 // NewTaskFunc is the function signature for launching a new task.
-type NewTaskFunc func(ctx context.Context, taskName, description string) error
+type NewTaskFunc func(ctx context.Context, taskName, description, author string) error
 
 // processedSpecsFile is the filename used to track which specs have been picked up.
 const processedSpecsFile = "processed_specs.json"
@@ -180,6 +180,13 @@ func (d *Daemon) checkForNewSpecs(ctx context.Context) {
 
 		description := string(decoded)
 
+		// Fetch the author of the spec file (the person who created it)
+		author, err := d.gh.GetFileAuthor(ctx, d.tasksRepo, "main", "in-progress/"+file)
+		if err != nil {
+			log.Warn("Failed to fetch spec author, continuing without author", "spec", file, "error", err)
+			author = ""
+		}
+
 		// Mark as processed before launching to avoid re-processing
 		processed.Specs[file] = true
 		if err := saveProcessedSpecs(d.outputDir, processed); err != nil {
@@ -197,17 +204,17 @@ func (d *Daemon) checkForNewSpecs(ctx context.Context) {
 		d.running[taskName] = true
 		d.mu.Unlock()
 
-		go func(name, desc string) {
+		go func(name, desc, author string) {
 			defer func() {
 				d.mu.Lock()
 				delete(d.running, name)
 				d.mu.Unlock()
 			}()
 
-			if err := d.newTaskFunc(ctx, name, desc); err != nil {
+			if err := d.newTaskFunc(ctx, name, desc, author); err != nil {
 				slog.Error("task new failed", "task", name, "error", err)
 			}
-		}(taskName, description)
+		}(taskName, description, author)
 	}
 }
 
@@ -291,7 +298,7 @@ func (d *Daemon) checkForNewIssues(ctx context.Context) {
 				d.mu.Unlock()
 			}()
 
-			if err := d.newTaskFunc(ctx, name, desc); err != nil {
+			if err := d.newTaskFunc(ctx, name, desc, ""); err != nil {
 				slog.Error("task new failed", "task", name, "error", err)
 			}
 		}(taskName, description)

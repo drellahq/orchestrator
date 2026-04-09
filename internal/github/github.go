@@ -244,6 +244,19 @@ func (r *Runner) GetFileContent(ctx context.Context, repo, branch, path string) 
 	return strings.TrimSpace(out), nil
 }
 
+// GetFileAuthor returns the author of the first commit that introduced a file,
+// in "Name <email>" format. It fetches the commit history for the file and
+// returns the author of the oldest commit.
+func (r *Runner) GetFileAuthor(ctx context.Context, repo, branch, path string) (string, error) {
+	endpoint := fmt.Sprintf("/repos/%s/commits?path=%s&sha=%s&per_page=100", repo, path, branch)
+	jqExpr := `.[-1] | .commit.author.name + " <" + .commit.author.email + ">"`
+	out, err := r.run(ctx, "", r.bin, "api", endpoint, "--jq", jqExpr)
+	if err != nil {
+		return "", fmt.Errorf("getting file author: %w", err)
+	}
+	return strings.TrimSpace(out), nil
+}
+
 // Issue represents a GitHub issue (not a pull request).
 type Issue struct {
 	Number int    `json:"number"`

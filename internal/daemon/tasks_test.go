@@ -144,6 +144,10 @@ case "$jq_arg" in
     esac
     exit 0
     ;;
+  ".[-1]"*)
+    printf '%%s' 'Test Author <test@example.com>'
+    exit 0
+    ;;
 esac
 
 printf '[]'
@@ -182,11 +186,11 @@ func TestCheckForNewSpecs_PicksUpNewSpec(t *testing.T) {
 	d.SetTasksRepo("org/tasks")
 
 	var mu sync.Mutex
-	var capturedTasks []struct{ name, desc string }
+	var capturedTasks []struct{ name, desc, author string }
 	done := make(chan struct{}, 1)
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description string) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, author string) error {
 		mu.Lock()
-		capturedTasks = append(capturedTasks, struct{ name, desc string }{taskName, description})
+		capturedTasks = append(capturedTasks, struct{ name, desc, author string }{taskName, description, author})
 		mu.Unlock()
 		done <- struct{}{}
 		return nil
@@ -215,6 +219,9 @@ func TestCheckForNewSpecs_PicksUpNewSpec(t *testing.T) {
 	}
 	if capturedTasks[0].desc != specContent {
 		t.Errorf("task description = %q, want %q", capturedTasks[0].desc, specContent)
+	}
+	if capturedTasks[0].author != "Test Author <test@example.com>" {
+		t.Errorf("task author = %q, want %q", capturedTasks[0].author, "Test Author <test@example.com>")
 	}
 
 	// Verify spec is marked as processed
@@ -248,7 +255,7 @@ func TestCheckForNewSpecs_SkipsAlreadyProcessed(t *testing.T) {
 	d.SetTasksRepo("org/tasks")
 
 	called := false
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description string) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, author string) error {
 		called = true
 		return nil
 	})
@@ -278,7 +285,7 @@ func TestCheckForNewSpecs_SkipsRunningTask(t *testing.T) {
 	d.SetTaskRunning("add-dark-mode", true)
 
 	called := false
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description string) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, author string) error {
 		called = true
 		return nil
 	})
@@ -316,7 +323,7 @@ func TestCheckForNewSpecs_SkipsNonMdFiles(t *testing.T) {
 	d.SetTasksRepo("org/tasks")
 
 	called := false
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description string) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, author string) error {
 		called = true
 		return nil
 	})
@@ -348,7 +355,7 @@ func TestCheckForNewSpecs_MultipleSpecs(t *testing.T) {
 	var mu sync.Mutex
 	var capturedNames []string
 	done := make(chan struct{}, 2)
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description string) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, author string) error {
 		mu.Lock()
 		capturedNames = append(capturedNames, taskName)
 		mu.Unlock()
@@ -400,7 +407,7 @@ func TestCheckForNewSpecs_SetsRunningState(t *testing.T) {
 
 	started := make(chan struct{})
 	finish := make(chan struct{})
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description string) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, author string) error {
 		close(started)
 		<-finish
 		return nil
@@ -448,7 +455,7 @@ func TestCheckForNewSpecs_ContextCancelled(t *testing.T) {
 	d.SetTasksRepo("org/tasks")
 
 	called := false
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description string) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, author string) error {
 		called = true
 		return nil
 	})
@@ -494,7 +501,7 @@ esac
 	d.SetTasksRepo("org/tasks")
 
 	called := false
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description string) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, author string) error {
 		called = true
 		return nil
 	})
@@ -506,6 +513,78 @@ esac
 
 	if called {
 		t.Error("newTaskFunc should not have been called when content fetch fails")
+	}
+}
+
+func TestCheckForNewSpecs_AuthorFetchFailure(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not found")
+	}
+
+	dir := t.TempDir()
+	specContent := "Spec content"
+
+	// Create a script that lists files and returns content, but fails on
+	// the commits endpoint (author lookup). The jq dispatch is by pattern:
+	// .[].name → list, .content → content, .[-1]* → author.
+	// We omit the .[-1]* case so it falls through to "printf '[]'" which
+	// won't parse as a valid author, causing GetFileAuthor to fail.
+	scriptDir := t.TempDir()
+	script := filepath.Join(scriptDir, "gh")
+	encoded := base64.StdEncoding.EncodeToString([]byte(specContent))
+	scriptContent := fmt.Sprintf(`#!/bin/sh
+jq_arg=""
+for arg in "$@"; do
+  case "$prev" in
+    --jq) jq_arg="$arg" ;;
+  esac
+  prev="$arg"
+done
+
+case "$jq_arg" in
+  ".[].name")
+    printf '%%s' 'my-spec.md'
+    exit 0
+    ;;
+  ".content")
+    printf '%%s' '%s'
+    exit 0
+    ;;
+  ".[-1]"*)
+    exit 1
+    ;;
+esac
+
+printf '[]'
+`, encoded)
+	if err := os.WriteFile(script, []byte(scriptContent), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	d := New(gh.New(script), time.Minute, "", dir, nil)
+	d.SetTasksRepo("org/tasks")
+
+	var capturedAuthor string
+	done := make(chan struct{}, 1)
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, author string) error {
+		capturedAuthor = author
+		done <- struct{}{}
+		return nil
+	})
+
+	d.checkForNewSpecs(context.Background())
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for newTaskFunc")
+	}
+
+	time.Sleep(50 * time.Millisecond)
+
+	// Author should be empty when fetch fails, but task should still be launched
+	if capturedAuthor != "" {
+		t.Errorf("expected empty author on fetch failure, got %q", capturedAuthor)
 	}
 }
 
@@ -527,7 +606,7 @@ func TestCheckForNewSpecs_IdempotentAcrossCalls(t *testing.T) {
 	var mu sync.Mutex
 	callCount := 0
 	done := make(chan struct{}, 2)
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description string) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, author string) error {
 		mu.Lock()
 		callCount++
 		mu.Unlock()
@@ -696,11 +775,11 @@ func TestCheckForNewIssues_PicksUpNewIssue(t *testing.T) {
 	d.SetTasksRepo("org/tasks")
 
 	var mu sync.Mutex
-	var capturedTasks []struct{ name, desc string }
+	var capturedTasks []struct{ name, desc, author string }
 	done := make(chan struct{}, 1)
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description string) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, author string) error {
 		mu.Lock()
-		capturedTasks = append(capturedTasks, struct{ name, desc string }{taskName, description})
+		capturedTasks = append(capturedTasks, struct{ name, desc, author string }{taskName, description, author})
 		mu.Unlock()
 		done <- struct{}{}
 		return nil
@@ -727,6 +806,9 @@ func TestCheckForNewIssues_PicksUpNewIssue(t *testing.T) {
 	}
 	if capturedTasks[0].desc != "Please add a dark mode toggle." {
 		t.Errorf("task description = %q, want %q", capturedTasks[0].desc, "Please add a dark mode toggle.")
+	}
+	if capturedTasks[0].author != "" {
+		t.Errorf("task author = %q, want empty for issues", capturedTasks[0].author)
 	}
 
 	// Verify issue is marked as processed
@@ -756,7 +838,7 @@ func TestCheckForNewIssues_FallsBackToTitle(t *testing.T) {
 
 	var capturedDesc string
 	done := make(chan struct{}, 1)
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description string) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, author string) error {
 		capturedDesc = description
 		done <- struct{}{}
 		return nil
@@ -797,7 +879,7 @@ func TestCheckForNewIssues_SkipsAlreadyProcessed(t *testing.T) {
 	d.SetTasksRepo("org/tasks")
 
 	called := false
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description string) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, author string) error {
 		called = true
 		return nil
 	})
@@ -827,7 +909,7 @@ func TestCheckForNewIssues_SkipsRunningTask(t *testing.T) {
 	d.SetTaskRunning("tasks-7", true)
 
 	called := false
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description string) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, author string) error {
 		called = true
 		return nil
 	})
@@ -866,7 +948,7 @@ func TestCheckForNewIssues_FiltersPullRequests(t *testing.T) {
 	var mu sync.Mutex
 	var capturedNames []string
 	done := make(chan struct{}, 2)
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description string) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, author string) error {
 		mu.Lock()
 		capturedNames = append(capturedNames, taskName)
 		mu.Unlock()
@@ -914,7 +996,7 @@ func TestCheckForNewIssues_MultipleIssues(t *testing.T) {
 	var mu sync.Mutex
 	var capturedNames []string
 	done := make(chan struct{}, 2)
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description string) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, author string) error {
 		mu.Lock()
 		capturedNames = append(capturedNames, taskName)
 		mu.Unlock()
@@ -967,7 +1049,7 @@ func TestCheckForNewIssues_IdempotentAcrossCalls(t *testing.T) {
 	var mu sync.Mutex
 	callCount := 0
 	done := make(chan struct{}, 2)
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description string) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, author string) error {
 		mu.Lock()
 		callCount++
 		mu.Unlock()
@@ -1012,7 +1094,7 @@ func TestCheckForNewIssues_SetsRunningState(t *testing.T) {
 
 	started := make(chan struct{})
 	finish := make(chan struct{})
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description string) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, author string) error {
 		close(started)
 		<-finish
 		return nil

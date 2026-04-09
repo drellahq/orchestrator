@@ -290,7 +290,7 @@ func TestProcessPR_SkipsClosedPR(t *testing.T) {
 func TestBuildNewTaskArgs_WithFrontMatter(t *testing.T) {
 	description := "---\nprofile: code-review\nrepo: org/repo\npr: 42\n---\n\nReview this pull request."
 
-	args := buildNewTaskArgs("/etc/config.yaml", "my-task", description)
+	args := buildNewTaskArgs("/etc/config.yaml", "my-task", description, "")
 
 	// Should have: task new --config <path> --profile code-review --var ... --var ... <name> <desc>
 	assertContains(t, args, "--config", "/etc/config.yaml")
@@ -317,7 +317,7 @@ func TestBuildNewTaskArgs_WithFrontMatter(t *testing.T) {
 func TestBuildNewTaskArgs_NoFrontMatter(t *testing.T) {
 	description := "Just a regular task description."
 
-	args := buildNewTaskArgs("/etc/config.yaml", "my-task", description)
+	args := buildNewTaskArgs("/etc/config.yaml", "my-task", description, "")
 
 	// Should have: task new --config <path> <name> <desc>
 	if len(args) != 6 {
@@ -346,7 +346,7 @@ func TestBuildNewTaskArgs_NoFrontMatter(t *testing.T) {
 func TestBuildNewTaskArgs_MalformedFrontMatter(t *testing.T) {
 	description := "---\n{{invalid yaml\n---\n\nBody."
 
-	args := buildNewTaskArgs("/etc/config.yaml", "my-task", description)
+	args := buildNewTaskArgs("/etc/config.yaml", "my-task", description, "")
 
 	// Should fall back to raw description
 	if args[len(args)-1] != description {
@@ -367,7 +367,7 @@ func TestBuildNewTaskArgs_MalformedFrontMatter(t *testing.T) {
 func TestBuildNewTaskArgs_ProfileOnly(t *testing.T) {
 	description := "---\nprofile: deploy\n---\n\nDeploy the service."
 
-	args := buildNewTaskArgs("/etc/config.yaml", "my-task", description)
+	args := buildNewTaskArgs("/etc/config.yaml", "my-task", description, "")
 
 	assertContains(t, args, "--profile", "deploy")
 
@@ -386,7 +386,7 @@ func TestBuildNewTaskArgs_ProfileOnly(t *testing.T) {
 func TestBuildNewTaskArgs_VarsOnly(t *testing.T) {
 	description := "---\nrepo: org/repo\n---\n\nBody."
 
-	args := buildNewTaskArgs("/etc/config.yaml", "my-task", description)
+	args := buildNewTaskArgs("/etc/config.yaml", "my-task", description, "")
 
 	// No --profile flag expected
 	for _, a := range args {
@@ -402,6 +402,35 @@ func TestBuildNewTaskArgs_VarsOnly(t *testing.T) {
 
 	if args[len(args)-1] != "Body." {
 		t.Errorf("expected stripped description, got %q", args[len(args)-1])
+	}
+}
+
+func TestBuildNewTaskArgs_WithAuthor(t *testing.T) {
+	description := "Just a regular task description."
+
+	args := buildNewTaskArgs("/etc/config.yaml", "my-task", description, "Jane Doe <jane@example.com>")
+
+	assertContains(t, args, "--author", "Jane Doe <jane@example.com>")
+
+	// Last two args should still be task name and description
+	if args[len(args)-2] != "my-task" {
+		t.Errorf("expected task name as second-to-last arg, got %q", args[len(args)-2])
+	}
+	if args[len(args)-1] != description {
+		t.Errorf("expected description as last arg, got %q", args[len(args)-1])
+	}
+}
+
+func TestBuildNewTaskArgs_EmptyAuthor(t *testing.T) {
+	description := "Just a regular task description."
+
+	args := buildNewTaskArgs("/etc/config.yaml", "my-task", description, "")
+
+	// Should NOT have --author
+	for _, a := range args {
+		if a == "--author" {
+			t.Error("unexpected --author flag when author is empty")
+		}
 	}
 }
 
