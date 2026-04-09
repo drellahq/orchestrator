@@ -592,18 +592,48 @@ func TestTaskNameFromIssue(t *testing.T) {
 	tests := []struct {
 		repo   string
 		number int
+		title  string
 		want   string
 	}{
-		{"org/tasks", 42, "tasks-42"},
-		{"org/my-repo", 1, "my-repo-1"},
-		{"simple", 10, "simple-10"},
+		{"org/tasks", 42, "Add dark mode", "tasks-42-add_dark_mode"},
+		{"org/my-repo", 1, "Fix the login bug", "my-repo-1-fix_the_login_bug"},
+		{"simple", 10, "Hello World", "simple-10-hello_world"},
+		{"org/tasks", 7, "Feature: add SSO support!", "tasks-7-feature_add_sso_support"},
+		{"org/tasks", 3, "  extra   spaces  ", "tasks-3-extra_spaces"},
 	}
 
 	for _, tt := range tests {
-		t.Run(fmt.Sprintf("%s-%d", tt.repo, tt.number), func(t *testing.T) {
-			got := taskNameFromIssue(tt.repo, tt.number)
+		t.Run(tt.want, func(t *testing.T) {
+			got := taskNameFromIssue(tt.repo, tt.number, tt.title)
 			if got != tt.want {
-				t.Errorf("taskNameFromIssue(%q, %d) = %q, want %q", tt.repo, tt.number, got, tt.want)
+				t.Errorf("taskNameFromIssue(%q, %d, %q) = %q, want %q", tt.repo, tt.number, tt.title, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestToSnakeCase(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"Add dark mode", "add_dark_mode"},
+		{"Fix the login bug", "fix_the_login_bug"},
+		{"Hello World!", "hello_world"},
+		{"  extra   spaces  ", "extra_spaces"},
+		{"Feature: add SSO support!", "feature_add_sso_support"},
+		{"camelCase", "camelcase"},
+		{"with-hyphens", "with_hyphens"},
+		{"with_underscores", "with_underscores"},
+		{"123 numbers", "123_numbers"},
+		{"", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := toSnakeCase(tt.input)
+			if got != tt.want {
+				t.Errorf("toSnakeCase(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
 	}
@@ -722,8 +752,8 @@ func TestCheckForNewIssues_PicksUpNewIssue(t *testing.T) {
 	if len(capturedTasks) != 1 {
 		t.Fatalf("expected 1 task, got %d", len(capturedTasks))
 	}
-	if capturedTasks[0].name != "tasks-7" {
-		t.Errorf("task name = %q, want %q", capturedTasks[0].name, "tasks-7")
+	if capturedTasks[0].name != "tasks-7-add_dark_mode" {
+		t.Errorf("task name = %q, want %q", capturedTasks[0].name, "tasks-7-add_dark_mode")
 	}
 	if capturedTasks[0].desc != "Please add a dark mode toggle." {
 		t.Errorf("task description = %q, want %q", capturedTasks[0].desc, "Please add a dark mode toggle.")
@@ -863,7 +893,7 @@ func TestCheckForNewIssues_SkipsRunningTask(t *testing.T) {
 
 	d := New(gh.New(script), time.Minute, "", dir, []string{"alice"})
 	d.SetTasksRepo("org/tasks")
-	d.SetTaskRunning("tasks-7", true)
+	d.SetTaskRunning("tasks-7-add_dark_mode", true)
 
 	called := false
 	d.SetNewTaskFunc(func(ctx context.Context, taskName, description string) error {
@@ -929,8 +959,8 @@ func TestCheckForNewIssues_FiltersPullRequests(t *testing.T) {
 	if len(capturedNames) != 1 {
 		t.Fatalf("expected 1 task (PR should be filtered), got %d: %v", len(capturedNames), capturedNames)
 	}
-	if capturedNames[0] != "tasks-1" {
-		t.Errorf("task name = %q, want %q", capturedNames[0], "tasks-1")
+	if capturedNames[0] != "tasks-1-real_issue" {
+		t.Errorf("task name = %q, want %q", capturedNames[0], "tasks-1-real_issue")
 	}
 }
 
@@ -1065,14 +1095,14 @@ func TestCheckForNewIssues_SetsRunningState(t *testing.T) {
 		t.Fatal("timed out waiting for task to start")
 	}
 
-	if !d.IsTaskRunning("tasks-5") {
+	if !d.IsTaskRunning("tasks-5-my_task") {
 		t.Error("expected task to be marked as running")
 	}
 
 	close(finish)
 	time.Sleep(50 * time.Millisecond)
 
-	if d.IsTaskRunning("tasks-5") {
+	if d.IsTaskRunning("tasks-5-my_task") {
 		t.Error("expected task to no longer be running")
 	}
 }
