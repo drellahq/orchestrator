@@ -252,7 +252,9 @@ func (r *PodmanRunner) Cp(ctx context.Context, name, src, dest string) error {
 		} else if remotePath == "~" {
 			remotePath = "/home/claude"
 		}
-		_ = r.SSHAsRoot(ctx, name, "chown", "-R", "claude:claude", remotePath)
+		if err := r.SSHAsRoot(ctx, name, "chown", "-R", "claude:claude", remotePath); err != nil {
+			slog.Warn("Failed to chown copied file to claude user", "path", remotePath, "error", err)
+		}
 	}
 	return nil
 }

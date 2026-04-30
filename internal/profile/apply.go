@@ -118,9 +118,11 @@ func runSetup(ctx context.Context, runner sandbox.Runner, sbx, setupPath, taskDi
 set -euo pipefail
 podman cp "$1" "$2"
 `)
+		// Wrap in su - claude to match runner.SSH() behavior — podman exec
+		// runs as root by default, but setup scripts expect the claude user.
 		sandboxSSH = fmt.Sprintf(`#!/bin/bash
 set -euo pipefail
-podman exec %q "$@"
+podman exec %q su - claude -c "$(printf '%%q ' "$@")"
 `, sbx)
 	default:
 		// gjoll backend (default)
