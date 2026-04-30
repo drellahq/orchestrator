@@ -14,8 +14,8 @@ type SSHOpts struct {
 // Runner defines the interface for sandbox backends (gjoll VMs, podman containers, etc).
 type Runner interface {
 	// Up provisions a new sandbox.
-	// For gjoll: config is the path to .tf file
-	// For podman: config is the container image name
+	// For gjoll: config is the path to the .tf file.
+	// For podman: config is unused (image is configured at construction time).
 	Up(ctx context.Context, name string, config string) error
 
 	// Start starts a stopped sandbox.

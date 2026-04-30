@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
-	"github.com/drellabot/orchestrator/internal/sandbox"
 	"fmt"
 	"io"
 	"os"
@@ -12,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/drellabot/orchestrator/internal/config"
+	"github.com/drellabot/orchestrator/internal/sandbox"
 	"github.com/drellabot/orchestrator/internal/task"
 	"github.com/spf13/cobra"
 )
