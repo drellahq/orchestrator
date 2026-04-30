@@ -326,14 +326,16 @@ func (r *PodmanRunner) runInteractive(ctx context.Context, args ...string) error
 
 // wrapUserCommand wraps a command to run as the claude user via su.
 // Each argument is individually shell-quoted to preserve arguments
-// containing spaces or special characters.
+// containing spaces or special characters. Tilde (~) prefixes are
+// expanded to /home/claude because the inner command runs inside
+// single quotes where bash would not expand ~ on its own.
 func (r *PodmanRunner) wrapUserCommand(command ...string) []string {
 	if len(command) == 0 {
 		return []string{"bash", "-c", "su - claude"}
 	}
 	quoted := make([]string, len(command))
 	for i, arg := range command {
-		quoted[i] = shellQuoteForSu(arg)
+		quoted[i] = shellQuoteForSu(expandTilde(arg))
 	}
 	cmdStr := strings.Join(quoted, " ")
 	return []string{"bash", "-c", fmt.Sprintf("su - claude -c %s", shellQuoteForSu(cmdStr))}

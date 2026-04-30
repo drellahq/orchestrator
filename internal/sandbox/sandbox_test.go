@@ -219,6 +219,25 @@ func TestWrapUserCommand(t *testing.T) {
 				return []string{"bash", "-c", "su - claude -c " + shellQuoteForSu(inner)}
 			}(),
 		},
+		{
+			name:    "tilde expanded in args",
+			command: []string{"chmod", "+x", "~/run-claude.sh"},
+			// ~ must be expanded to /home/claude before quoting, because
+			// the inner command runs inside single quotes where bash
+			// would not expand ~ on its own.
+			want: func() []string {
+				inner := shellQuoteForSu("chmod") + " " + shellQuoteForSu("+x") + " " + shellQuoteForSu("/home/claude/run-claude.sh")
+				return []string{"bash", "-c", "su - claude -c " + shellQuoteForSu(inner)}
+			}(),
+		},
+		{
+			name:    "bare tilde expanded",
+			command: []string{"ls", "~"},
+			want: func() []string {
+				inner := shellQuoteForSu("ls") + " " + shellQuoteForSu("/home/claude")
+				return []string{"bash", "-c", "su - claude -c " + shellQuoteForSu(inner)}
+			}(),
+		},
 	}
 
 	for _, tt := range tests {
