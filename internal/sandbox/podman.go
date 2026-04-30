@@ -146,8 +146,10 @@ func (r *PodmanRunner) SSHAsRoot(ctx context.Context, name string, command ...st
 }
 
 // SSHProxy runs an interactive command in the container as the claude user
-// with TTY allocation (-it). Podman containers use --network host, so
-// SSHOpts.ReverseTunnels are unnecessary and ignored with a warning.
+// with TTY allocation (-it). The -it flags are required because callers
+// use this for interactive sessions (e.g. tmux). Podman containers use
+// --network host, so SSHOpts.ReverseTunnels are unnecessary and ignored
+// with a warning.
 func (r *PodmanRunner) SSHProxy(ctx context.Context, name string, opts *SSHOpts, command ...string) error {
 	if opts != nil {
 		if opts.Proxy {
@@ -202,6 +204,8 @@ func (r *PodmanRunner) Pull(ctx context.Context, name, remotePath, localRepoDir 
 		}
 	}
 
+	// Copy via a temp directory to avoid podman cp's inconsistent behavior
+	// when the destination already exists (it merges rather than replaces).
 	tmpDir, err := os.MkdirTemp("", "drella-pull-*")
 	if err != nil {
 		return fmt.Errorf("creating temp dir: %w", err)
@@ -256,12 +260,7 @@ func (r *PodmanRunner) Cp(ctx context.Context, name, src, dest string) error {
 	// Fix ownership when copying to the container — podman cp creates
 	// files as root, but the claude user needs to own them.
 	if isRemoteDest {
-		remotePath := dest[1:] // strip leading ":"
-		if strings.HasPrefix(remotePath, "~/") {
-			remotePath = "/home/claude/" + remotePath[2:]
-		} else if remotePath == "~" {
-			remotePath = "/home/claude"
-		}
+		remotePath := expandTilde(dest[1:]) // strip leading ":" and expand ~
 		if err := r.SSHAsRoot(ctx, name, "chown", "-R", "claude:claude", remotePath); err != nil {
 			slog.Warn("Failed to chown copied file to claude user", "path", remotePath, "error", err)
 		}
@@ -274,14 +273,18 @@ func (r *PodmanRunner) translatePath(name, path string) string {
 	if !strings.HasPrefix(path, ":") {
 		return path
 	}
-	remotePath := path[1:] // strip leading ":"
-	// Expand ~ to /home/claude
-	if strings.HasPrefix(remotePath, "~/") {
-		remotePath = "/home/claude/" + remotePath[2:]
-	} else if remotePath == "~" {
-		remotePath = "/home/claude"
+	return name + ":" + expandTilde(path[1:])
+}
+
+// expandTilde replaces a leading ~ with /home/claude in remote paths.
+func expandTilde(path string) string {
+	if strings.HasPrefix(path, "~/") {
+		return "/home/claude/" + path[2:]
 	}
-	return name + ":" + remotePath
+	if path == "~" {
+		return "/home/claude"
+	}
+	return path
 }
 
 // Stop stops a running container.
@@ -301,6 +304,10 @@ func (r *PodmanRunner) run(ctx context.Context, args ...string) error {
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
+		// For exec commands, include the container name for easier debugging.
+		if len(args) >= 2 && args[0] == "exec" {
+			return fmt.Errorf("podman exec %s: %w", args[1], err)
+		}
 		return fmt.Errorf("podman %s: %w", args[0], err)
 	}
 	return nil
@@ -321,6 +328,9 @@ func (r *PodmanRunner) runInteractive(ctx context.Context, args ...string) error
 // Each argument is individually shell-quoted to preserve arguments
 // containing spaces or special characters.
 func (r *PodmanRunner) wrapUserCommand(command ...string) []string {
+	if len(command) == 0 {
+		return []string{"bash", "-c", "su - claude"}
+	}
 	quoted := make([]string, len(command))
 	for i, arg := range command {
 		quoted[i] = shellQuoteForSu(arg)

@@ -190,6 +190,11 @@ func TestWrapUserCommand(t *testing.T) {
 		want    []string
 	}{
 		{
+			name:    "zero args",
+			command: []string{},
+			want:    []string{"bash", "-c", "su - claude"},
+		},
+		{
 			name:    "single arg",
 			command: []string{"whoami"},
 			want:    []string{"bash", "-c", "su - claude -c ''\\''whoami'\\'''"},
@@ -226,6 +231,30 @@ func TestWrapUserCommand(t *testing.T) {
 				if got[i] != tt.want[i] {
 					t.Errorf("wrapUserCommand(%v)[%d] = %q, want %q", tt.command, i, got[i], tt.want[i])
 				}
+			}
+		})
+	}
+}
+
+func TestExpandTilde(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"home-relative", "~/file.txt", "/home/claude/file.txt"},
+		{"bare tilde", "~", "/home/claude"},
+		{"absolute path unchanged", "/tmp/file.txt", "/tmp/file.txt"},
+		{"nested tilde path", "~/.claude/settings.json", "/home/claude/.claude/settings.json"},
+		{"empty string", "", ""},
+		{"tilde in middle unchanged", "foo/~/bar", "foo/~/bar"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := expandTilde(tt.input)
+			if got != tt.want {
+				t.Errorf("expandTilde(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
 	}
