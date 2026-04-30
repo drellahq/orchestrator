@@ -31,6 +31,8 @@ func Apply(ctx context.Context, p *Profile, runner sandbox.Runner, sbx string, t
 		if err := runner.Cp(ctx, sbx, p.Settings, ":~/.claude/settings.json"); err != nil {
 			return fmt.Errorf("copying settings.json: %w", err)
 		}
+		// Fix ownership — podman cp copies as root
+		runner.SSH(ctx, sbx, "bash", "-c", "chown claude:claude /home/claude/.claude/settings.json")
 		slog.Debug("Copied profile settings.json", "profile", p.Name)
 	}
 
@@ -72,7 +74,13 @@ func writeToSandbox(ctx context.Context, runner sandbox.Runner, sbx, content, de
 	}
 	tmpFile.Close()
 
-	return runner.Cp(ctx, sbx, tmpFile.Name(), dest)
+	if err := runner.Cp(ctx, sbx, tmpFile.Name(), dest); err != nil {
+		return err
+	}
+
+	// Fix ownership — podman cp copies as root, claude user needs to read these files
+	runner.SSH(ctx, sbx, "bash", "-c", "chown -R claude:claude /home/claude/.claude")
+	return nil
 }
 
 // registerMCPServer runs "claude mcp add" in the sandbox for a single server.

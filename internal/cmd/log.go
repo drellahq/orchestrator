@@ -57,7 +57,7 @@ func runLog(cmd *cobra.Command, args []string) error {
 
 		runner := sandbox.NewFromConfig(cfg.SandboxBackend, cfg.GjollEnv, cfg.PodmanImage, cfg.AnthropicKeyFile, 19090)
 		tw := newTranscriptWriter(os.Stdout, verbose)
-		return runner.SSHProxyOutput(ctx, taskName, tw, &sandbox.SSHOpts{Proxy: true}, "tail -f ~/transcript.jsonl")
+		return runner.SSHProxyOutput(ctx, taskName, tw, &sandbox.SSHOpts{Proxy: true}, "bash", "-c", "su - claude -c 'tail -f ~/transcript.jsonl'")
 	}
 
 	// Read local transcript

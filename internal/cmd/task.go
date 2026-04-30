@@ -354,6 +354,11 @@ func setupSandboxWithProfile(ctx context.Context, runner sandbox.Runner, taskNam
 		return fmt.Errorf("copying system prompt: %w", err)
 	}
 
+	// Fix ownership — podman cp copies as root
+	if err := runner.SSH(ctx, taskName, "bash", "-c", "chown claude:claude /home/claude/system-prompt.md"); err != nil {
+		return fmt.Errorf("chowning system prompt: %w", err)
+	}
+
 	return nil
 }
 
