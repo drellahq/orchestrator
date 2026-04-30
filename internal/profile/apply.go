@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 
 	"github.com/drellabot/orchestrator/internal/sandbox"
 )
@@ -31,8 +30,6 @@ func Apply(ctx context.Context, p *Profile, runner sandbox.Runner, sbx string, t
 		if err := runner.Cp(ctx, sbx, p.Settings, ":~/.claude/settings.json"); err != nil {
 			return fmt.Errorf("copying settings.json: %w", err)
 		}
-		// Fix ownership — podman cp copies as root
-		runner.SSH(ctx, sbx, "bash", "-c", "chown claude:claude /home/claude/.claude/settings.json")
 		slog.Debug("Copied profile settings.json", "profile", p.Name)
 	}
 
@@ -60,7 +57,7 @@ func Apply(ctx context.Context, p *Profile, runner sandbox.Runner, sbx string, t
 // writeToSandbox writes content to a file in the sandbox via a temp file + cp.
 func writeToSandbox(ctx context.Context, runner sandbox.Runner, sbx, content, dest string) error {
 	// Ensure the parent directory exists in the sandbox
-	runner.SSH(ctx, sbx, "bash", "-c", "su - claude -c 'mkdir -p ~/.claude'")
+	runner.SSH(ctx, sbx, "mkdir", "-p", "~/.claude")
 
 	tmpFile, err := os.CreateTemp("", "profile-*")
 	if err != nil {
@@ -74,16 +71,12 @@ func writeToSandbox(ctx context.Context, runner sandbox.Runner, sbx, content, de
 	}
 	tmpFile.Close()
 
-	if err := runner.Cp(ctx, sbx, tmpFile.Name(), dest); err != nil {
-		return err
-	}
-
-	// Fix ownership — podman cp copies as root, claude user needs to read these files
-	runner.SSH(ctx, sbx, "bash", "-c", "chown -R claude:claude /home/claude/.claude")
-	return nil
+	return runner.Cp(ctx, sbx, tmpFile.Name(), dest)
 }
 
 // registerMCPServer runs "claude mcp add" in the sandbox for a single server.
+// Commands are passed as separate args to runner.SSH which handles user context
+// (gjoll runs as the SSH user directly; podman wraps in su - claude).
 func registerMCPServer(ctx context.Context, runner sandbox.Runner, sbx string, server MCPServer) error {
 	var args []string
 	switch server.Transport {
@@ -103,19 +96,7 @@ func registerMCPServer(ctx context.Context, runner sandbox.Runner, sbx string, s
 	default:
 		return fmt.Errorf("unsupported MCP transport type: %q", server.Transport)
 	}
-	// Shell-quote each argument individually to prevent word splitting and injection
-	quoted := make([]string, len(args))
-	for i, a := range args {
-		quoted[i] = shellQuote(a)
-	}
-	// Use double quotes for the su -c wrapper so inner single quotes work correctly
-	return runner.SSH(ctx, sbx, "bash", "-c", fmt.Sprintf(`su - claude -c "%s"`, strings.Join(quoted, " ")))
-}
-
-// shellQuote wraps a string in single quotes for safe shell embedding.
-// Internal single quotes are escaped as '\'' (end quote, escaped quote, start quote).
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+	return runner.SSH(ctx, sbx, args...)
 }
 
 // runSetup executes setup.sh on the host with helper scripts on PATH.

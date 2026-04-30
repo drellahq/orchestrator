@@ -134,6 +134,71 @@ func TestTranslatePath(t *testing.T) {
 	}
 }
 
+func TestShellQuoteForSu(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"no special chars", "hello", "'hello'"},
+		{"with single quote", "it's", "'it'\\''s'"},
+		{"multiple single quotes", "'hello' 'world'", "''\\''hello'\\'' '\\''world'\\'''"},
+		{"empty string", "", "''"},
+		{"double quotes pass through", `"hello"`, `'"hello"'`},
+		{"spaces preserved", "hello world", "'hello world'"},
+		{"url unchanged", "http://localhost:19090/mcp", "'http://localhost:19090/mcp'"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := shellQuoteForSu(tt.input)
+			if got != tt.want {
+				t.Errorf("shellQuoteForSu(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestWrapUserCommand(t *testing.T) {
+	r := NewPodman("fedora:43", "", 19090)
+
+	tests := []struct {
+		name    string
+		command []string
+		want    []string
+	}{
+		{
+			name:    "single arg",
+			command: []string{"whoami"},
+			want:    []string{"bash", "-c", "su - claude -c 'whoami'"},
+		},
+		{
+			name:    "multiple args",
+			command: []string{"git", "config", "--global", "user.name", "Drellabot"},
+			want:    []string{"bash", "-c", "su - claude -c 'git config --global user.name Drellabot'"},
+		},
+		{
+			name:    "args with single quote",
+			command: []string{"echo", "it's"},
+			want:    []string{"bash", "-c", "su - claude -c 'echo it'\\''s'"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := r.wrapUserCommand(tt.command...)
+			if len(got) != len(tt.want) {
+				t.Fatalf("wrapUserCommand(%v) = %v (len %d), want %v (len %d)", tt.command, got, len(got), tt.want, len(tt.want))
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("wrapUserCommand(%v)[%d] = %q, want %q", tt.command, i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
 // typeString returns the type of a Runner as a string for test comparison.
 func typeString(r Runner) string {
 	switch r.(type) {
