@@ -134,17 +134,17 @@ podman cp "$1" "$2"
 `)
 		sandboxSSH = fmt.Sprintf(`#!/bin/bash
 set -euo pipefail
-podman exec %s "$@"
+podman exec %q "$@"
 `, sbx)
 	default:
 		// gjoll backend (default)
 		sandboxCp = fmt.Sprintf(`#!/bin/bash
 set -euo pipefail
-gjoll cp %s "$1" "$2"
+gjoll cp %q "$1" "$2"
 `, sbx)
 		sandboxSSH = fmt.Sprintf(`#!/bin/bash
 set -euo pipefail
-gjoll ssh %s -- "$@"
+gjoll ssh %q -- "$@"
 `, sbx)
 	}
 
