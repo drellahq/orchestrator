@@ -306,10 +306,14 @@ func (r *PodmanRunner) runInteractive(ctx context.Context, args ...string) error
 }
 
 // wrapUserCommand wraps a command to run as the claude user via su.
-// The command args are joined into a single shell command string.
+// Each argument is individually shell-quoted to preserve arguments
+// containing spaces or special characters.
 func (r *PodmanRunner) wrapUserCommand(command ...string) []string {
-	// Join all args into a single command string for su -c
-	cmdStr := strings.Join(command, " ")
+	quoted := make([]string, len(command))
+	for i, arg := range command {
+		quoted[i] = shellQuoteForSu(arg)
+	}
+	cmdStr := strings.Join(quoted, " ")
 	return []string{"bash", "-c", fmt.Sprintf("su - claude -c %s", shellQuoteForSu(cmdStr))}
 }
 

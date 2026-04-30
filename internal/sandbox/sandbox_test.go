@@ -192,17 +192,27 @@ func TestWrapUserCommand(t *testing.T) {
 		{
 			name:    "single arg",
 			command: []string{"whoami"},
-			want:    []string{"bash", "-c", "su - claude -c 'whoami'"},
+			want:    []string{"bash", "-c", "su - claude -c ''\\''whoami'\\'''"},
 		},
 		{
 			name:    "multiple args",
 			command: []string{"git", "config", "--global", "user.name", "Drellabot"},
-			want:    []string{"bash", "-c", "su - claude -c 'git config --global user.name Drellabot'"},
+			want:    []string{"bash", "-c", "su - claude -c ''\\''git'\\'' '\\''config'\\'' '\\''--global'\\'' '\\''user.name'\\'' '\\''Drellabot'\\'''"},
 		},
 		{
-			name:    "args with single quote",
+			name:    "args with spaces",
+			command: []string{"git", "config", "--global", "user.name", "Jane Doe"},
+			want:    []string{"bash", "-c", "su - claude -c ''\\''git'\\'' '\\''config'\\'' '\\''--global'\\'' '\\''user.name'\\'' '\\''Jane Doe'\\'''"},
+		},
+		{
+			name: "args with single quote",
 			command: []string{"echo", "it's"},
-			want:    []string{"bash", "-c", "su - claude -c 'echo it'\\''s'"},
+			// Inner: 'echo' 'it'\''s'
+			// Outer shellQuoteForSu wraps the whole inner string
+			want: func() []string {
+				inner := shellQuoteForSu("echo") + " " + shellQuoteForSu("it's")
+				return []string{"bash", "-c", "su - claude -c " + shellQuoteForSu(inner)}
+			}(),
 		},
 	}
 
