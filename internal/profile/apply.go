@@ -148,9 +148,30 @@ fi
 `, sbx, sbx)
 		// Wrap in su - claude to match runner.SSH() behavior — podman exec
 		// runs as root by default, but setup scripts expect the claude user.
+		// Uses single-quote escaping ('\\'' for embedded quotes) consistent
+		// with the Go shellQuoteForSu approach used by wrapUserCommand.
 		sandboxSSH = fmt.Sprintf(`#!/bin/bash
 set -euo pipefail
-podman exec %q su - claude -c "$(printf '%%q ' "$@")"
+
+# shell_quote: wraps a string in single quotes, escaping embedded single quotes
+# with the '\'' technique — same as Go's shellQuoteForSu.
+shell_quote() {
+  printf "'"
+  printf '%%s' "$1" | sed "s/'/'\\\\''/g"
+  printf "'"
+}
+
+# Expand ~ to /home/claude (matching Go's expandTilde) and quote each arg.
+inner=""
+for arg in "$@"; do
+  case "$arg" in
+    ~/*)  arg="/home/claude/${arg#"~/"}" ;;
+    "~")  arg="/home/claude" ;;
+  esac
+  inner="${inner:+$inner }$(shell_quote "$arg")"
+done
+
+podman exec %q bash -c "su - claude -c $(shell_quote "$inner")"
 `, sbx)
 	default:
 		// gjoll backend (default)

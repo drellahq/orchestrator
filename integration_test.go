@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/drellabot/orchestrator/internal/gjoll"
 	mcpserver "github.com/drellabot/orchestrator/internal/mcp"
+	"github.com/drellabot/orchestrator/internal/sandbox"
 	"github.com/drellabot/orchestrator/internal/task"
 )
 
@@ -182,14 +182,14 @@ output "init_script" {
 
 func TestIntegration(t *testing.T) {
 	ctx := context.Background()
-	runner := gjoll.New("")
+	runner := sandbox.NewGjollAdapter()
 
 	tfPath := testTF(t)
 
 	// 1. Provision sandbox
 	t.Log("Provisioning sandbox...")
 	if err := runner.Up(ctx, sandboxName, tfPath); err != nil {
-		t.Fatalf("gjoll up failed: %v", err)
+		t.Fatalf("sandbox up failed: %v", err)
 	}
 
 	tornDown := false
@@ -252,7 +252,7 @@ echo "Session ID: $SESSION_ID"
 curl -s -X POST http://localhost:%d/ -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -H "Mcp-Session-Id: $SESSION_ID" -d '{"jsonrpc":"2.0","method":"notifications/initialized"}'
 RESULT=$(curl -s -X POST http://localhost:%d/ -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -H "Mcp-Session-Id: $SESSION_ID" -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"open_pr","arguments":{"path":"~","repo":"test/repo","branch":"test-branch","title":"Test","body":"Test"}}}')
 echo "Result: $RESULT"`, remotePort, remotePort, remotePort)
-	if err := runner.SSHProxy(ctx, sandboxName, &gjoll.SSHOpts{ReverseTunnels: []string{mcpTunnel}}, pullScript); err != nil {
+	if err := runner.SSHProxy(ctx, sandboxName, &sandbox.SSHOpts{ReverseTunnels: []string{mcpTunnel}}, pullScript); err != nil {
 		t.Fatalf("open_pr via ssh -R: %v", err)
 	}
 
@@ -317,7 +317,7 @@ echo "Session ID: $SESSION_ID"
 curl -s -X POST http://localhost:%d/ -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -H "Mcp-Session-Id: $SESSION_ID" -d '{"jsonrpc":"2.0","method":"notifications/initialized"}'
 RESULT=$(curl -s -X POST http://localhost:%d/ -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -H "Mcp-Session-Id: $SESSION_ID" -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"comment_on_pr","arguments":{"pr_url":"https://github.com/test/repo/pull/1","body":"Pushed updated code"}}}')
 echo "Result: $RESULT"`, remotePort, remotePort, remotePort)
-	if err := runner.SSHProxy(ctx, sandboxName, &gjoll.SSHOpts{ReverseTunnels: []string{mcpTunnel}}, commentScript); err != nil {
+	if err := runner.SSHProxy(ctx, sandboxName, &sandbox.SSHOpts{ReverseTunnels: []string{mcpTunnel}}, commentScript); err != nil {
 		t.Fatalf("comment_on_pr via ssh -R: %v", err)
 	}
 
@@ -338,7 +338,7 @@ curl -s -X POST http://localhost:%d/ -H "Content-Type: application/json" -H "Acc
 RESULT=$(curl -s -X POST http://localhost:%d/ -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -H "Mcp-Session-Id: $SESSION_ID" -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"comment_on_pr","arguments":{"pr_url":"https://github.com/evil/repo/pull/99","body":"sneaky"}}}')
 echo "Result: $RESULT"
 echo "$RESULT" | grep -q "was not opened by this task"`, remotePort, remotePort, remotePort)
-	if err := runner.SSHProxy(ctx, sandboxName, &gjoll.SSHOpts{ReverseTunnels: []string{mcpTunnel}}, rejectScript); err != nil {
+	if err := runner.SSHProxy(ctx, sandboxName, &sandbox.SSHOpts{ReverseTunnels: []string{mcpTunnel}}, rejectScript); err != nil {
 		t.Fatalf("comment_on_pr rejection test via ssh -R: %v", err)
 	}
 
@@ -434,7 +434,7 @@ echo "$RESULT" | grep -q "was not opened by this task"`, remotePort, remotePort,
 
 func TestIntegrationWithAuthor(t *testing.T) {
 	ctx := context.Background()
-	runner := gjoll.New("")
+	runner := sandbox.NewGjollAdapter()
 
 	tfPath := testTF(t)
 
@@ -499,7 +499,7 @@ SESSION_ID=$(echo "$HEADERS" | grep -i "mcp-session-id" | tr -d '\r' | awk '{pri
 curl -s -X POST http://localhost:%d/ -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -H "Mcp-Session-Id: $SESSION_ID" -d '{"jsonrpc":"2.0","method":"notifications/initialized"}'
 RESULT=$(curl -s -X POST http://localhost:%d/ -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -H "Mcp-Session-Id: $SESSION_ID" -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"open_pr","arguments":{"path":"~","repo":"test/repo","branch":"author-test","title":"Test","body":"Test"}}}')
 echo "Result: $RESULT"`, remotePort, remotePort, remotePort)
-	if err := runner.SSHProxy(ctx, authorSandboxName, &gjoll.SSHOpts{ReverseTunnels: []string{mcpTunnel}}, pullScript); err != nil {
+	if err := runner.SSHProxy(ctx, authorSandboxName, &sandbox.SSHOpts{ReverseTunnels: []string{mcpTunnel}}, pullScript); err != nil {
 		t.Fatalf("open_pr via ssh -R: %v", err)
 	}
 
@@ -542,7 +542,7 @@ SESSION_ID=$(echo "$HEADERS" | grep -i "mcp-session-id" | tr -d '\r' | awk '{pri
 curl -s -X POST http://localhost:%d/ -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -H "Mcp-Session-Id: $SESSION_ID" -d '{"jsonrpc":"2.0","method":"notifications/initialized"}'
 RESULT=$(curl -s -X POST http://localhost:%d/ -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -H "Mcp-Session-Id: $SESSION_ID" -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"open_pr","arguments":{"path":"~","repo":"test/repo","branch":"continue-test","title":"Continue Test","body":"Test"}}}')
 echo "Result: $RESULT"`, remotePort, remotePort, remotePort)
-	if err := runner.SSHProxy(ctx, authorSandboxName, &gjoll.SSHOpts{ReverseTunnels: []string{mcpTunnel2}}, pullScript2); err != nil {
+	if err := runner.SSHProxy(ctx, authorSandboxName, &sandbox.SSHOpts{ReverseTunnels: []string{mcpTunnel2}}, pullScript2); err != nil {
 		t.Fatalf("open_pr via ssh -R (continue simulation): %v", err)
 	}
 

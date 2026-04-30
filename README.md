@@ -143,9 +143,17 @@ Use gjoll VMs (same as cloud deployment) but with direct Anthropic API instead o
 |---------|----------------|---------------|
 | Startup time | Seconds | Minutes |
 | Resource usage | Low | Higher (full VM) |
-| Isolation | Container | Full VM |
+| Isolation | Container (host network) | Full VM (isolated network) |
 | Nested virtualization | Not needed | May be needed |
 | Best for | Local development, iteration | Testing VM workflows, cloud-like setup |
+
+**Security note:** Podman containers run with `--network host`, which means the
+container shares the host's network stack. Any service listening on localhost on
+the host (databases, admin panels, etc.) is accessible from inside the container.
+Since sandboxes execute AI-generated code, be aware of this reduced network
+isolation compared to gjoll VMs, which use their own network namespace with
+explicit SSH tunnels for connectivity. For production or multi-tenant deployments,
+use the gjoll backend.
 
 ## Usage
 

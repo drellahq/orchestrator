@@ -147,9 +147,12 @@ func (r *PodmanRunner) SSHAsRoot(ctx context.Context, name string, command ...st
 
 // SSHProxy runs an interactive command in the container as the claude user
 // with TTY allocation (-it). The -it flags are required because callers
-// use this for interactive sessions (e.g. tmux). Podman containers use
-// --network host, so SSHOpts.ReverseTunnels are unnecessary and ignored
-// with a warning.
+// use this for interactive sessions (e.g. tmux).
+//
+// SSHOpts are handled as follows for podman:
+//   - Proxy: ignored (podman uses a direct API key instead of credential-injecting proxies)
+//   - ReverseTunnels: ignored (container uses --network host, so host services
+//     like the MCP server on localhost:19090 are already reachable without tunneling)
 func (r *PodmanRunner) SSHProxy(ctx context.Context, name string, opts *SSHOpts, command ...string) error {
 	if opts != nil {
 		if opts.Proxy {
@@ -166,8 +169,7 @@ func (r *PodmanRunner) SSHProxy(ctx context.Context, name string, opts *SSHOpts,
 }
 
 // SSHProxyOutput runs a command in the container as the claude user,
-// writing stdout to w. Podman containers use --network host, so
-// SSHOpts.ReverseTunnels are unnecessary and ignored with a warning.
+// writing stdout to w. See SSHProxy for how SSHOpts are handled on podman.
 func (r *PodmanRunner) SSHProxyOutput(ctx context.Context, name string, w io.Writer, opts *SSHOpts, command ...string) error {
 	if opts != nil {
 		if opts.Proxy {
