@@ -63,11 +63,33 @@ func TestNewPodman(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			r := NewPodman(tt.image, "~/.anthropic/api_key", 19090)
+			r := NewPodman(tt.image, "/abs/path/key", 19090)
 			if r.image != tt.wantImage {
 				t.Errorf("image = %q, want %q", r.image, tt.wantImage)
 			}
 		})
+	}
+}
+
+func TestNewPodmanTildeExpansion(t *testing.T) {
+	r := NewPodman("", "~/.anthropic/api_key", 19090)
+	// After construction, tilde should be expanded (if home dir is available)
+	if r.anthropicKey == "~/.anthropic/api_key" {
+		// This would mean UserHomeDir failed — skip on systems where it might
+		t.Skip("UserHomeDir not available, tilde not expanded")
+	}
+	if r.anthropicKey == "" {
+		t.Error("anthropicKey should not be empty after tilde expansion")
+	}
+	// Verify it's an absolute path now
+	if r.anthropicKey[0] != '/' {
+		t.Errorf("expected absolute path after tilde expansion, got %q", r.anthropicKey)
+	}
+
+	// Absolute paths should pass through unchanged
+	r2 := NewPodman("", "/abs/path/key", 19090)
+	if r2.anthropicKey != "/abs/path/key" {
+		t.Errorf("absolute path should be unchanged, got %q", r2.anthropicKey)
 	}
 }
 

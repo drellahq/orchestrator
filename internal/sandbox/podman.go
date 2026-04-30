@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,6 +18,9 @@ import (
 // in "su - claude -c ..." so callers don't need to be backend-aware.
 // Commands that need root (used internally during provisioning) use the
 // lower-level run/runInteractive methods directly.
+//
+// NOTE: Provisioning (Up) uses dnf for package installation, so only
+// Fedora-based images are currently supported.
 type PodmanRunner struct {
 	image        string
 	anthropicKey string
@@ -28,6 +32,15 @@ type PodmanRunner struct {
 func NewPodman(image, anthropicKeyFile string, mcpPort int) *PodmanRunner {
 	if image == "" {
 		image = "fedora:43"
+	}
+	// Expand tilde in key path at construction time so all methods
+	// can use it without per-call expansion.
+	if strings.HasPrefix(anthropicKeyFile, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			anthropicKeyFile = filepath.Join(home, anthropicKeyFile[2:])
+		}
+		// If UserHomeDir fails, keep the unexpanded path — Up() will
+		// report the error when it tries to read the file.
 	}
 	return &PodmanRunner{
 		image:        image,
@@ -76,14 +89,6 @@ func (r *PodmanRunner) Up(ctx context.Context, name string, config string) error
 	// Copy and configure API key
 	if r.anthropicKey != "" {
 		keyPath := r.anthropicKey
-		if strings.HasPrefix(keyPath, "~/") {
-			home, err := os.UserHomeDir()
-			if err != nil {
-				_ = r.Down(context.Background(), name)
-				return fmt.Errorf("resolving home directory for API key path: %w", err)
-			}
-			keyPath = filepath.Join(home, keyPath[2:])
-		}
 
 		// Create .anthropic directory and copy key (as root)
 		mkdirCmd := []string{"bash", "-c", "mkdir -p /home/claude/.anthropic && chown claude:claude /home/claude/.anthropic"}
@@ -141,16 +146,26 @@ func (r *PodmanRunner) SSHAsRoot(ctx context.Context, name string, command ...st
 }
 
 // SSHProxy runs an interactive command in the container as the claude user
-// with TTY allocation.
+// with TTY allocation (-it). Podman containers use --network host, so
+// SSHOpts.ReverseTunnels are unnecessary and ignored with a warning.
 func (r *PodmanRunner) SSHProxy(ctx context.Context, name string, opts *SSHOpts, command ...string) error {
+	if opts != nil && len(opts.ReverseTunnels) > 0 {
+		slog.Warn("Podman backend ignores reverse tunnels (container uses --network host)",
+			"tunnels", opts.ReverseTunnels)
+	}
 	args := []string{"exec", "-it", name}
 	args = append(args, r.wrapUserCommand(command...)...)
 	return r.runInteractive(ctx, args...)
 }
 
 // SSHProxyOutput runs a command in the container as the claude user,
-// writing stdout to w.
+// writing stdout to w. Podman containers use --network host, so
+// SSHOpts.ReverseTunnels are unnecessary and ignored with a warning.
 func (r *PodmanRunner) SSHProxyOutput(ctx context.Context, name string, w io.Writer, opts *SSHOpts, command ...string) error {
+	if opts != nil && len(opts.ReverseTunnels) > 0 {
+		slog.Warn("Podman backend ignores reverse tunnels (container uses --network host)",
+			"tunnels", opts.ReverseTunnels)
+	}
 	args := []string{"exec", name}
 	args = append(args, r.wrapUserCommand(command...)...)
 	cmd := exec.CommandContext(ctx, "podman", args...)
@@ -267,6 +282,8 @@ func (r *PodmanRunner) Down(ctx context.Context, name string) error {
 	return r.run(ctx, "rm", "-f", name)
 }
 
+// run executes a podman command. Stdout is sent to stderr to keep the
+// orchestrator's own stdout clean for structured output (matches gjoll convention).
 func (r *PodmanRunner) run(ctx context.Context, args ...string) error {
 	cmd := exec.CommandContext(ctx, "podman", args...)
 	cmd.Stdout = os.Stderr

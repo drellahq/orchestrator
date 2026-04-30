@@ -57,7 +57,9 @@ func Apply(ctx context.Context, p *Profile, runner sandbox.Runner, sbx string, t
 // writeToSandbox writes content to a file in the sandbox via a temp file + cp.
 func writeToSandbox(ctx context.Context, runner sandbox.Runner, sbx, content, dest string) error {
 	// Ensure the parent directory exists in the sandbox
-	runner.SSH(ctx, sbx, "mkdir", "-p", "~/.claude")
+	if err := runner.SSH(ctx, sbx, "mkdir", "-p", "~/.claude"); err != nil {
+		return fmt.Errorf("creating ~/.claude directory: %w", err)
+	}
 
 	tmpFile, err := os.CreateTemp("", "profile-*")
 	if err != nil {

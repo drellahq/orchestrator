@@ -38,26 +38,24 @@ func (a *GjollAdapter) SSH(ctx context.Context, name string, command ...string) 
 
 // SSHProxy runs a command with proxy and reverse tunnels.
 func (a *GjollAdapter) SSHProxy(ctx context.Context, name string, opts *SSHOpts, command ...string) error {
-	var gjollOpts *gjoll.SSHOpts
-	if opts != nil {
-		gjollOpts = &gjoll.SSHOpts{
-			Proxy:          opts.Proxy,
-			ReverseTunnels: opts.ReverseTunnels,
-		}
-	}
-	return a.runner.SSHProxy(ctx, name, gjollOpts, command...)
+	return a.runner.SSHProxy(ctx, name, convertOpts(opts), command...)
 }
 
 // SSHProxyOutput runs a command with proxy, writing stdout to w.
 func (a *GjollAdapter) SSHProxyOutput(ctx context.Context, name string, w io.Writer, opts *SSHOpts, command ...string) error {
-	var gjollOpts *gjoll.SSHOpts
-	if opts != nil {
-		gjollOpts = &gjoll.SSHOpts{
-			Proxy:          opts.Proxy,
-			ReverseTunnels: opts.ReverseTunnels,
-		}
+	return a.runner.SSHProxyOutput(ctx, name, w, convertOpts(opts), command...)
+}
+
+// convertOpts translates sandbox.SSHOpts to gjoll.SSHOpts.
+// Returns nil if opts is nil.
+func convertOpts(opts *SSHOpts) *gjoll.SSHOpts {
+	if opts == nil {
+		return nil
 	}
-	return a.runner.SSHProxyOutput(ctx, name, w, gjollOpts, command...)
+	return &gjoll.SSHOpts{
+		Proxy:          opts.Proxy,
+		ReverseTunnels: opts.ReverseTunnels,
+	}
 }
 
 // Pull fetches committed code from the sandbox.
