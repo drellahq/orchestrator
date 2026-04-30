@@ -3,7 +3,6 @@ package sandbox
 import (
 	"context"
 	"io"
-	"log/slog"
 )
 
 // SSHOpts configures proxy and reverse tunnels for sandbox command execution.
@@ -32,7 +31,9 @@ type Runner interface {
 	// SSHProxyOutput runs a command in the sandbox, writing stdout to w.
 	SSHProxyOutput(ctx context.Context, name string, w io.Writer, opts *SSHOpts, command ...string) error
 
-	// Pull fetches committed code from the sandbox into a local git repo.
+	// Pull fetches code from the sandbox into a local git repo.
+	// For gjoll: uses git bundles to transfer committed history.
+	// For podman: copies files and creates a local commit (no remote history).
 	Pull(ctx context.Context, name, remotePath, localRepoDir string) error
 
 	// Cp copies files to/from a sandbox.
@@ -46,16 +47,13 @@ type Runner interface {
 }
 
 // NewFromConfig creates the appropriate Runner based on configuration.
-func NewFromConfig(backend, podmanImage, anthropicKeyFile string, mcpPort int) Runner {
+// The backend value should be validated before calling this function
+// (config.Load rejects unknown values).
+func NewFromConfig(backend, podmanImage, anthropicKeyFile string) Runner {
 	switch backend {
 	case "podman":
-		return NewPodman(podmanImage, anthropicKeyFile, mcpPort)
-	case "gjoll":
-		return NewGjollAdapter()
+		return NewPodman(podmanImage, anthropicKeyFile)
 	default:
-		if backend != "" {
-			slog.Warn("Unknown sandbox backend, defaulting to gjoll", "backend", backend)
-		}
 		return NewGjollAdapter()
 	}
 }

@@ -97,6 +97,24 @@ func TestLoad(t *testing.T) {
 			},
 		},
 		{
+			name:      "unknown sandbox_backend rejected",
+			writeFile: true,
+			yaml:      "sandbox_backend: docker\n",
+			wantErr:   true,
+		},
+		{
+			name:      "podman backend accepted",
+			writeFile: true,
+			yaml:      "sandbox_backend: podman\n",
+			want: Config{
+				OutputDir:        "./tasks",
+				SandboxBackend:   "podman",
+				GjollEnv:         "./configs/sandbox.tf",
+				PodmanImage:      "fedora:43",
+				AnthropicKeyFile: "~/.anthropic/api_key",
+			},
+		},
+		{
 			name:      "invalid yaml",
 			writeFile: true,
 			yaml:      "{{invalid",

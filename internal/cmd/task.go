@@ -144,7 +144,7 @@ func logPreflightWarnings(ctx context.Context, cfg *config.Config) *gh.Runner {
 
 func createSandboxRunner(cfg *config.Config) sandbox.Runner {
 	slog.Info("Creating sandbox runner", "backend", cfg.SandboxBackend)
-	return sandbox.NewFromConfig(cfg.SandboxBackend, cfg.PodmanImage, cfg.AnthropicKeyFile, mcpserver.MCPRemotePort)
+	return sandbox.NewFromConfig(cfg.SandboxBackend, cfg.PodmanImage, cfg.AnthropicKeyFile)
 }
 
 func executeTask(ctx context.Context, taskName, taskDescription string, taskDir *task.Dir, cfg *config.Config, ghRunner *gh.Runner, continueSession bool, author string, profileName string, profileVars []string) error {

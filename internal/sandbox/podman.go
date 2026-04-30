@@ -11,6 +11,9 @@ import (
 	"strings"
 )
 
+// claudeHome is the home directory of the claude user inside podman containers.
+const claudeHome = "/home/claude"
+
 // PodmanRunner implements Runner using podman containers as sandboxes.
 //
 // Podman containers run as root, but Claude is installed under a non-root
@@ -27,9 +30,7 @@ type PodmanRunner struct {
 }
 
 // NewPodman creates a PodmanRunner.
-// mcpPort is accepted for interface compatibility but unused — podman containers
-// use --network host, so the MCP server is reachable without port mapping.
-func NewPodman(image, anthropicKeyFile string, mcpPort int) *PodmanRunner {
+func NewPodman(image, anthropicKeyFile string) *PodmanRunner {
 	if image == "" {
 		image = "fedora:43"
 	}
@@ -69,9 +70,9 @@ func (r *PodmanRunner) Up(ctx context.Context, name string, config string) error
 	// Create non-root user for Claude (runs as root)
 	userSetupCmds := []string{
 		"bash", "-c",
-		"useradd -m -s /bin/bash claude && dnf install -y git-core curl sudo && chown claude:claude /home/claude && (chown -R claude:claude /home/claude 2>/dev/null || true)",
+		fmt.Sprintf("useradd -m -s /bin/bash claude && dnf install -y git-core curl sudo && chown claude:claude %s && (chown -R claude:claude %s 2>/dev/null || true)", claudeHome, claudeHome),
 	}
-	if err := r.SSHAsRoot(ctx, name, userSetupCmds...); err != nil {
+	if err := r.sshAsRoot(ctx, name, userSetupCmds...); err != nil {
 		_ = r.Down(context.Background(), name)
 		return fmt.Errorf("user setup: %w", err)
 	}
@@ -81,7 +82,7 @@ func (r *PodmanRunner) Up(ctx context.Context, name string, config string) error
 		"bash", "-c",
 		"su - claude -c 'curl -fsSL https://claude.ai/install.sh | bash'",
 	}
-	if err := r.SSHAsRoot(ctx, name, installCmds...); err != nil {
+	if err := r.sshAsRoot(ctx, name, installCmds...); err != nil {
 		_ = r.Down(context.Background(), name)
 		return fmt.Errorf("claude install: %w", err)
 	}
@@ -90,22 +91,28 @@ func (r *PodmanRunner) Up(ctx context.Context, name string, config string) error
 	if r.anthropicKey != "" {
 		keyPath := r.anthropicKey
 
+		// Verify key file exists before proceeding (fail fast with a clear message)
+		if _, err := os.Stat(keyPath); err != nil {
+			_ = r.Down(context.Background(), name)
+			return fmt.Errorf("API key file %q: %w", keyPath, err)
+		}
+
 		// Create .anthropic directory and copy key (as root)
-		mkdirCmd := []string{"bash", "-c", "mkdir -p /home/claude/.anthropic && chown claude:claude /home/claude/.anthropic"}
-		if err := r.SSHAsRoot(ctx, name, mkdirCmd...); err != nil {
+		mkdirCmd := []string{"bash", "-c", fmt.Sprintf("mkdir -p %s/.anthropic && chown claude:claude %s/.anthropic", claudeHome, claudeHome)}
+		if err := r.sshAsRoot(ctx, name, mkdirCmd...); err != nil {
 			_ = r.Down(context.Background(), name)
 			return fmt.Errorf("creating .anthropic dir: %w", err)
 		}
 
 		// Copy API key (Cp auto-chowns to claude user)
-		if err := r.Cp(ctx, name, keyPath, ":/home/claude/.anthropic/api_key"); err != nil {
+		if err := r.Cp(ctx, name, keyPath, ":"+claudeHome+"/.anthropic/api_key"); err != nil {
 			_ = r.Down(context.Background(), name)
 			return fmt.Errorf("copying API key: %w", err)
 		}
 
 		// Fix permissions (as root)
-		chownCmd := []string{"bash", "-c", "chmod 600 /home/claude/.anthropic/api_key"}
-		if err := r.SSHAsRoot(ctx, name, chownCmd...); err != nil {
+		chownCmd := []string{"bash", "-c", fmt.Sprintf("chmod 600 %s/.anthropic/api_key", claudeHome)}
+		if err := r.sshAsRoot(ctx, name, chownCmd...); err != nil {
 			_ = r.Down(context.Background(), name)
 			return fmt.Errorf("fixing API key permissions: %w", err)
 		}
@@ -137,9 +144,9 @@ func (r *PodmanRunner) SSH(ctx context.Context, name string, command ...string) 
 	return r.run(ctx, args...)
 }
 
-// SSHAsRoot runs a command in the container as root (no su wrapping).
+// sshAsRoot runs a command in the container as root (no su wrapping).
 // Used internally during provisioning.
-func (r *PodmanRunner) SSHAsRoot(ctx context.Context, name string, command ...string) error {
+func (r *PodmanRunner) sshAsRoot(ctx context.Context, name string, command ...string) error {
 	args := []string{"exec", name}
 	args = append(args, command...)
 	return r.run(ctx, args...)
@@ -250,7 +257,7 @@ func (r *PodmanRunner) Pull(ctx context.Context, name, remotePath, localRepoDir 
 // Cp copies files to/from a container.
 // Remote paths use the convention ":path" (e.g. ":~/file" or ":/abs/path").
 // PodmanRunner translates these to "name:/path" format for podman cp,
-// expanding "~" to "/home/claude".
+// expanding "~" to the claude user's home directory.
 // When copying TO the container (dest starts with ":"), files are chown'd
 // to the claude user automatically since podman cp copies as root.
 func (r *PodmanRunner) Cp(ctx context.Context, name, src, dest string) error {
@@ -263,7 +270,7 @@ func (r *PodmanRunner) Cp(ctx context.Context, name, src, dest string) error {
 	// files as root, but the claude user needs to own them.
 	if isRemoteDest {
 		remotePath := expandTilde(dest[1:]) // strip leading ":" and expand ~
-		if err := r.SSHAsRoot(ctx, name, "chown", "-R", "claude:claude", remotePath); err != nil {
+		if err := r.sshAsRoot(ctx, name, "chown", "-R", "claude:claude", remotePath); err != nil {
 			slog.Warn("Failed to chown copied file to claude user", "path", remotePath, "error", err)
 		}
 	}
@@ -278,13 +285,13 @@ func (r *PodmanRunner) translatePath(name, path string) string {
 	return name + ":" + expandTilde(path[1:])
 }
 
-// expandTilde replaces a leading ~ with /home/claude in remote paths.
+// expandTilde replaces a leading ~ with the claude user's home directory in remote paths.
 func expandTilde(path string) string {
 	if strings.HasPrefix(path, "~/") {
-		return "/home/claude/" + path[2:]
+		return claudeHome + "/" + path[2:]
 	}
 	if path == "~" {
-		return "/home/claude"
+		return claudeHome
 	}
 	return path
 }
@@ -329,7 +336,7 @@ func (r *PodmanRunner) runInteractive(ctx context.Context, args ...string) error
 // wrapUserCommand wraps a command to run as the claude user via su.
 // Each argument is individually shell-quoted to preserve arguments
 // containing spaces or special characters. Tilde (~) prefixes are
-// expanded to /home/claude because the inner command runs inside
+// expanded to the claude user's home directory because the inner command runs inside
 // single quotes where bash would not expand ~ on its own.
 func (r *PodmanRunner) wrapUserCommand(command ...string) []string {
 	if len(command) == 0 {

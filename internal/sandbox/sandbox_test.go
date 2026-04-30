@@ -34,7 +34,7 @@ func TestNewFromConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			runner := NewFromConfig(tt.backend, "fedora:43", "~/.anthropic/api_key", 19090)
+			runner := NewFromConfig(tt.backend, "fedora:43", "~/.anthropic/api_key")
 			got := typeString(runner)
 			if got != tt.wantType {
 				t.Errorf("NewFromConfig(%q) returned %s, want %s", tt.backend, got, tt.wantType)
@@ -63,7 +63,7 @@ func TestNewPodman(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			r := NewPodman(tt.image, "/abs/path/key", 19090)
+			r := NewPodman(tt.image, "/abs/path/key")
 			if r.image != tt.wantImage {
 				t.Errorf("image = %q, want %q", r.image, tt.wantImage)
 			}
@@ -72,7 +72,7 @@ func TestNewPodman(t *testing.T) {
 }
 
 func TestNewPodmanTildeExpansion(t *testing.T) {
-	r := NewPodman("", "~/.anthropic/api_key", 19090)
+	r := NewPodman("", "~/.anthropic/api_key")
 	// After construction, tilde should be expanded (if home dir is available)
 	if r.anthropicKey == "~/.anthropic/api_key" {
 		// This would mean UserHomeDir failed — skip on systems where it might
@@ -87,14 +87,14 @@ func TestNewPodmanTildeExpansion(t *testing.T) {
 	}
 
 	// Absolute paths should pass through unchanged
-	r2 := NewPodman("", "/abs/path/key", 19090)
+	r2 := NewPodman("", "/abs/path/key")
 	if r2.anthropicKey != "/abs/path/key" {
 		t.Errorf("absolute path should be unchanged, got %q", r2.anthropicKey)
 	}
 }
 
 func TestTranslatePath(t *testing.T) {
-	r := NewPodman("fedora:43", "", 19090)
+	r := NewPodman("fedora:43", "")
 
 	tests := []struct {
 		name     string
@@ -182,7 +182,7 @@ func TestShellQuoteForSu(t *testing.T) {
 }
 
 func TestWrapUserCommand(t *testing.T) {
-	r := NewPodman("fedora:43", "", 19090)
+	r := NewPodman("fedora:43", "")
 
 	tests := []struct {
 		name    string

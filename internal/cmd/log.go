@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"github.com/drellabot/orchestrator/internal/config"
-	mcpserver "github.com/drellabot/orchestrator/internal/mcp"
 	"github.com/drellabot/orchestrator/internal/sandbox"
 	"github.com/drellabot/orchestrator/internal/task"
 	"github.com/spf13/cobra"
@@ -56,7 +55,7 @@ func runLog(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("loading config: %w", err)
 		}
 
-		runner := sandbox.NewFromConfig(cfg.SandboxBackend, cfg.PodmanImage, cfg.AnthropicKeyFile, mcpserver.MCPRemotePort)
+		runner := sandbox.NewFromConfig(cfg.SandboxBackend, cfg.PodmanImage, cfg.AnthropicKeyFile)
 		tw := newTranscriptWriter(os.Stdout, verbose)
 		return runner.SSHProxyOutput(ctx, taskName, tw, &sandbox.SSHOpts{Proxy: true}, "tail", "-f", "~/transcript.jsonl")
 	}

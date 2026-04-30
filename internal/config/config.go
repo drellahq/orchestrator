@@ -75,5 +75,13 @@ func Load(path string) (*Config, error) {
 		cfg.AnthropicKeyFile = "~/.anthropic/api_key"
 	}
 
+	// Validate sandbox backend
+	switch cfg.SandboxBackend {
+	case "gjoll", "podman":
+		// valid
+	default:
+		return nil, fmt.Errorf("unknown sandbox_backend %q: must be \"gjoll\" or \"podman\"", cfg.SandboxBackend)
+	}
+
 	return cfg, nil
 }
