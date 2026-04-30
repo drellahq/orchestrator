@@ -14,11 +14,11 @@ import (
 
 	"github.com/drellabot/orchestrator/internal/config"
 	gh "github.com/drellabot/orchestrator/internal/github"
-	"github.com/drellabot/orchestrator/internal/sandbox"
 	"github.com/drellabot/orchestrator/internal/logging"
 	mcpserver "github.com/drellabot/orchestrator/internal/mcp"
 	"github.com/drellabot/orchestrator/internal/profile"
 	"github.com/drellabot/orchestrator/internal/prompts"
+	"github.com/drellabot/orchestrator/internal/sandbox"
 	"github.com/drellabot/orchestrator/internal/task"
 	"github.com/spf13/cobra"
 )
@@ -35,8 +35,9 @@ var taskCmd = &cobra.Command{
 var taskNewCmd = &cobra.Command{
 	Use:   "new <task-name> <task-description...>",
 	Short: "Run a new task in a sandboxed Claude instance",
-	Long: `Provisions a sandbox VM via gjoll, starts an MCP server for code pulling,
-launches Claude with the task description, and archives the results.`,
+	Long: `Provisions a sandbox (VM via gjoll or container via podman), starts an MCP
+server for code pulling, launches Claude with the task description, and archives
+the results.`,
 	Args: cobra.MinimumNArgs(2),
 	RunE: runTask,
 }

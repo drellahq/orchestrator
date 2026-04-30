@@ -3,6 +3,7 @@ package sandbox
 import (
 	"context"
 	"io"
+	"log/slog"
 )
 
 // SSHOpts configures proxy and reverse tunnels for sandbox command execution.
@@ -52,7 +53,9 @@ func NewFromConfig(backend, podmanImage, anthropicKeyFile string, mcpPort int) R
 	case "gjoll":
 		return NewGjollAdapter()
 	default:
-		// Default to gjoll for backward compatibility
+		if backend != "" {
+			slog.Warn("Unknown sandbox backend, defaulting to gjoll", "backend", backend)
+		}
 		return NewGjollAdapter()
 	}
 }

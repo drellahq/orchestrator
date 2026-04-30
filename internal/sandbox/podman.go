@@ -71,7 +71,11 @@ func (r *PodmanRunner) Up(ctx context.Context, name string, config string) error
 	if r.anthropicKey != "" {
 		keyPath := r.anthropicKey
 		if strings.HasPrefix(keyPath, "~/") {
-			home, _ := os.UserHomeDir()
+			home, err := os.UserHomeDir()
+			if err != nil {
+				_ = r.Down(context.Background(), name)
+				return fmt.Errorf("resolving home directory for API key path: %w", err)
+			}
 			keyPath = filepath.Join(home, keyPath[2:])
 		}
 
@@ -121,7 +125,7 @@ func (r *PodmanRunner) SSH(ctx context.Context, name string, command ...string) 
 	return r.run(ctx, args...)
 }
 
-// SSHProxy runs a command in the container.
+// SSHProxy runs an interactive command in the container with TTY allocation.
 func (r *PodmanRunner) SSHProxy(ctx context.Context, name string, opts *SSHOpts, command ...string) error {
 	args := []string{"exec", "-it", name}
 	args = append(args, command...)
@@ -136,7 +140,10 @@ func (r *PodmanRunner) SSHProxyOutput(ctx context.Context, name string, w io.Wri
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = w
 	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("podman exec: %w", err)
+	}
+	return nil
 }
 
 // Pull fetches committed code from the sandbox.
