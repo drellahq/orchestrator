@@ -100,19 +100,22 @@ func registerMCPServer(ctx context.Context, runner sandbox.Runner, sbx string, s
 			args = append(args, "--scope", server.Scope)
 		}
 		args = append(args, server.Name, server.URL)
+	default:
+		return fmt.Errorf("unsupported MCP transport type: %q", server.Transport)
 	}
-	// Shell-quote each argument to prevent injection via single quotes
+	// Shell-quote each argument individually to prevent word splitting and injection
 	quoted := make([]string, len(args))
 	for i, a := range args {
 		quoted[i] = shellQuote(a)
 	}
-	return runner.SSH(ctx, sbx, "bash", "-c", fmt.Sprintf("su - claude -c '%s'", strings.Join(quoted, " ")))
+	// Use double quotes for the su -c wrapper so inner single quotes work correctly
+	return runner.SSH(ctx, sbx, "bash", "-c", fmt.Sprintf(`su - claude -c "%s"`, strings.Join(quoted, " ")))
 }
 
-// shellQuote escapes a string for safe embedding in single-quoted shell contexts.
-// It replaces each single quote with the sequence '\'' (end quote, escaped quote, start quote).
+// shellQuote wraps a string in single quotes for safe shell embedding.
+// Internal single quotes are escaped as '\'' (end quote, escaped quote, start quote).
 func shellQuote(s string) string {
-	return strings.ReplaceAll(s, "'", "'\\''")
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
 
 // runSetup executes setup.sh on the host with helper scripts on PATH.

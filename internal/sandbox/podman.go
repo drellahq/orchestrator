@@ -12,20 +12,20 @@ import (
 
 // PodmanRunner implements Runner using podman containers as sandboxes.
 type PodmanRunner struct {
-	image         string
-	anthropicKey  string
-	mcpServerPort int
+	image        string
+	anthropicKey string
 }
 
 // NewPodman creates a PodmanRunner.
+// mcpPort is accepted for interface compatibility but unused — podman containers
+// use --network host, so the MCP server is reachable without port mapping.
 func NewPodman(image, anthropicKeyFile string, mcpPort int) *PodmanRunner {
 	if image == "" {
 		image = "fedora:43"
 	}
 	return &PodmanRunner{
-		image:         image,
-		anthropicKey:  anthropicKeyFile,
-		mcpServerPort: mcpPort,
+		image:        image,
+		anthropicKey: anthropicKeyFile,
 	}
 }
 
@@ -168,6 +168,26 @@ func (r *PodmanRunner) Pull(ctx context.Context, name, remotePath, localRepoDir 
 	if err := cpCmd.Run(); err != nil {
 		return fmt.Errorf("copying to local repo: %w", err)
 	}
+
+	// Stage and commit the copied files so the local repo has git history.
+	// Unlike gjoll's Pull (which uses git bundles), podman's Pull is a file copy,
+	// so we create a commit to maintain consistent git semantics for callers.
+	addCmd := exec.CommandContext(ctx, "git", "add", "-A")
+	addCmd.Dir = localRepoDir
+	if err := addCmd.Run(); err != nil {
+		return fmt.Errorf("git add: %w", err)
+	}
+
+	commitCmd := exec.CommandContext(ctx, "git", "commit", "--allow-empty-message", "-m", "Pull from sandbox")
+	commitCmd.Dir = localRepoDir
+	commitCmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=orchestrator",
+		"GIT_AUTHOR_EMAIL=orchestrator@localhost",
+		"GIT_COMMITTER_NAME=orchestrator",
+		"GIT_COMMITTER_EMAIL=orchestrator@localhost",
+	)
+	// Ignore error — commit fails if there are no changes, which is fine
+	_ = commitCmd.Run()
 
 	return nil
 }

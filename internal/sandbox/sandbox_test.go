@@ -34,7 +34,7 @@ func TestNewFromConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			runner := NewFromConfig(tt.backend, "", "fedora:43", "~/.anthropic/api_key", 19090)
+			runner := NewFromConfig(tt.backend, "fedora:43", "~/.anthropic/api_key", 19090)
 			got := typeString(runner)
 			if got != tt.wantType {
 				t.Errorf("NewFromConfig(%q) returned %s, want %s", tt.backend, got, tt.wantType)

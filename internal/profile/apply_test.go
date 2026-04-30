@@ -13,37 +13,37 @@ func TestShellQuote(t *testing.T) {
 		{
 			name:  "no special chars",
 			input: "hello",
-			want:  "hello",
+			want:  "'hello'",
 		},
 		{
 			name:  "with single quote",
 			input: "it's",
-			want:  "it'\\''s",
+			want:  "'it'\\''s'",
 		},
 		{
 			name:  "multiple single quotes",
 			input: "'hello' 'world'",
-			want:  "'\\''hello'\\'' '\\''world'\\''",
+			want:  "''\\''hello'\\'' '\\''world'\\'''",
 		},
 		{
 			name:  "empty string",
 			input: "",
-			want:  "",
+			want:  "''",
 		},
 		{
 			name:  "double quotes pass through",
 			input: `"hello"`,
-			want:  `"hello"`,
+			want:  `'"hello"'`,
 		},
 		{
-			name:  "spaces preserved",
+			name:  "spaces preserved inside quotes",
 			input: "hello world",
-			want:  "hello world",
+			want:  "'hello world'",
 		},
 		{
 			name:  "url unchanged",
 			input: "http://localhost:19090/mcp",
-			want:  "http://localhost:19090/mcp",
+			want:  "'http://localhost:19090/mcp'",
 		},
 	}
 

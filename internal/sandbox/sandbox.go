@@ -45,7 +45,7 @@ type Runner interface {
 }
 
 // NewFromConfig creates the appropriate Runner based on configuration.
-func NewFromConfig(backend, gjollEnv, podmanImage, anthropicKeyFile string, mcpPort int) Runner {
+func NewFromConfig(backend, podmanImage, anthropicKeyFile string, mcpPort int) Runner {
 	switch backend {
 	case "podman":
 		return NewPodman(podmanImage, anthropicKeyFile, mcpPort)
