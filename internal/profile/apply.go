@@ -110,14 +110,42 @@ func runSetup(ctx context.Context, runner sandbox.Runner, sbx, setupPath, taskDi
 	}
 	defer os.RemoveAll(helpersDir)
 
-	// Generate backend-appropriate helper scripts
+	// Generate backend-appropriate helper scripts.
+	// The podman sandbox-cp translates the ":path" convention used by
+	// runner.Cp() (e.g. ":~/file" or ":/abs/path") to podman's "name:path"
+	// format with tilde expansion, and chowns files to the claude user.
 	var sandboxCp, sandboxSSH string
 	switch runner.(type) {
 	case *sandbox.PodmanRunner:
 		sandboxCp = fmt.Sprintf(`#!/bin/bash
 set -euo pipefail
-podman cp "$1" "$2"
-`)
+CONTAINER=%q
+
+translate_path() {
+  local p="$1"
+  if [[ "$p" == :~/* ]]; then
+    echo "${CONTAINER}:/home/claude/${p#:~/}"
+  elif [[ "$p" == :~ ]]; then
+    echo "${CONTAINER}:/home/claude"
+  elif [[ "$p" == :* ]]; then
+    echo "${CONTAINER}:${p#:}"
+  else
+    echo "$p"
+  fi
+}
+
+src=$(translate_path "$1")
+dest=$(translate_path "$2")
+podman cp "$src" "$dest"
+
+# Chown to claude user when copying TO the container
+if [[ "$2" == :* ]]; then
+  remote="${2#:}"
+  [[ "$remote" == ~/* ]] && remote="/home/claude/${remote#~/}"
+  [[ "$remote" == "~" ]] && remote="/home/claude"
+  podman exec %q chown -R claude:claude "$remote" 2>/dev/null || true
+fi
+`, sbx, sbx)
 		// Wrap in su - claude to match runner.SSH() behavior — podman exec
 		// runs as root by default, but setup scripts expect the claude user.
 		sandboxSSH = fmt.Sprintf(`#!/bin/bash

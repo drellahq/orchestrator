@@ -149,9 +149,14 @@ func (r *PodmanRunner) SSHAsRoot(ctx context.Context, name string, command ...st
 // with TTY allocation (-it). Podman containers use --network host, so
 // SSHOpts.ReverseTunnels are unnecessary and ignored with a warning.
 func (r *PodmanRunner) SSHProxy(ctx context.Context, name string, opts *SSHOpts, command ...string) error {
-	if opts != nil && len(opts.ReverseTunnels) > 0 {
-		slog.Warn("Podman backend ignores reverse tunnels (container uses --network host)",
-			"tunnels", opts.ReverseTunnels)
+	if opts != nil {
+		if opts.Proxy {
+			slog.Debug("Podman backend ignores Proxy flag (no credential proxy needed with direct API key)")
+		}
+		if len(opts.ReverseTunnels) > 0 {
+			slog.Warn("Podman backend ignores reverse tunnels (container uses --network host)",
+				"tunnels", opts.ReverseTunnels)
+		}
 	}
 	args := []string{"exec", "-it", name}
 	args = append(args, r.wrapUserCommand(command...)...)
@@ -162,9 +167,14 @@ func (r *PodmanRunner) SSHProxy(ctx context.Context, name string, opts *SSHOpts,
 // writing stdout to w. Podman containers use --network host, so
 // SSHOpts.ReverseTunnels are unnecessary and ignored with a warning.
 func (r *PodmanRunner) SSHProxyOutput(ctx context.Context, name string, w io.Writer, opts *SSHOpts, command ...string) error {
-	if opts != nil && len(opts.ReverseTunnels) > 0 {
-		slog.Warn("Podman backend ignores reverse tunnels (container uses --network host)",
-			"tunnels", opts.ReverseTunnels)
+	if opts != nil {
+		if opts.Proxy {
+			slog.Debug("Podman backend ignores Proxy flag (no credential proxy needed with direct API key)")
+		}
+		if len(opts.ReverseTunnels) > 0 {
+			slog.Warn("Podman backend ignores reverse tunnels (container uses --network host)",
+				"tunnels", opts.ReverseTunnels)
+		}
 	}
 	args := []string{"exec", name}
 	args = append(args, r.wrapUserCommand(command...)...)
