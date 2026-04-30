@@ -50,9 +50,9 @@ func NewFromConfig(backend, gjollEnv, podmanImage, anthropicKeyFile string, mcpP
 	case "podman":
 		return NewPodman(podmanImage, anthropicKeyFile, mcpPort)
 	case "gjoll":
-		return NewGjollAdapter(gjollEnv)
+		return NewGjollAdapter()
 	default:
 		// Default to gjoll for backward compatibility
-		return NewGjollAdapter(gjollEnv)
+		return NewGjollAdapter()
 	}
 }

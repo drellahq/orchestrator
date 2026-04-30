@@ -182,12 +182,12 @@ func executeTask(ctx context.Context, taskName, taskDescription string, taskDir 
 	// After successful provisioning, ensure cleanup on exit
 	defer func() {
 		slog.Debug("Copying transcript", "task", taskName)
-		if copyErr := runner.Cp(context.Background(), taskName, taskName+":/home/claude/transcript.jsonl", taskDir.TranscriptPath()); copyErr != nil {
+		if copyErr := runner.Cp(context.Background(), taskName, ":/home/claude/transcript.jsonl", taskDir.TranscriptPath()); copyErr != nil {
 			slog.Warn("Failed to copy transcript", "task", taskName, "error", copyErr)
 		}
 
 		slog.Debug("Copying conversations", "task", taskName)
-		if copyErr := runner.Cp(context.Background(), taskName, taskName+":/home/claude/.claude/", taskDir.ConversationsPath()); copyErr != nil {
+		if copyErr := runner.Cp(context.Background(), taskName, ":~/.claude/", taskDir.ConversationsPath()); copyErr != nil {
 			slog.Warn("Failed to copy conversations", "task", taskName, "error", copyErr)
 		}
 
@@ -227,7 +227,7 @@ func executeTask(ctx context.Context, taskName, taskDescription string, taskDir 
 	}
 	tmpRun.Close()
 
-	if err := runner.Cp(ctx, taskName, tmpRun.Name(), taskName+":/home/claude/run-claude.sh"); err != nil {
+	if err := runner.Cp(ctx, taskName, tmpRun.Name(), ":/home/claude/run-claude.sh"); err != nil {
 		return fmt.Errorf("copying run script: %w", err)
 	}
 	if err := runner.SSH(ctx, taskName, "bash", "-c", "chown claude:claude /home/claude/run-claude.sh && chmod +x /home/claude/run-claude.sh"); err != nil {
@@ -372,7 +372,7 @@ func setupSandboxDefault(ctx context.Context, runner sandbox.Runner, taskName st
 	}
 	tmpFile.Close()
 
-	if err := runner.Cp(ctx, taskName, tmpFile.Name(), taskName+":/home/claude/system-prompt.md"); err != nil {
+	if err := runner.Cp(ctx, taskName, tmpFile.Name(), ":~/system-prompt.md"); err != nil {
 		return fmt.Errorf("copying system prompt: %w", err)
 	}
 

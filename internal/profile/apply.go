@@ -105,22 +105,36 @@ func runSetup(ctx context.Context, runner sandbox.Runner, sbx, setupPath, taskDi
 	}
 	defer os.RemoveAll(helpersDir)
 
-	gjollBin := "gjoll"
+	// Generate backend-appropriate helper scripts
+	var sandboxCp, sandboxSSH string
+	switch runner.(type) {
+	case *sandbox.PodmanRunner:
+		sandboxCp = fmt.Sprintf(`#!/bin/bash
+set -euo pipefail
+podman cp "$1" "$2"
+`)
+		sandboxSSH = fmt.Sprintf(`#!/bin/bash
+set -euo pipefail
+podman exec %s "$@"
+`, sbx)
+	default:
+		// gjoll backend (default)
+		sandboxCp = fmt.Sprintf(`#!/bin/bash
+set -euo pipefail
+gjoll cp %s "$1" "$2"
+`, sbx)
+		sandboxSSH = fmt.Sprintf(`#!/bin/bash
+set -euo pipefail
+gjoll ssh %s -- "$@"
+`, sbx)
+	}
 
 	// Write sandbox-cp helper
-	sandboxCp := fmt.Sprintf(`#!/bin/bash
-set -euo pipefail
-%s cp %s "$1" "$2"
-`, gjollBin, sbx)
 	if err := os.WriteFile(filepath.Join(helpersDir, "sandbox-cp"), []byte(sandboxCp), 0755); err != nil {
 		return fmt.Errorf("writing sandbox-cp: %w", err)
 	}
 
 	// Write sandbox-ssh helper
-	sandboxSSH := fmt.Sprintf(`#!/bin/bash
-set -euo pipefail
-%s ssh %s -- "$@"
-`, gjollBin, sbx)
 	if err := os.WriteFile(filepath.Join(helpersDir, "sandbox-ssh"), []byte(sandboxSSH), 0755); err != nil {
 		return fmt.Errorf("writing sandbox-ssh: %w", err)
 	}

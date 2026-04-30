@@ -83,7 +83,7 @@ func (r *PodmanRunner) Up(ctx context.Context, name string, config string) error
 		}
 
 		// Copy API key
-		if err := r.Cp(ctx, name, keyPath, name+":/home/claude/.anthropic/api_key"); err != nil {
+		if err := r.Cp(ctx, name, keyPath, ":/home/claude/.anthropic/api_key"); err != nil {
 			_ = r.Down(context.Background(), name)
 			return fmt.Errorf("copying API key: %w", err)
 		}
@@ -159,7 +159,7 @@ func (r *PodmanRunner) Pull(ctx context.Context, name, remotePath, localRepoDir 
 	}
 	defer os.RemoveAll(tmpDir)
 
-	cpSrc := name + ":" + remotePath + "/."
+	cpSrc := ":" + remotePath + "/."
 	if err := r.Cp(ctx, name, cpSrc, tmpDir); err != nil {
 		return fmt.Errorf("copying from container: %w", err)
 	}
@@ -173,8 +173,28 @@ func (r *PodmanRunner) Pull(ctx context.Context, name, remotePath, localRepoDir 
 }
 
 // Cp copies files to/from a container.
+// Remote paths use the convention ":path" (e.g. ":~/file" or ":/abs/path").
+// PodmanRunner translates these to "name:/path" format for podman cp,
+// expanding "~" to "/home/claude".
 func (r *PodmanRunner) Cp(ctx context.Context, name, src, dest string) error {
+	src = r.translatePath(name, src)
+	dest = r.translatePath(name, dest)
 	return r.run(ctx, "cp", src, dest)
+}
+
+// translatePath converts ":path" sandbox convention to "name:path" podman format.
+func (r *PodmanRunner) translatePath(name, path string) string {
+	if !strings.HasPrefix(path, ":") {
+		return path
+	}
+	remotePath := path[1:] // strip leading ":"
+	// Expand ~ to /home/claude
+	if strings.HasPrefix(remotePath, "~/") {
+		remotePath = "/home/claude/" + remotePath[2:]
+	} else if remotePath == "~" {
+		remotePath = "/home/claude"
+	}
+	return name + ":" + remotePath
 }
 
 // Stop stops a running container.

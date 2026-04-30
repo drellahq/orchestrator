@@ -13,9 +13,10 @@ type GjollAdapter struct {
 }
 
 // NewGjollAdapter creates a sandbox.Runner from a gjoll.Runner.
-func NewGjollAdapter(gjollBin string) *GjollAdapter {
+// The gjoll binary is resolved via PATH (defaults to "gjoll").
+func NewGjollAdapter() *GjollAdapter {
 	return &GjollAdapter{
-		runner: gjoll.New(gjollBin),
+		runner: gjoll.New(""),
 	}
 }
 
