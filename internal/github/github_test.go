@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -433,6 +434,67 @@ func TestAddCoAuthorTrailers(t *testing.T) {
 		count := strings.Count(msgs[0], "Co-authored-by: Test Author")
 		if count != 1 {
 			t.Errorf("trailer appears %d times, want 1: %q", count, msgs[0])
+		}
+	})
+
+	t.Run("shell metacharacters in trailer are not executed", func(t *testing.T) {
+		upstreamDir := t.TempDir()
+		initGitRepo(t, upstreamDir)
+
+		localDir := t.TempDir()
+		initGitRepo(t, localDir)
+
+		cmd := exec.Command("git", "remote", "add", "upstream", upstreamDir)
+		cmd.Dir = localDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("remote add: %v\n%s", err, out)
+		}
+		cmd = exec.Command("git", "fetch", "upstream", "main")
+		cmd.Dir = localDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("fetch: %v\n%s", err, out)
+		}
+		cmd = exec.Command("git", "reset", "--hard", "upstream/main")
+		cmd.Dir = localDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("reset: %v\n%s", err, out)
+		}
+		cmd = exec.Command("git", "checkout", "-b", "gjoll-test-task")
+		cmd.Dir = localDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("checkout: %v\n%s", err, out)
+		}
+		addCommit(t, localDir, "new commit")
+
+		cmd = exec.Command("git", "remote", "remove", "upstream")
+		cmd.Dir = localDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("remote remove: %v\n%s", err, out)
+		}
+
+		// Use a trailer with shell metacharacters that would execute a command
+		// if not properly escaped. The $(touch ...) would create a file.
+		sentinel := filepath.Join(t.TempDir(), "pwned")
+		trailer := fmt.Sprintf(`Co-authored-by: Evil "$(touch %s)" <evil@example.com>`, sentinel)
+
+		r := New("")
+		err := r.addCoAuthorTrailers(context.Background(), "git", localDir, upstreamDir, "main", "gjoll-test-task", trailer)
+		if err != nil {
+			t.Fatalf("addCoAuthorTrailers: %v", err)
+		}
+
+		// The sentinel file must NOT exist — if it does, shell injection occurred.
+		if _, err := os.Stat(sentinel); err == nil {
+			t.Fatal("shell injection: sentinel file was created by trailer containing shell metacharacters")
+		}
+
+		// The trailer should appear literally in the commit message
+		msgs := gitLog(t, localDir, "upstream/main..HEAD")
+		if len(msgs) != 1 {
+			t.Fatalf("expected 1 commit, got %d", len(msgs))
+		}
+		if !strings.Contains(msgs[0], `Co-authored-by: Evil "$(touch`) {
+			t.Errorf("commit message should contain the trailer literally, got: %q", msgs[0])
 		}
 	})
 

@@ -110,7 +110,22 @@ func (r *Runner) addCoAuthorTrailers(ctx context.Context, gitBin, repoDir, upstr
 	// Use git filter-branch to add the trailer to commits that lack it.
 	// git interpret-trailers --if-exists doNothing skips the trailer if
 	// the commit message already contains one with the same key and value.
-	msgFilter := fmt.Sprintf(`git interpret-trailers --trailer "%s" --if-exists doNothing`, trailer)
+	//
+	// To avoid shell injection via the trailer string, we write the trailer
+	// to a temp file and read it in the msg-filter script rather than
+	// interpolating it into the shell command.
+	trailerFile, err := os.CreateTemp("", "trailer-*")
+	if err != nil {
+		return fmt.Errorf("creating trailer temp file: %w", err)
+	}
+	defer os.Remove(trailerFile.Name())
+	if _, err := trailerFile.WriteString(trailer); err != nil {
+		trailerFile.Close()
+		return fmt.Errorf("writing trailer: %w", err)
+	}
+	trailerFile.Close()
+
+	msgFilter := fmt.Sprintf(`git interpret-trailers --trailer "$(cat %s)" --if-exists doNothing`, shellQuote(trailerFile.Name()))
 	cmd := exec.CommandContext(ctx, gitBin, "filter-branch", "-f", "--msg-filter", msgFilter, "upstream/"+base+"..HEAD")
 	cmd.Dir = repoDir
 	cmd.Env = append(os.Environ(), "FILTER_BRANCH_SQUELCH_WARNING=1")
@@ -298,6 +313,12 @@ func (r *Runner) ListIssues(ctx context.Context, repo string) ([]Issue, error) {
 		})
 	}
 	return issues, nil
+}
+
+// shellQuote returns s wrapped in single quotes with internal single quotes
+// escaped using the '\'' idiom, making it safe to embed in a shell command.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 func (r *Runner) run(ctx context.Context, dir, name string, args ...string) (string, error) {
