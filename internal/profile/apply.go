@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/drellabot/orchestrator/internal/shellutil"
+
 	"github.com/drellabot/orchestrator/internal/gjoll"
 )
 
@@ -75,12 +77,6 @@ func writeToSandbox(ctx context.Context, runner *gjoll.Runner, sandbox, content,
 	return runner.Cp(ctx, sandbox, tmpFile.Name(), dest)
 }
 
-// shellQuote returns s wrapped in single quotes with internal single quotes
-// escaped using the '\'' idiom, making it safe to embed in a shell command.
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
-}
-
 // registerMCPServer runs "claude mcp add" in the sandbox for a single server.
 func registerMCPServer(ctx context.Context, runner *gjoll.Runner, sandbox string, server MCPServer) error {
 	var args []string
@@ -88,18 +84,18 @@ func registerMCPServer(ctx context.Context, runner *gjoll.Runner, sandbox string
 	case "stdio":
 		args = []string{"claude", "mcp", "add", "--transport", "stdio"}
 		if server.Scope != "" {
-			args = append(args, "--scope", shellQuote(server.Scope))
+			args = append(args, "--scope", shellutil.Quote(server.Scope))
 		}
-		args = append(args, shellQuote(server.Name), shellQuote(server.Command))
+		args = append(args, shellutil.Quote(server.Name), shellutil.Quote(server.Command))
 		for _, a := range server.Args {
-			args = append(args, shellQuote(a))
+			args = append(args, shellutil.Quote(a))
 		}
 	case "http":
 		args = []string{"claude", "mcp", "add", "--transport", "http"}
 		if server.Scope != "" {
-			args = append(args, "--scope", shellQuote(server.Scope))
+			args = append(args, "--scope", shellutil.Quote(server.Scope))
 		}
-		args = append(args, shellQuote(server.Name), shellQuote(server.URL))
+		args = append(args, shellutil.Quote(server.Name), shellutil.Quote(server.URL))
 	}
 	return runner.SSH(ctx, sandbox, strings.Join(args, " "))
 }
@@ -119,7 +115,7 @@ func runSetup(ctx context.Context, runner *gjoll.Runner, sandbox, setupPath, tas
 	sandboxCp := fmt.Sprintf(`#!/bin/bash
 set -euo pipefail
 %s cp %s "$1" "$2"
-`, gjollBin, shellQuote(sandbox))
+`, gjollBin, shellutil.Quote(sandbox))
 	if err := os.WriteFile(filepath.Join(helpersDir, "sandbox-cp"), []byte(sandboxCp), 0755); err != nil {
 		return fmt.Errorf("writing sandbox-cp: %w", err)
 	}
@@ -128,7 +124,7 @@ set -euo pipefail
 	sandboxSSH := fmt.Sprintf(`#!/bin/bash
 set -euo pipefail
 %s ssh %s -- "$@"
-`, gjollBin, shellQuote(sandbox))
+`, gjollBin, shellutil.Quote(sandbox))
 	if err := os.WriteFile(filepath.Join(helpersDir, "sandbox-ssh"), []byte(sandboxSSH), 0755); err != nil {
 		return fmt.Errorf("writing sandbox-ssh: %w", err)
 	}
