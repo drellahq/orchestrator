@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/drellabot/orchestrator/internal/shellutil"
 )
 
 // Runner wraps the gh CLI for GitHub operations (fork, push, PR).
@@ -125,7 +127,7 @@ func (r *Runner) addCoAuthorTrailers(ctx context.Context, gitBin, repoDir, upstr
 	}
 	trailerFile.Close()
 
-	msgFilter := fmt.Sprintf(`git interpret-trailers --trailer "$(cat %s)" --if-exists doNothing`, shellQuote(trailerFile.Name()))
+	msgFilter := fmt.Sprintf(`git interpret-trailers --trailer "$(cat %s)" --if-exists doNothing`, shellutil.Quote(trailerFile.Name()))
 	cmd := exec.CommandContext(ctx, gitBin, "filter-branch", "-f", "--msg-filter", msgFilter, "upstream/"+base+"..HEAD")
 	cmd.Dir = repoDir
 	cmd.Env = append(os.Environ(), "FILTER_BRANCH_SQUELCH_WARNING=1")
@@ -313,12 +315,6 @@ func (r *Runner) ListIssues(ctx context.Context, repo string) ([]Issue, error) {
 		})
 	}
 	return issues, nil
-}
-
-// shellQuote returns s wrapped in single quotes with internal single quotes
-// escaped using the '\'' idiom, making it safe to embed in a shell command.
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 func (r *Runner) run(ctx context.Context, dir, name string, args ...string) (string, error) {
