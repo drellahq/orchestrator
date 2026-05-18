@@ -32,6 +32,11 @@ type Resources struct {
 }
 
 // PRs returns all PRs regardless of provider.
+//
+// NOTE: The returned slice shares its backing array with r.GitHub.PRs.
+// UpdatePR relies on this to mutate PRs in place. If PRs() is changed to
+// aggregate from multiple providers (e.g. append(r.GitHub.PRs, r.GitLab.MRs...)),
+// UpdatePR must be updated to write back to the correct provider bucket.
 func (r *Resources) PRs() []PR {
 	return r.GitHub.PRs
 }

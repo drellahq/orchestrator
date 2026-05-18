@@ -5,6 +5,11 @@ import "fmt"
 // ProviderConstructor is a function that creates a new Provider instance.
 type ProviderConstructor func() Provider
 
+// registry uses init()-based self-registration rather than a switch-case with
+// direct imports. This avoids a circular dependency (vcs -> github -> vcs) and
+// makes the factory extensible without modifying this package. Callers must
+// ensure the desired provider package is imported (directly or via blank import)
+// so that its init() function registers the constructor.
 var registry = map[string]ProviderConstructor{}
 
 // Register adds a provider constructor to the registry.

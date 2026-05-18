@@ -217,7 +217,10 @@ func New(logger *slog.Logger, taskName string, taskDir *task.Dir, puller CodePul
 				}, nil, nil
 			}
 
-			prNumber, _ := vcsProvider.PRNumberFromURL(prURL)
+			prNumber, err := vcsProvider.PRNumberFromURL(prURL)
+			if err != nil {
+				logger.Warn("Failed to parse PR number from URL", "url", prURL, "error", err)
+			}
 			if err := taskDir.AddPR(task.PR{
 				URL:    prURL,
 				Repo:   input.Repo,
