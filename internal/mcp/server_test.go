@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/drellabot/orchestrator/internal/task"
+	"github.com/drellabot/orchestrator/internal/vcs"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -29,8 +31,8 @@ func (s *stubPuller) Pull(_ context.Context, name, remotePath, localRepoDir stri
 	return s.err
 }
 
-// stubPROpener implements PROpener for testing.
-type stubPROpener struct {
+// stubVCSProvider implements vcs.Provider for testing.
+type stubVCSProvider struct {
 	user    string
 	userErr error
 
@@ -79,16 +81,16 @@ type stubPROpener struct {
 	gotReviewBody  string
 }
 
-func (s *stubPROpener) AuthenticatedUser(_ context.Context) (string, error) {
+func (s *stubVCSProvider) AuthenticatedUser(_ context.Context) (string, error) {
 	return s.user, s.userErr
 }
 
-func (s *stubPROpener) EnsureFork(_ context.Context, upstream string) (string, error) {
+func (s *stubVCSProvider) EnsureFork(_ context.Context, upstream string) (string, error) {
 	s.forkCalled = true
 	return s.forkName, s.forkErr
 }
 
-func (s *stubPROpener) PushBranch(_ context.Context, repoDir, forkFullName, branch, sourceRef string) error {
+func (s *stubVCSProvider) PushBranch(_ context.Context, repoDir, forkFullName, branch, sourceRef string) error {
 	s.gotRepoDir = repoDir
 	s.gotForkName = forkFullName
 	s.gotBranch = branch
@@ -96,28 +98,28 @@ func (s *stubPROpener) PushBranch(_ context.Context, repoDir, forkFullName, bran
 	return s.pushErr
 }
 
-func (s *stubPROpener) CreatePR(_ context.Context, upstream, forkOwner, branch, base, title, body string) (string, error) {
+func (s *stubVCSProvider) CreatePR(_ context.Context, upstream, forkOwner, branch, base, title, body string) (string, error) {
 	s.gotPRRepo = upstream
 	s.gotPRHead = forkOwner + ":" + branch
 	s.gotPRBase = base
 	return s.prURL, s.prErr
 }
 
-func (s *stubPROpener) AddCoAuthorTrailers(_ context.Context, repoDir, upstream, base, sourceRef, trailer string) error {
+func (s *stubVCSProvider) AddCoAuthorTrailers(_ context.Context, repoDir, upstream, base, sourceRef, trailer string) error {
 	s.trailerCalled = true
 	s.gotTrailer = trailer
 	s.gotTrailerBase = base
 	return s.trailerErr
 }
 
-func (s *stubPROpener) CommentOnPR(_ context.Context, prURL, body string) error {
+func (s *stubVCSProvider) CommentOnPR(_ context.Context, prURL, body string) error {
 	s.commentCalled = true
 	s.gotCommentURL = prURL
 	s.gotCommentBody = body
 	return s.commentErr
 }
 
-func (s *stubPROpener) CommentOnIssue(_ context.Context, repo string, issue int, body string) error {
+func (s *stubVCSProvider) CommentOnIssue(_ context.Context, repo string, issue int, body string) error {
 	s.issueCommentCalled = true
 	s.gotIssueCommentRepo = repo
 	s.gotIssueCommentNum = issue
@@ -125,14 +127,14 @@ func (s *stubPROpener) CommentOnIssue(_ context.Context, repo string, issue int,
 	return s.issueCommentErr
 }
 
-func (s *stubPROpener) UpdatePRTitle(_ context.Context, prURL, title string) error {
+func (s *stubVCSProvider) UpdatePRTitle(_ context.Context, prURL, title string) error {
 	s.titleCalled = true
 	s.gotTitleURL = prURL
 	s.gotTitleTitle = title
 	return s.titleErr
 }
 
-func (s *stubPROpener) PostReview(_ context.Context, repo string, pr int, event, body string) error {
+func (s *stubVCSProvider) PostReview(_ context.Context, repo string, pr int, event, body string) error {
 	s.reviewCalled = true
 	s.gotReviewRepo = repo
 	s.gotReviewPR = pr
@@ -141,7 +143,52 @@ func (s *stubPROpener) PostReview(_ context.Context, repo string, pr int, event,
 	return s.reviewErr
 }
 
-func startTestServer(t *testing.T, puller CodePuller, prOpener PROpener, allowedRepos []string, authors ...string) (*task.Dir, *Server, string) {
+func (s *stubVCSProvider) IsPROpen(_ context.Context, repo string, prNumber int) (bool, error) {
+	return true, nil
+}
+
+func (s *stubVCSProvider) FetchAllComments(_ context.Context, repo string, prNumber int) ([]vcs.Comment, error) {
+	return nil, nil
+}
+
+func (s *stubVCSProvider) ListRepoFiles(_ context.Context, repo, branch, dir string) ([]string, error) {
+	return nil, nil
+}
+
+func (s *stubVCSProvider) GetFileContent(_ context.Context, repo, branch, path string) (string, error) {
+	return "", nil
+}
+
+func (s *stubVCSProvider) ListIssues(_ context.Context, repo string) ([]vcs.Issue, error) {
+	return nil, nil
+}
+
+func (s *stubVCSProvider) CloneRepo(_ context.Context, repo, dir string) error {
+	return nil
+}
+
+func (s *stubVCSProvider) PRNumberFromURL(url string) (int, error) {
+	const prefix = "/pull/"
+	idx := strings.LastIndex(url, prefix)
+	if idx == -1 {
+		return 0, fmt.Errorf("no /pull/ in URL")
+	}
+	numStr := url[idx+len(prefix):]
+	if i := strings.Index(numStr, "/"); i != -1 {
+		numStr = numStr[:i]
+	}
+	n, err := strconv.Atoi(numStr)
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+func (s *stubVCSProvider) RepoURL(repo string) string {
+	return "https://github.com/" + repo + ".git"
+}
+
+func startTestServer(t *testing.T, puller CodePuller, vcsProvider vcs.Provider, allowedRepos []string, authors ...string) (*task.Dir, *Server, string) {
 	t.Helper()
 	dir := t.TempDir()
 	td, err := task.Create(dir, "test-task")
@@ -154,7 +201,7 @@ func startTestServer(t *testing.T, puller CodePuller, prOpener PROpener, allowed
 		author = authors[0]
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	s := New(logger, "test-task", td, puller, prOpener, allowedRepos, author, "")
+	s := New(logger, "test-task", td, puller, vcsProvider, allowedRepos, author, "")
 	if err := s.StartOn("127.0.0.1:0"); err != nil {
 		t.Fatalf("StartOn() error: %v", err)
 	}
@@ -216,7 +263,7 @@ func TestStartAllocatesDynamicPort(t *testing.T) {
 }
 
 func TestServerListTools(t *testing.T) {
-	opener := &stubPROpener{user: "testuser", forkName: "testuser/repo", prURL: "https://github.com/org/repo/pull/1"}
+	opener := &stubVCSProvider{user: "testuser", forkName: "testuser/repo", prURL: "https://github.com/org/repo/pull/1"}
 	_, _, endpoint := startTestServer(t, &stubPuller{}, opener, []string{"org/*"})
 	session := connectClient(t, endpoint)
 
@@ -242,7 +289,7 @@ func TestOpenPRTool(t *testing.T) {
 	tests := []struct {
 		name           string
 		puller         *stubPuller
-		opener         *stubPROpener
+		opener         *stubVCSProvider
 		allowedRepos   []string
 		input          map[string]any
 		wantError      bool
@@ -253,7 +300,7 @@ func TestOpenPRTool(t *testing.T) {
 		{
 			name:   "successful PR via fork",
 			puller: &stubPuller{},
-			opener: &stubPROpener{
+			opener: &stubVCSProvider{
 				user:     "testuser",
 				forkName: "testuser/osbuild",
 				prURL:    "https://github.com/osbuild/osbuild/pull/42",
@@ -274,7 +321,7 @@ func TestOpenPRTool(t *testing.T) {
 		{
 			name:   "user owns repo skips fork",
 			puller: &stubPuller{},
-			opener: &stubPROpener{
+			opener: &stubVCSProvider{
 				user:  "osbuild",
 				prURL: "https://github.com/osbuild/osbuild/pull/99",
 			},
@@ -294,7 +341,7 @@ func TestOpenPRTool(t *testing.T) {
 		{
 			name:   "default base branch",
 			puller: &stubPuller{},
-			opener: &stubPROpener{
+			opener: &stubVCSProvider{
 				user:     "testuser",
 				forkName: "testuser/osbuild",
 				prURL:    "https://github.com/osbuild/osbuild/pull/43",
@@ -314,7 +361,7 @@ func TestOpenPRTool(t *testing.T) {
 		{
 			name:         "repo not allowed",
 			puller:       &stubPuller{},
-			opener:       &stubPROpener{},
+			opener:       &stubVCSProvider{},
 			allowedRepos: []string{"osbuild/*"},
 			input: map[string]any{
 				"path":   "/test/project",
@@ -330,7 +377,7 @@ func TestOpenPRTool(t *testing.T) {
 		{
 			name:   "pull failure",
 			puller: &stubPuller{err: fmt.Errorf("connection refused")},
-			opener: &stubPROpener{
+			opener: &stubVCSProvider{
 				user:     "testuser",
 				forkName: "testuser/osbuild",
 			},
@@ -349,7 +396,7 @@ func TestOpenPRTool(t *testing.T) {
 		{
 			name:   "fork failure",
 			puller: &stubPuller{},
-			opener: &stubPROpener{
+			opener: &stubVCSProvider{
 				user:    "testuser",
 				forkErr: fmt.Errorf("fork failed"),
 			},
@@ -369,7 +416,7 @@ func TestOpenPRTool(t *testing.T) {
 		{
 			name:   "push failure",
 			puller: &stubPuller{},
-			opener: &stubPROpener{
+			opener: &stubVCSProvider{
 				user:     "testuser",
 				forkName: "testuser/osbuild",
 				pushErr:  fmt.Errorf("push rejected"),
@@ -390,7 +437,7 @@ func TestOpenPRTool(t *testing.T) {
 		{
 			name:   "PR creation failure",
 			puller: &stubPuller{},
-			opener: &stubPROpener{
+			opener: &stubVCSProvider{
 				user:     "testuser",
 				forkName: "testuser/osbuild",
 				prErr:    fmt.Errorf("duplicate PR"),
@@ -411,7 +458,7 @@ func TestOpenPRTool(t *testing.T) {
 		{
 			name:   "auth failure",
 			puller: &stubPuller{},
-			opener: &stubPROpener{
+			opener: &stubVCSProvider{
 				userErr: fmt.Errorf("not authenticated"),
 			},
 			allowedRepos:   []string{"osbuild/*"},
@@ -487,14 +534,14 @@ func TestOpenPRTool(t *testing.T) {
 				t.Fatalf("LoadState() error: %v", stateErr)
 			}
 			if tt.wantError {
-				if len(state.Resources.GitHub.PRs) != 0 {
-					t.Errorf("expected no PRs on error, got %d", len(state.Resources.GitHub.PRs))
+				if len(state.Resources.PRs()) != 0 {
+					t.Errorf("expected no PRs on error, got %d", len(state.Resources.PRs()))
 				}
 			} else {
-				if len(state.Resources.GitHub.PRs) != 1 {
-					t.Fatalf("expected 1 PR, got %d", len(state.Resources.GitHub.PRs))
+				if len(state.Resources.PRs()) != 1 {
+					t.Fatalf("expected 1 PR, got %d", len(state.Resources.PRs()))
 				}
-				pr := state.Resources.GitHub.PRs[0]
+				pr := state.Resources.PRs()[0]
 				if pr.URL != tt.wantText {
 					t.Errorf("PR URL = %q, want %q", pr.URL, tt.wantText)
 				}
@@ -512,7 +559,7 @@ func TestOpenPRTool(t *testing.T) {
 func TestOpenPRToolWithAuthor(t *testing.T) {
 	t.Run("calls AddCoAuthorTrailers when author is set", func(t *testing.T) {
 		puller := &stubPuller{}
-		opener := &stubPROpener{
+		opener := &stubVCSProvider{
 			user:     "testuser",
 			forkName: "testuser/osbuild",
 			prURL:    "https://github.com/osbuild/osbuild/pull/42",
@@ -551,7 +598,7 @@ func TestOpenPRToolWithAuthor(t *testing.T) {
 
 	t.Run("skips AddCoAuthorTrailers when author is empty", func(t *testing.T) {
 		puller := &stubPuller{}
-		opener := &stubPROpener{
+		opener := &stubVCSProvider{
 			user:     "testuser",
 			forkName: "testuser/osbuild",
 			prURL:    "https://github.com/osbuild/osbuild/pull/42",
@@ -584,7 +631,7 @@ func TestOpenPRToolWithAuthor(t *testing.T) {
 
 	t.Run("returns error when AddCoAuthorTrailers fails", func(t *testing.T) {
 		puller := &stubPuller{}
-		opener := &stubPROpener{
+		opener := &stubVCSProvider{
 			user:       "testuser",
 			forkName:   "testuser/osbuild",
 			prURL:      "https://github.com/osbuild/osbuild/pull/42",
@@ -740,7 +787,7 @@ func TestOpenPRSkipsIssueLinkWithoutSource(t *testing.T) {
 func TestUpdatePRToolWithAuthor(t *testing.T) {
 	t.Run("looks up base branch from task state", func(t *testing.T) {
 		puller := &stubPuller{}
-		opener := &stubPROpener{
+		opener := &stubVCSProvider{
 			user:     "testuser",
 			forkName: "testuser/osbuild",
 		}
@@ -783,7 +830,7 @@ func TestUpdatePRToolWithAuthor(t *testing.T) {
 
 	t.Run("defaults to main when no PR recorded", func(t *testing.T) {
 		puller := &stubPuller{}
-		opener := &stubPROpener{
+		opener := &stubVCSProvider{
 			user:     "testuser",
 			forkName: "testuser/osbuild",
 		}
@@ -847,7 +894,7 @@ func TestUpdatePRTool(t *testing.T) {
 	tests := []struct {
 		name           string
 		puller         *stubPuller
-		opener         *stubPROpener
+		opener         *stubVCSProvider
 		allowedRepos   []string
 		input          map[string]any
 		wantError      bool
@@ -858,7 +905,7 @@ func TestUpdatePRTool(t *testing.T) {
 		{
 			name:   "successful update via fork",
 			puller: &stubPuller{},
-			opener: &stubPROpener{
+			opener: &stubVCSProvider{
 				user:     "testuser",
 				forkName: "testuser/osbuild",
 			},
@@ -875,7 +922,7 @@ func TestUpdatePRTool(t *testing.T) {
 		{
 			name:   "user owns repo skips fork",
 			puller: &stubPuller{},
-			opener: &stubPROpener{
+			opener: &stubVCSProvider{
 				user: "osbuild",
 			},
 			allowedRepos: []string{"osbuild/*"},
@@ -891,7 +938,7 @@ func TestUpdatePRTool(t *testing.T) {
 		{
 			name:         "repo not allowed",
 			puller:       &stubPuller{},
-			opener:       &stubPROpener{},
+			opener:       &stubVCSProvider{},
 			allowedRepos: []string{"osbuild/*"},
 			input: map[string]any{
 				"path":   "/test/project",
@@ -905,7 +952,7 @@ func TestUpdatePRTool(t *testing.T) {
 		{
 			name:   "pull failure",
 			puller: &stubPuller{err: fmt.Errorf("connection refused")},
-			opener: &stubPROpener{
+			opener: &stubVCSProvider{
 				user:     "testuser",
 				forkName: "testuser/osbuild",
 			},
@@ -922,7 +969,7 @@ func TestUpdatePRTool(t *testing.T) {
 		{
 			name:   "push failure",
 			puller: &stubPuller{},
-			opener: &stubPROpener{
+			opener: &stubVCSProvider{
 				user:     "testuser",
 				forkName: "testuser/osbuild",
 				pushErr:  fmt.Errorf("push rejected"),
@@ -941,7 +988,7 @@ func TestUpdatePRTool(t *testing.T) {
 		{
 			name:   "auth failure",
 			puller: &stubPuller{},
-			opener: &stubPROpener{
+			opener: &stubVCSProvider{
 				userErr: fmt.Errorf("not authenticated"),
 			},
 			allowedRepos:   []string{"osbuild/*"},
@@ -1009,7 +1056,7 @@ func TestCommentOnPRTool(t *testing.T) {
 
 	tests := []struct {
 		name              string
-		opener            *stubPROpener
+		opener            *stubVCSProvider
 		seedPR            bool // whether to add a PR to task state before calling
 		input             map[string]any
 		wantError         bool
@@ -1020,7 +1067,7 @@ func TestCommentOnPRTool(t *testing.T) {
 	}{
 		{
 			name:   "successful comment on owned PR",
-			opener: &stubPROpener{user: "testuser"},
+			opener: &stubVCSProvider{user: "testuser"},
 			seedPR: true,
 			input: map[string]any{
 				"pr_url": ownedPRURL,
@@ -1031,7 +1078,7 @@ func TestCommentOnPRTool(t *testing.T) {
 		},
 		{
 			name:   "successful comment with title update",
-			opener: &stubPROpener{user: "testuser"},
+			opener: &stubVCSProvider{user: "testuser"},
 			seedPR: true,
 			input: map[string]any{
 				"pr_url": ownedPRURL,
@@ -1045,7 +1092,7 @@ func TestCommentOnPRTool(t *testing.T) {
 		},
 		{
 			name:   "title not updated when empty",
-			opener: &stubPROpener{user: "testuser"},
+			opener: &stubVCSProvider{user: "testuser"},
 			seedPR: true,
 			input: map[string]any{
 				"pr_url": ownedPRURL,
@@ -1057,7 +1104,7 @@ func TestCommentOnPRTool(t *testing.T) {
 		},
 		{
 			name:   "title update failure",
-			opener: &stubPROpener{user: "testuser", titleErr: fmt.Errorf("title update forbidden")},
+			opener: &stubVCSProvider{user: "testuser", titleErr: fmt.Errorf("title update forbidden")},
 			seedPR: true,
 			input: map[string]any{
 				"pr_url": ownedPRURL,
@@ -1072,7 +1119,7 @@ func TestCommentOnPRTool(t *testing.T) {
 		},
 		{
 			name:   "rejected for unowned PR",
-			opener: &stubPROpener{user: "testuser"},
+			opener: &stubVCSProvider{user: "testuser"},
 			seedPR: false,
 			input: map[string]any{
 				"pr_url": "https://github.com/other/repo/pull/99",
@@ -1084,7 +1131,7 @@ func TestCommentOnPRTool(t *testing.T) {
 		},
 		{
 			name:   "gh comment failure",
-			opener: &stubPROpener{user: "testuser", commentErr: fmt.Errorf("forbidden")},
+			opener: &stubVCSProvider{user: "testuser", commentErr: fmt.Errorf("forbidden")},
 			seedPR: true,
 			input: map[string]any{
 				"pr_url": ownedPRURL,
@@ -1161,7 +1208,7 @@ func TestCommentOnPRTool(t *testing.T) {
 func TestPostReviewTool(t *testing.T) {
 	tests := []struct {
 		name             string
-		opener           *stubPROpener
+		opener           *stubVCSProvider
 		allowedRepos     []string
 		input            map[string]any
 		wantError        bool
@@ -1170,7 +1217,7 @@ func TestPostReviewTool(t *testing.T) {
 	}{
 		{
 			name:         "successful review",
-			opener:       &stubPROpener{user: "testuser"},
+			opener:       &stubVCSProvider{user: "testuser"},
 			allowedRepos: []string{"osbuild/*"},
 			input: map[string]any{
 				"repo":  "osbuild/osbuild",
@@ -1183,7 +1230,7 @@ func TestPostReviewTool(t *testing.T) {
 		},
 		{
 			name:         "repo not allowed",
-			opener:       &stubPROpener{user: "testuser"},
+			opener:       &stubVCSProvider{user: "testuser"},
 			allowedRepos: []string{"osbuild/*"},
 			input: map[string]any{
 				"repo":  "evil/repo",
@@ -1197,7 +1244,7 @@ func TestPostReviewTool(t *testing.T) {
 		},
 		{
 			name:         "invalid event",
-			opener:       &stubPROpener{user: "testuser", reviewErr: fmt.Errorf("invalid review event \"INVALID\": must be APPROVE, REQUEST_CHANGES, or COMMENT")},
+			opener:       &stubVCSProvider{user: "testuser", reviewErr: fmt.Errorf("invalid review event \"INVALID\": must be APPROVE, REQUEST_CHANGES, or COMMENT")},
 			allowedRepos: []string{"osbuild/*"},
 			input: map[string]any{
 				"repo":  "osbuild/osbuild",
@@ -1211,7 +1258,7 @@ func TestPostReviewTool(t *testing.T) {
 		},
 		{
 			name:         "gh command failure",
-			opener:       &stubPROpener{user: "testuser", reviewErr: fmt.Errorf("gh command failed")},
+			opener:       &stubVCSProvider{user: "testuser", reviewErr: fmt.Errorf("gh command failed")},
 			allowedRepos: []string{"osbuild/*"},
 			input: map[string]any{
 				"repo":  "osbuild/osbuild",
