@@ -151,6 +151,14 @@ func (s *stubVCSProvider) FetchAllComments(_ context.Context, repo string, prNum
 	return nil, nil
 }
 
+func (s *stubVCSProvider) ReactToComment(_ context.Context, repo string, commentID int64, commentType vcs.CommentType, reaction string) error {
+	return nil
+}
+
+func (s *stubVCSProvider) ReactToIssue(_ context.Context, repo string, issueNumber int, reaction string) error {
+	return nil
+}
+
 func (s *stubVCSProvider) ListRepoFiles(_ context.Context, repo, branch, dir string) ([]string, error) {
 	return nil, nil
 }

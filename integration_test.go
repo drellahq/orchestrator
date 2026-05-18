@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -17,12 +18,13 @@ import (
 	"github.com/drellabot/orchestrator/internal/gjoll"
 	mcpserver "github.com/drellabot/orchestrator/internal/mcp"
 	"github.com/drellabot/orchestrator/internal/task"
+	"github.com/drellabot/orchestrator/internal/vcs"
 )
 
 const sandboxName = "orch-integ-test"
 
-// testPROpener implements mcpserver.PROpener for integration testing.
-type testPROpener struct {
+// testVCSProvider implements vcs.Provider for integration testing.
+type testVCSProvider struct {
 	trailerCalled bool
 	gotTrailer    string
 
@@ -30,44 +32,97 @@ type testPROpener struct {
 	lastCommentBody string
 }
 
-func (t *testPROpener) AuthenticatedUser(_ context.Context) (string, error) {
+func (t *testVCSProvider) AuthenticatedUser(_ context.Context) (string, error) {
 	return "testuser", nil
 }
 
-func (t *testPROpener) EnsureFork(_ context.Context, upstream string) (string, error) {
+func (t *testVCSProvider) EnsureFork(_ context.Context, upstream string) (string, error) {
 	return "testuser/" + strings.SplitN(upstream, "/", 2)[1], nil
 }
 
-func (t *testPROpener) PushBranch(_ context.Context, repoDir, forkFullName, branch, sourceRef string) error {
+func (t *testVCSProvider) PushBranch(_ context.Context, repoDir, forkFullName, branch, sourceRef string) error {
 	return nil
 }
 
-func (t *testPROpener) CreatePR(_ context.Context, upstream, forkOwner, branch, base, title, body string) (string, error) {
+func (t *testVCSProvider) CreatePR(_ context.Context, upstream, forkOwner, branch, base, title, body string) (string, error) {
 	return fmt.Sprintf("https://github.com/%s/pull/1", upstream), nil
 }
 
-func (t *testPROpener) AddCoAuthorTrailers(_ context.Context, repoDir, upstream, base, sourceRef, trailer string) error {
+func (t *testVCSProvider) AddCoAuthorTrailers(_ context.Context, repoDir, upstream, base, sourceRef, trailer string) error {
 	t.trailerCalled = true
 	t.gotTrailer = trailer
 	return nil
 }
 
-func (t *testPROpener) CommentOnPR(_ context.Context, prURL, body string) error {
+func (t *testVCSProvider) CommentOnPR(_ context.Context, prURL, body string) error {
 	t.lastCommentURL = prURL
 	t.lastCommentBody = body
 	return nil
 }
 
-func (t *testPROpener) CommentOnIssue(_ context.Context, repo string, issue int, body string) error {
+func (t *testVCSProvider) CommentOnIssue(_ context.Context, repo string, issue int, body string) error {
 	return nil
 }
 
-func (t *testPROpener) UpdatePRTitle(_ context.Context, prURL, title string) error {
+func (t *testVCSProvider) UpdatePRTitle(_ context.Context, prURL, title string) error {
 	return nil
 }
 
-func (t *testPROpener) PostReview(_ context.Context, repo string, pr int, event, body string) error {
+func (t *testVCSProvider) PostReview(_ context.Context, repo string, pr int, event, body string) error {
 	return nil
+}
+
+func (t *testVCSProvider) IsPROpen(_ context.Context, repo string, prNumber int) (bool, error) {
+	return true, nil
+}
+
+func (t *testVCSProvider) FetchAllComments(_ context.Context, repo string, prNumber int) ([]vcs.Comment, error) {
+	return nil, nil
+}
+
+func (t *testVCSProvider) ReactToComment(_ context.Context, repo string, commentID int64, commentType vcs.CommentType, reaction string) error {
+	return nil
+}
+
+func (t *testVCSProvider) ReactToIssue(_ context.Context, repo string, issueNumber int, reaction string) error {
+	return nil
+}
+
+func (t *testVCSProvider) ListRepoFiles(_ context.Context, repo, branch, dir string) ([]string, error) {
+	return nil, nil
+}
+
+func (t *testVCSProvider) GetFileContent(_ context.Context, repo, branch, path string) (string, error) {
+	return "", nil
+}
+
+func (t *testVCSProvider) ListIssues(_ context.Context, repo string) ([]vcs.Issue, error) {
+	return nil, nil
+}
+
+func (t *testVCSProvider) CloneRepo(_ context.Context, repo, dir string) error {
+	return nil
+}
+
+func (t *testVCSProvider) PRNumberFromURL(url string) (int, error) {
+	const prefix = "/pull/"
+	idx := strings.LastIndex(url, prefix)
+	if idx == -1 {
+		return 0, fmt.Errorf("no /pull/ in URL")
+	}
+	numStr := url[idx+len(prefix):]
+	if i := strings.Index(numStr, "/"); i != -1 {
+		numStr = numStr[:i]
+	}
+	n, err := strconv.Atoi(numStr)
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+func (t *testVCSProvider) RepoURL(repo string) string {
+	return "https://github.com/" + repo + ".git"
 }
 
 // testTF returns the path to a minimal .tf file for integration testing.
@@ -235,8 +290,8 @@ func TestIntegration(t *testing.T) {
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	prOpener := &testPROpener{}
-	mcpSrv := mcpserver.New(logger, sandboxName, taskDir, runner, prOpener, []string{"test/*"}, "", "")
+	provider := &testVCSProvider{}
+	mcpSrv := mcpserver.New(logger, sandboxName, taskDir, runner, provider, []string{"test/*"}, "", "")
 	if err := mcpSrv.Start(); err != nil {
 		t.Fatalf("MCP server start: %v", err)
 	}
@@ -325,12 +380,12 @@ echo "Result: $RESULT"`, remotePort, remotePort, remotePort)
 		t.Fatalf("comment_on_pr via ssh -R: %v", err)
 	}
 
-	// Verify the comment was dispatched to the PROpener
-	if prOpener.lastCommentURL != "https://github.com/test/repo/pull/1" {
-		t.Errorf("comment URL = %q, want %q", prOpener.lastCommentURL, "https://github.com/test/repo/pull/1")
+	// Verify the comment was dispatched to the VCS provider
+	if provider.lastCommentURL != "https://github.com/test/repo/pull/1" {
+		t.Errorf("comment URL = %q, want %q", provider.lastCommentURL, "https://github.com/test/repo/pull/1")
 	}
-	if prOpener.lastCommentBody != "Pushed updated code" {
-		t.Errorf("comment body = %q, want %q", prOpener.lastCommentBody, "Pushed updated code")
+	if provider.lastCommentBody != "Pushed updated code" {
+		t.Errorf("comment body = %q, want %q", provider.lastCommentBody, "Pushed updated code")
 	}
 
 	// 6c. Verify comment_on_pr rejects unowned PRs
@@ -484,9 +539,9 @@ func TestIntegrationWithAuthor(t *testing.T) {
 		t.Fatalf("task.Create: %v", err)
 	}
 
-	prOpener := &testPROpener{}
+	provider := &testVCSProvider{}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	mcpSrv := mcpserver.New(logger, authorSandboxName, taskDir, runner, prOpener, []string{"test/*"}, "Test User <test@example.com>", "")
+	mcpSrv := mcpserver.New(logger, authorSandboxName, taskDir, runner, provider, []string{"test/*"}, "Test User <test@example.com>", "")
 	if err := mcpSrv.Start(); err != nil {
 		t.Fatalf("MCP server start: %v", err)
 	}
@@ -508,12 +563,12 @@ echo "Result: $RESULT"`, remotePort, remotePort, remotePort)
 	}
 
 	// Verify AddCoAuthorTrailers was called
-	if !prOpener.trailerCalled {
+	if !provider.trailerCalled {
 		t.Error("AddCoAuthorTrailers was not called")
 	}
 	wantTrailer := "Co-authored-by: Test User <test@example.com>"
-	if prOpener.gotTrailer != wantTrailer {
-		t.Errorf("trailer = %q, want %q", prOpener.gotTrailer, wantTrailer)
+	if provider.gotTrailer != wantTrailer {
+		t.Errorf("trailer = %q, want %q", provider.gotTrailer, wantTrailer)
 	}
 
 	// Verify author is persisted in task state so task continue can use it
@@ -531,8 +586,8 @@ echo "Result: $RESULT"`, remotePort, remotePort, remotePort)
 
 	// Verify a new MCP server created with the persisted author works correctly
 	// (simulates what task continue would do: load author from state, pass to MCP server)
-	prOpener2 := &testPROpener{}
-	mcpSrv2 := mcpserver.New(logger, authorSandboxName, taskDir, runner, prOpener2, []string{"test/*"}, state.Author, "")
+	provider2 := &testVCSProvider{}
+	mcpSrv2 := mcpserver.New(logger, authorSandboxName, taskDir, runner, provider2, []string{"test/*"}, state.Author, "")
 	if err := mcpSrv2.Start(); err != nil {
 		t.Fatalf("MCP server 2 start: %v", err)
 	}
@@ -550,11 +605,11 @@ echo "Result: $RESULT"`, remotePort, remotePort, remotePort)
 		t.Fatalf("open_pr via ssh -R (continue simulation): %v", err)
 	}
 
-	if !prOpener2.trailerCalled {
+	if !provider2.trailerCalled {
 		t.Error("AddCoAuthorTrailers was not called on continued task")
 	}
-	if prOpener2.gotTrailer != wantTrailer {
-		t.Errorf("continued task trailer = %q, want %q", prOpener2.gotTrailer, wantTrailer)
+	if provider2.gotTrailer != wantTrailer {
+		t.Errorf("continued task trailer = %q, want %q", provider2.gotTrailer, wantTrailer)
 	}
 
 	// Tear down
