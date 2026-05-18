@@ -9,6 +9,36 @@ import (
 	"time"
 )
 
+func TestResources_PRs(t *testing.T) {
+	r := Resources{
+		GitHub: GitHubResources{
+			PRs: []PR{
+				{URL: "https://github.com/org/repo/pull/1", Repo: "org/repo"},
+				{URL: "https://github.com/org/repo/pull/2", Repo: "org/repo"},
+			},
+		},
+	}
+	got := r.PRs()
+	if len(got) != 2 {
+		t.Fatalf("got %d PRs, want 2", len(got))
+	}
+	if got[0].URL != "https://github.com/org/repo/pull/1" {
+		t.Errorf("got URL %q, want pull/1", got[0].URL)
+	}
+}
+
+func TestResources_AddPRToResources(t *testing.T) {
+	r := &Resources{}
+	r.AddPRToResources(PR{URL: "https://github.com/org/repo/pull/1", Repo: "org/repo"})
+	if len(r.GitHub.PRs) != 1 {
+		t.Fatalf("got %d PRs, want 1", len(r.GitHub.PRs))
+	}
+	r.AddPRToResources(PR{URL: "https://github.com/org/repo/pull/2", Repo: "org/repo"})
+	if len(r.GitHub.PRs) != 2 {
+		t.Fatalf("got %d PRs, want 2", len(r.GitHub.PRs))
+	}
+}
+
 func TestCreate(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -401,58 +431,7 @@ func TestLoadState_NoFile(t *testing.T) {
 	}
 }
 
-func TestPRNumberFromURL(t *testing.T) {
-	tests := []struct {
-		name    string
-		url     string
-		want    int
-		wantErr bool
-	}{
-		{
-			name: "standard PR URL",
-			url:  "https://github.com/org/repo/pull/42",
-			want: 42,
-		},
-		{
-			name: "PR URL with trailing slash",
-			url:  "https://github.com/org/repo/pull/99/",
-			want: 99,
-		},
-		{
-			name: "PR URL with sub-path",
-			url:  "https://github.com/org/repo/pull/7/files",
-			want: 7,
-		},
-		{
-			name:    "no pull path",
-			url:     "https://github.com/org/repo/issues/5",
-			wantErr: true,
-		},
-		{
-			name:    "non-numeric PR number",
-			url:     "https://github.com/org/repo/pull/abc",
-			wantErr: true,
-		},
-	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := PRNumberFromURL(tt.url)
-			if tt.wantErr {
-				if err == nil {
-					t.Fatal("expected error, got nil")
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if got != tt.want {
-				t.Errorf("PRNumberFromURL(%q) = %d, want %d", tt.url, got, tt.want)
-			}
-		})
-	}
-}
 
 func TestUpdatePR(t *testing.T) {
 	tests := []struct {
@@ -533,21 +512,33 @@ func TestUpdatePR(t *testing.T) {
 	}
 }
 
-func TestAddPR_PopulatesNumber(t *testing.T) {
-	outputDir := t.TempDir()
-	td, err := Create(outputDir, "number-test")
+func TestAddPR_PreservesNumber(t *testing.T) {
+	dir := t.TempDir()
+	td, err := Create(dir, "test-task")
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	pr := PR{URL: "https://github.com/org/repo/pull/42", Repo: "org/repo", Branch: "fix", Base: "main"}
-	if err := td.AddPR(pr); err != nil {
+	if err := td.SaveMetadata("test-task", "test", "", time.Now()); err != nil {
 		t.Fatal(err)
+	}
+
+	err = td.AddPR(PR{
+		URL:    "https://github.com/org/repo/pull/42",
+		Repo:   "org/repo",
+		Branch: "fix",
+		Base:   "main",
+		Number: 42,
+	})
+	if err != nil {
+		t.Fatalf("AddPR() error: %v", err)
 	}
 
 	state, err := td.LoadState()
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(state.Resources.GitHub.PRs) != 1 {
+		t.Fatalf("got %d PRs, want 1", len(state.Resources.GitHub.PRs))
 	}
 	if state.Resources.GitHub.PRs[0].Number != 42 {
 		t.Errorf("Number = %d, want 42", state.Resources.GitHub.PRs[0].Number)

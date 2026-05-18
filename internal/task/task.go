@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 )
@@ -23,27 +21,6 @@ type PR struct {
 	Closed        bool   `json:"closed,omitempty"`
 }
 
-// PRNumberFromURL extracts the pull request number from a GitHub PR URL
-// of the form https://github.com/owner/repo/pull/42.
-func PRNumberFromURL(url string) (int, error) {
-	// Expected format: https://github.com/owner/repo/pull/NUMBER
-	const prefix = "/pull/"
-	idx := strings.LastIndex(url, prefix)
-	if idx == -1 {
-		return 0, fmt.Errorf("URL does not contain /pull/: %s", url)
-	}
-	numStr := url[idx+len(prefix):]
-	// Strip any trailing path components
-	if i := strings.Index(numStr, "/"); i != -1 {
-		numStr = numStr[:i]
-	}
-	n, err := strconv.Atoi(numStr)
-	if err != nil {
-		return 0, fmt.Errorf("invalid PR number in URL %s: %w", url, err)
-	}
-	return n, nil
-}
-
 // GitHubResources holds GitHub-related resources created by the task.
 type GitHubResources struct {
 	PRs []PR `json:"prs"`
@@ -52,6 +29,16 @@ type GitHubResources struct {
 // Resources holds external resources created by the task.
 type Resources struct {
 	GitHub GitHubResources `json:"github"`
+}
+
+// PRs returns all PRs regardless of provider.
+func (r *Resources) PRs() []PR {
+	return r.GitHub.PRs
+}
+
+// AddPRToResources adds a PR to the appropriate provider bucket.
+func (r *Resources) AddPRToResources(pr PR) {
+	r.GitHub.PRs = append(r.GitHub.PRs, pr)
 }
 
 // Source records the tasks-repo GitHub issue a task was spawned from.
@@ -231,14 +218,7 @@ func (d *Dir) TouchUpdatedAt(t time.Time) error {
 }
 
 // AddPR appends a PR to the task state and persists it to disk.
-// It automatically populates the Number field from the URL if not set.
 func (d *Dir) AddPR(pr PR) error {
-	if pr.Number == 0 && pr.URL != "" {
-		if n, err := PRNumberFromURL(pr.URL); err == nil {
-			pr.Number = n
-		}
-	}
-
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -246,7 +226,7 @@ func (d *Dir) AddPR(pr PR) error {
 	if err != nil {
 		return err
 	}
-	s.Resources.GitHub.PRs = append(s.Resources.GitHub.PRs, pr)
+	s.Resources.AddPRToResources(pr)
 	return d.saveStateLocked(s)
 }
 
@@ -260,9 +240,11 @@ func (d *Dir) UpdatePR(prURL string, fn func(*PR)) error {
 	if err != nil {
 		return err
 	}
-	for i := range s.Resources.GitHub.PRs {
-		if s.Resources.GitHub.PRs[i].URL == prURL {
-			fn(&s.Resources.GitHub.PRs[i])
+	prs := s.Resources.PRs()
+	for i := range prs {
+		if prs[i].URL == prURL {
+			fn(&prs[i])
+			s.Resources.GitHub.PRs = prs
 			return d.saveStateLocked(s)
 		}
 	}
