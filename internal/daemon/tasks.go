@@ -149,7 +149,7 @@ func (d *Daemon) checkForNewSpecs(ctx context.Context) {
 	defer os.RemoveAll(tmpDir)
 
 	cloneDir := filepath.Join(tmpDir, "repo")
-	if err := d.gh.CloneRepo(ctx, tasksRepo, cloneDir); err != nil {
+	if err := d.vcs.CloneRepo(ctx, tasksRepo, cloneDir); err != nil {
 		log.Debug("Failed to clone tasks repo", "error", err)
 		return
 	}
@@ -263,7 +263,7 @@ func (d *Daemon) checkForNewIssues(ctx context.Context) {
 
 	log := slog.With("tasks_repo", tasksRepo)
 
-	issues, err := d.gh.ListIssues(ctx, tasksRepo)
+	issues, err := d.vcs.ListIssues(ctx, tasksRepo)
 	if err != nil {
 		log.Debug("Failed to list issues", "error", err)
 		return
@@ -299,7 +299,7 @@ func (d *Daemon) checkForNewIssues(ctx context.Context) {
 
 		if !allowed[issue.User.Login] {
 			log.Debug("Issue author not in allowed_commenters, skipping", "issue", issue.Number, "author", issue.User.Login)
-			if err := d.gh.ReactToIssue(ctx, tasksRepo, issue.Number, "confused"); err != nil {
+			if err := d.vcs.ReactToIssue(ctx, tasksRepo, issue.Number, "confused"); err != nil {
 				log.Debug("Failed to add confused reaction to issue", "issue", issue.Number, "error", err)
 			}
 			continue
@@ -341,7 +341,7 @@ func (d *Daemon) checkForNewIssues(ctx context.Context) {
 		d.running[taskName] = true
 		d.mu.Unlock()
 
-		if err := d.gh.ReactToIssue(ctx, tasksRepo, issue.Number, "rocket"); err != nil {
+		if err := d.vcs.ReactToIssue(ctx, tasksRepo, issue.Number, "rocket"); err != nil {
 			log.Debug("Failed to add rocket reaction to issue", "issue", issue.Number, "error", err)
 		}
 

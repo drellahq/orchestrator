@@ -15,6 +15,7 @@ type Comment struct {
 	User      CommentUser `json:"user"`
 	CreatedAt string      `json:"created_at"`
 	Type      CommentType `json:"-"`
+	HTMLURL   string      `json:"html_url,omitempty"`
 
 	// Review comment fields (only set for review comments)
 	Path     string `json:"path,omitempty"`

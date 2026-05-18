@@ -13,11 +13,11 @@ import (
 	"sync"
 	"time"
 
-	gh "github.com/drellabot/orchestrator/internal/github"
 	"github.com/drellabot/orchestrator/internal/gjoll"
 	"github.com/drellabot/orchestrator/internal/profile"
 	"github.com/drellabot/orchestrator/internal/prompts"
 	"github.com/drellabot/orchestrator/internal/task"
+	"github.com/drellabot/orchestrator/internal/vcs"
 )
 
 // PRRef ties a task name to one of its PRs.
@@ -37,7 +37,7 @@ type DownFunc func(ctx context.Context, taskName string) error
 // It also monitors a tasks repo for new specs in in-progress/ and spawns
 // new tasks for them.
 type Daemon struct {
-	gh           *gh.Runner
+	vcs          vcs.Provider
 	configPath   string
 	outputDir    string
 	continueFunc ContinueFunc
@@ -55,9 +55,9 @@ type Daemon struct {
 }
 
 // New creates a Daemon.
-func New(ghRunner *gh.Runner, interval time.Duration, configPath, outputDir string, allowedCommenters []string) *Daemon {
+func New(vcsProvider vcs.Provider, interval time.Duration, configPath, outputDir string, allowedCommenters []string) *Daemon {
 	d := &Daemon{
-		gh:                ghRunner,
+		vcs:               vcsProvider,
 		interval:          interval,
 		configPath:        configPath,
 		outputDir:         outputDir,
@@ -119,7 +119,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 		d.cleanupSandboxes(ctx)
 
-		refs := DiscoverPRs(d.outputDir)
+		refs := d.DiscoverPRs()
 		interval := d.getInterval()
 		if len(refs) == 0 {
 			slog.Info("No open PRs found, waiting before re-discovery", "interval", interval)
@@ -174,10 +174,10 @@ func sleep(ctx context.Context, d time.Duration) error {
 }
 
 // DiscoverPRs scans all task directories for state.json files with open PRs.
-func DiscoverPRs(outputDir string) []PRRef {
-	entries, err := os.ReadDir(outputDir)
+func (d *Daemon) DiscoverPRs() []PRRef {
+	entries, err := os.ReadDir(d.outputDir)
 	if err != nil {
-		slog.Debug("Cannot read output dir", "dir", outputDir, "error", err)
+		slog.Debug("Cannot read output dir", "dir", d.outputDir, "error", err)
 		return nil
 	}
 
@@ -187,7 +187,7 @@ func DiscoverPRs(outputDir string) []PRRef {
 			continue
 		}
 		taskName := entry.Name()
-		td, err := task.Open(outputDir, taskName)
+		td, err := task.Open(d.outputDir, taskName)
 		if err != nil {
 			continue
 		}
@@ -196,19 +196,19 @@ func DiscoverPRs(outputDir string) []PRRef {
 			slog.Debug("Cannot load state", "task", taskName, "error", err)
 			continue
 		}
-		for _, pr := range state.Resources.GitHub.PRs {
+		for _, pr := range state.Resources.PRs() {
 			if pr.Closed {
 				continue
 			}
 			// Ensure Number is populated
 			if pr.Number == 0 && pr.URL != "" {
-				if n, err := task.PRNumberFromURL(pr.URL); err == nil {
+				if n, err := d.vcs.PRNumberFromURL(pr.URL); err == nil {
 					pr.Number = n
 				}
 			}
 			refs = append(refs, PRRef{
 				TaskName:  taskName,
-				OutputDir: outputDir,
+				OutputDir: d.outputDir,
 				PR:        pr,
 			})
 		}
@@ -225,7 +225,7 @@ func (d *Daemon) processPR(ctx context.Context, ref PRRef) {
 	}
 
 	// Check if PR is still open
-	open, err := d.gh.IsPROpen(ctx, ref.PR.Repo, ref.PR.Number)
+	open, err := d.vcs.IsPROpen(ctx, ref.PR.Repo, ref.PR.Number)
 	if err != nil {
 		log.Warn("Failed to check PR state", "error", err)
 		return
@@ -268,7 +268,7 @@ func (d *Daemon) processPR(ctx context.Context, ref PRRef) {
 	d.mu.Unlock()
 
 	// Fetch comments
-	comments, err := d.gh.FetchAllComments(ctx, ref.PR.Repo, ref.PR.Number)
+	comments, err := d.vcs.FetchAllComments(ctx, ref.PR.Repo, ref.PR.Number)
 	if err != nil {
 		log.Warn("Failed to fetch comments", "error", err)
 		return
@@ -350,13 +350,13 @@ func (d *Daemon) processPR(ctx context.Context, ref PRRef) {
 
 // FilterNewComments returns comments with ID > lastCommentID and user in
 // the allowed list. The input must be sorted by ID.
-func FilterNewComments(comments []gh.Comment, lastCommentID int64, allowedCommenters []string) []gh.Comment {
+func FilterNewComments(comments []vcs.Comment, lastCommentID int64, allowedCommenters []string) []vcs.Comment {
 	allowed := make(map[string]bool, len(allowedCommenters))
 	for _, u := range allowedCommenters {
 		allowed[u] = true
 	}
 
-	var result []gh.Comment
+	var result []vcs.Comment
 	for _, c := range comments {
 		if c.ID <= lastCommentID {
 			continue
@@ -372,13 +372,13 @@ func FilterNewComments(comments []gh.Comment, lastCommentID int64, allowedCommen
 // FilterRejectedComments returns comments with ID > lastCommentID whose user
 // is NOT in the allowed list. This is the complement of FilterNewComments for
 // the same ID-filtered set.
-func FilterRejectedComments(comments []gh.Comment, lastCommentID int64, allowedCommenters []string) []gh.Comment {
+func FilterRejectedComments(comments []vcs.Comment, lastCommentID int64, allowedCommenters []string) []vcs.Comment {
 	allowed := make(map[string]bool, len(allowedCommenters))
 	for _, u := range allowedCommenters {
 		allowed[u] = true
 	}
 
-	var result []gh.Comment
+	var result []vcs.Comment
 	for _, c := range comments {
 		if c.ID <= lastCommentID {
 			continue
@@ -391,7 +391,7 @@ func FilterRejectedComments(comments []gh.Comment, lastCommentID int64, allowedC
 }
 
 // maxCommentID returns the highest comment ID across multiple slices.
-func maxCommentID(slices ...[]gh.Comment) int64 {
+func maxCommentID(slices ...[]vcs.Comment) int64 {
 	var max int64
 	for _, s := range slices {
 		for _, c := range s {
@@ -405,16 +405,16 @@ func maxCommentID(slices ...[]gh.Comment) int64 {
 
 // reactToComments adds a reaction to each comment, logging failures without
 // returning an error (reactions are best-effort and must not block task dispatch).
-func (d *Daemon) reactToComments(ctx context.Context, repo string, comments []gh.Comment, reaction string) {
+func (d *Daemon) reactToComments(ctx context.Context, repo string, comments []vcs.Comment, reaction string) {
 	for _, c := range comments {
-		if err := d.gh.ReactToComment(ctx, repo, c.ID, c.Type, reaction); err != nil {
+		if err := d.vcs.ReactToComment(ctx, repo, c.ID, c.Type, reaction); err != nil {
 			slog.Debug("Failed to add reaction", "comment_id", c.ID, "reaction", reaction, "error", err)
 		}
 	}
 }
 
 // FormatCommentsAsPrompt formats comments as a chronological prompt.
-func FormatCommentsAsPrompt(comments []gh.Comment) string {
+func FormatCommentsAsPrompt(comments []vcs.Comment) string {
 	// Ensure sorted by ID
 	sort.Slice(comments, func(i, j int) bool { return comments[i].ID < comments[j].ID })
 
@@ -426,7 +426,7 @@ func FormatCommentsAsPrompt(comments []gh.Comment) string {
 			sb.WriteString("\n---\n\n")
 		}
 		header := fmt.Sprintf("@%s at %s", c.User.Login, c.CreatedAt)
-		if c.Type == gh.ReviewComment && c.Path != "" {
+		if c.Type == vcs.ReviewComment && c.Path != "" {
 			header += fmt.Sprintf(" on %s", c.Path)
 		}
 		if c.HTMLURL != "" {
@@ -527,7 +527,7 @@ type watchPR struct {
 // WatchTask polls all open PRs for a task for new comments from allowed
 // commenters. It returns the formatted prompt on the first new comment(s)
 // found across any PR.
-func WatchTask(ctx context.Context, ghRunner *gh.Runner, outputDir, taskName string, allowedCommenters []string, pollInterval time.Duration) (string, error) {
+func WatchTask(ctx context.Context, vcsProvider vcs.Provider, outputDir, taskName string, allowedCommenters []string, pollInterval time.Duration) (string, error) {
 	td, err := task.Open(outputDir, taskName)
 	if err != nil {
 		return "", fmt.Errorf("opening task: %w", err)
@@ -539,13 +539,13 @@ func WatchTask(ctx context.Context, ghRunner *gh.Runner, outputDir, taskName str
 	}
 
 	var prs []watchPR
-	for _, pr := range state.Resources.GitHub.PRs {
+	for _, pr := range state.Resources.PRs() {
 		if pr.Closed {
 			continue
 		}
 		number := pr.Number
 		if number == 0 && pr.URL != "" {
-			if n, err := task.PRNumberFromURL(pr.URL); err == nil {
+			if n, err := vcsProvider.PRNumberFromURL(pr.URL); err == nil {
 				number = n
 			}
 		}
@@ -567,7 +567,7 @@ func WatchTask(ctx context.Context, ghRunner *gh.Runner, outputDir, taskName str
 
 	for {
 		for _, pr := range prs {
-			comments, err := ghRunner.FetchAllComments(ctx, pr.Repo, pr.Number)
+			comments, err := vcsProvider.FetchAllComments(ctx, pr.Repo, pr.Number)
 			if err != nil {
 				return "", fmt.Errorf("fetching comments for %s#%d: %w", pr.Repo, pr.Number, err)
 			}
@@ -646,7 +646,7 @@ type triggerComment struct {
 
 // WriteTriggerEntry appends a trigger entry to the transcript file
 // recording which GitHub comments triggered this sub-run.
-func WriteTriggerEntry(transcriptPath string, comments []gh.Comment) error {
+func WriteTriggerEntry(transcriptPath string, comments []vcs.Comment) error {
 	entry := triggerEntry{Type: "trigger"}
 	for _, c := range comments {
 		entry.Comments = append(entry.Comments, triggerComment{
