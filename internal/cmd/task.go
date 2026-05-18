@@ -12,13 +12,14 @@ import (
 	"time"
 
 	"github.com/drellabot/orchestrator/internal/config"
-	gh "github.com/drellabot/orchestrator/internal/github"
+	_ "github.com/drellabot/orchestrator/internal/github"
 	"github.com/drellabot/orchestrator/internal/gjoll"
 	"github.com/drellabot/orchestrator/internal/logging"
 	mcpserver "github.com/drellabot/orchestrator/internal/mcp"
 	"github.com/drellabot/orchestrator/internal/profile"
 	"github.com/drellabot/orchestrator/internal/prompts"
 	"github.com/drellabot/orchestrator/internal/task"
+	"github.com/drellabot/orchestrator/internal/vcs"
 	"github.com/spf13/cobra"
 )
 
@@ -74,7 +75,7 @@ func runTask(cmd *cobra.Command, args []string) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	ghRunner := logPreflightWarnings(ctx, cfg)
+	vcsProvider := logPreflightWarnings(ctx, cfg)
 
 	slog.Info("Task started", "task", taskName)
 
@@ -93,7 +94,7 @@ func runTask(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	return executeTask(ctx, taskName, taskDescription, taskDir, cfg, ghRunner, false, author, profileName, profileVars)
+	return executeTask(ctx, taskName, taskDescription, taskDir, cfg, vcsProvider, false, author, profileName, profileVars)
 }
 
 func continueTask(cmd *cobra.Command, args []string) error {
@@ -108,7 +109,7 @@ func continueTask(cmd *cobra.Command, args []string) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	ghRunner := logPreflightWarnings(ctx, cfg)
+	vcsProvider := logPreflightWarnings(ctx, cfg)
 
 	slog.Info("Task continuing", "task", taskName)
 
@@ -122,7 +123,7 @@ func continueTask(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("loading task state: %w", err)
 	}
 
-	return executeTask(ctx, taskName, taskDescription, taskDir, cfg, ghRunner, true, state.Author, "", nil)
+	return executeTask(ctx, taskName, taskDescription, taskDir, cfg, vcsProvider, true, state.Author, "", nil)
 }
 
 func loadConfigAndSetupLogging() (*config.Config, error) {
@@ -137,26 +138,30 @@ func loadConfigAndSetupLogging() (*config.Config, error) {
 	return cfg, nil
 }
 
-func logPreflightWarnings(ctx context.Context, cfg *config.Config) *gh.Runner {
+func logPreflightWarnings(ctx context.Context, cfg *config.Config) vcs.Provider {
 	if len(cfg.AllowedRepos) == 0 {
 		slog.Warn("allowed_repos is empty; open_pr, update_pr, and comment_on_pr tools will not be available")
 	}
 
-	ghRunner := gh.New("")
-	if _, err := ghRunner.AuthenticatedUser(ctx); err != nil {
-		slog.Warn("GitHub CLI not authenticated; open_pr, update_pr, and comment_on_pr tools will not be available", "error", err)
+	vcsProvider, err := vcs.NewProvider(cfg.VCSProvider)
+	if err != nil {
+		slog.Warn("Failed to create VCS provider", "error", err)
+		return nil
+	}
+	if _, err := vcsProvider.AuthenticatedUser(ctx); err != nil {
+		slog.Warn("VCS provider not authenticated; open_pr, update_pr, and comment_on_pr tools will not be available", "error", err)
 	}
 
-	return ghRunner
+	return vcsProvider
 }
 
-func executeTask(ctx context.Context, taskName, taskDescription string, taskDir *task.Dir, cfg *config.Config, ghRunner *gh.Runner, continueSession bool, author string, profileName string, profileVars []string) error {
+func executeTask(ctx context.Context, taskName, taskDescription string, taskDir *task.Dir, cfg *config.Config, vcsProvider vcs.Provider, continueSession bool, author string, profileName string, profileVars []string) error {
 	runner := gjoll.New("")
 
 	logger := slog.Default()
 
 	// Start MCP server
-	mcpSrv := mcpserver.New(logger, taskName, taskDir, runner, ghRunner, cfg.AllowedRepos, author, cfg.Daemon.TasksRepo)
+	mcpSrv := mcpserver.New(logger, taskName, taskDir, runner, vcsProvider, cfg.AllowedRepos, author, cfg.Daemon.TasksRepo)
 	if err := mcpSrv.Start(); err != nil {
 		return fmt.Errorf("starting MCP server: %w", err)
 	}
@@ -214,7 +219,7 @@ func executeTask(ctx context.Context, taskName, taskDescription string, taskDir 
 	}
 
 	if !continueSession {
-		if err := setupSandbox(ctx, runner, taskName, taskDir, cfg, ghRunner, profileName, profileVars); err != nil {
+		if err := setupSandbox(ctx, runner, taskName, taskDir, cfg, vcsProvider, profileName, profileVars); err != nil {
 			return fmt.Errorf("setting up sandbox: %w", err)
 		}
 		slog.Debug("Sandbox setup complete", "task", taskName)
@@ -311,7 +316,7 @@ stdbuf -oL claude --dangerously-skip-permissions -p --verbose \
 `, claudeFlags, escapedDesc, teeFlag)
 }
 
-func setupSandbox(ctx context.Context, runner *gjoll.Runner, taskName string, taskDir *task.Dir, cfg *config.Config, ghRunner *gh.Runner, profileName string, profileVars []string) error {
+func setupSandbox(ctx context.Context, runner *gjoll.Runner, taskName string, taskDir *task.Dir, cfg *config.Config, vcsProvider vcs.Provider, profileName string, profileVars []string) error {
 	// Always: configure git
 	if err := runner.SSH(ctx, taskName, "git config --global user.name Drellabot"); err != nil {
 		return fmt.Errorf("git config user.name: %w", err)
@@ -327,14 +332,14 @@ func setupSandbox(ctx context.Context, runner *gjoll.Runner, taskName string, ta
 	}
 
 	if profileName != "" {
-		return setupSandboxWithProfile(ctx, runner, taskName, taskDir, cfg, ghRunner, profileName, profileVars)
+		return setupSandboxWithProfile(ctx, runner, taskName, taskDir, cfg, vcsProvider, profileName, profileVars)
 	}
 	return setupSandboxDefault(ctx, runner, taskName)
 }
 
 // setupSandboxWithProfile applies a profile's configuration to the sandbox.
-func setupSandboxWithProfile(ctx context.Context, runner *gjoll.Runner, taskName string, taskDir *task.Dir, cfg *config.Config, ghRunner *gh.Runner, profileName string, profileVars []string) error {
-	profileSource, cleanup, err := resolveProfileSource(ctx, cfg, ghRunner)
+func setupSandboxWithProfile(ctx context.Context, runner *gjoll.Runner, taskName string, taskDir *task.Dir, cfg *config.Config, vcsProvider vcs.Provider, profileName string, profileVars []string) error {
+	profileSource, cleanup, err := resolveProfileSource(ctx, cfg, vcsProvider)
 	if err != nil {
 		return err
 	}
@@ -415,7 +420,7 @@ func parseVarFlags(flags []string) map[string]string {
 // resolveProfileSource returns the directory containing profiles.
 // If profiles_dir is set, it's used directly. Otherwise, profiles_repo
 // is shallow-cloned to a temp directory (returned cleanup removes it).
-func resolveProfileSource(ctx context.Context, cfg *config.Config, ghRunner *gh.Runner) (dir string, cleanup func(), err error) {
+func resolveProfileSource(ctx context.Context, cfg *config.Config, vcsProvider vcs.Provider) (dir string, cleanup func(), err error) {
 	if cfg.ProfilesDir != "" {
 		return cfg.ProfilesDir, nil, nil
 	}
@@ -432,7 +437,7 @@ func resolveProfileSource(ctx context.Context, cfg *config.Config, ghRunner *gh.
 	cloneDir := filepath.Join(tmpDir, "profiles")
 	slog.Debug("Cloning profiles repo", "repo", cfg.ProfilesRepo, "dest", cloneDir)
 
-	if err := ghRunner.CloneRepo(ctx, cfg.ProfilesRepo, cloneDir); err != nil {
+	if err := vcsProvider.CloneRepo(ctx, cfg.ProfilesRepo, cloneDir); err != nil {
 		os.RemoveAll(tmpDir)
 		return "", nil, fmt.Errorf("cloning profiles repo %q: %w", cfg.ProfilesRepo, err)
 	}

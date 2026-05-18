@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/drellabot/orchestrator/internal/daemon"
-	gh "github.com/drellabot/orchestrator/internal/github"
+	"github.com/drellabot/orchestrator/internal/vcs"
 	"github.com/spf13/cobra"
 )
 
@@ -52,9 +52,12 @@ func runTaskWatch(cmd *cobra.Command, args []string) error {
 		defer timeoutCancel()
 	}
 
-	ghRunner := gh.New("")
+	vcsProvider, err := vcs.NewProvider(cfg.VCSProvider)
+	if err != nil {
+		return fmt.Errorf("creating VCS provider: %w", err)
+	}
 
-	prompt, err := daemon.WatchTask(ctx, ghRunner, cfg.OutputDir, taskName, cfg.Daemon.AllowedCommenters, 5*time.Second)
+	prompt, err := daemon.WatchTask(ctx, vcsProvider, cfg.OutputDir, taskName, cfg.Daemon.AllowedCommenters, 5*time.Second)
 	if err != nil {
 		return err
 	}
