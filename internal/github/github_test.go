@@ -755,6 +755,68 @@ func TestPostReview(t *testing.T) {
 	}
 }
 
+func TestPRNumberFromURL(t *testing.T) {
+	r := New("")
+	tests := []struct {
+		url     string
+		want    int
+		wantErr bool
+	}{
+		{"https://github.com/org/repo/pull/42", 42, false},
+		{"https://github.com/org/repo/pull/1", 1, false},
+		{"https://github.com/org/repo/pull/123/files", 123, false},
+		{"https://github.com/org/repo/issues/5", 0, true},
+		{"not-a-url", 0, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.url, func(t *testing.T) {
+			got, err := r.PRNumberFromURL(tt.url)
+			if tt.wantErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("got %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRepoURL(t *testing.T) {
+	r := New("")
+	got := r.RepoURL("org/repo")
+	want := "https://github.com/org/repo.git"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestCloneRepo(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not found")
+	}
+
+	script, outFile := writeArgCapture(t, "")
+	r := New(script)
+
+	dir := t.TempDir()
+	err := r.CloneRepo(context.Background(), "org/repo", dir+"/clone")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	gotArgs := readArgs(t, outFile)
+	wantArgs := []string{"repo", "clone", "org/repo", dir + "/clone", "--", "--depth=1"}
+	if !equalArgs(gotArgs, wantArgs) {
+		t.Errorf("args = %v, want %v", gotArgs, wantArgs)
+	}
+}
+
 func TestReactToComment_IssueComment(t *testing.T) {
 	if _, err := exec.LookPath("sh"); err != nil {
 		t.Skip("sh not found")
