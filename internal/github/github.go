@@ -278,29 +278,13 @@ func (r *Runner) ReactToIssue(ctx context.Context, repo string, issueNumber int,
 	return nil
 }
 
-// ListRepoFiles lists files in a directory of a repo on a given branch.
-// It returns a slice of file paths relative to the directory.
-func (r *Runner) ListRepoFiles(ctx context.Context, repo, branch, dir string) ([]string, error) {
-	endpoint := fmt.Sprintf("/repos/%s/contents/%s?ref=%s", repo, dir, branch)
-	out, err := r.run(ctx, "", r.bin, "api", "--paginate", endpoint, "--jq", ".[].name")
+// CloneRepo performs a shallow clone of a GitHub repo into dir.
+func (r *Runner) CloneRepo(ctx context.Context, repo, dir string) error {
+	_, err := r.run(ctx, "", r.bin, "repo", "clone", repo, dir, "--", "--depth=1")
 	if err != nil {
-		return nil, fmt.Errorf("listing repo files: %w", err)
+		return fmt.Errorf("cloning repo %s: %w", repo, err)
 	}
-	out = strings.TrimSpace(out)
-	if out == "" {
-		return nil, nil
-	}
-	return strings.Split(out, "\n"), nil
-}
-
-// GetFileContent fetches the raw content of a file from a repo.
-func (r *Runner) GetFileContent(ctx context.Context, repo, branch, path string) (string, error) {
-	endpoint := fmt.Sprintf("/repos/%s/contents/%s?ref=%s", repo, path, branch)
-	out, err := r.run(ctx, "", r.bin, "api", endpoint, "--jq", ".content")
-	if err != nil {
-		return "", fmt.Errorf("getting file content: %w", err)
-	}
-	return strings.TrimSpace(out), nil
+	return nil
 }
 
 // Issue represents a GitHub issue (not a pull request).

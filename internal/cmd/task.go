@@ -6,7 +6,6 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -215,7 +214,7 @@ func executeTask(ctx context.Context, taskName, taskDescription string, taskDir 
 	}
 
 	if !continueSession {
-		if err := setupSandbox(ctx, runner, taskName, taskDir, cfg, profileName, profileVars); err != nil {
+		if err := setupSandbox(ctx, runner, taskName, taskDir, cfg, ghRunner, profileName, profileVars); err != nil {
 			return fmt.Errorf("setting up sandbox: %w", err)
 		}
 		slog.Debug("Sandbox setup complete", "task", taskName)
@@ -312,7 +311,7 @@ stdbuf -oL claude --dangerously-skip-permissions -p --verbose \
 `, claudeFlags, escapedDesc, teeFlag)
 }
 
-func setupSandbox(ctx context.Context, runner *gjoll.Runner, taskName string, taskDir *task.Dir, cfg *config.Config, profileName string, profileVars []string) error {
+func setupSandbox(ctx context.Context, runner *gjoll.Runner, taskName string, taskDir *task.Dir, cfg *config.Config, ghRunner *gh.Runner, profileName string, profileVars []string) error {
 	// Always: configure git
 	if err := runner.SSH(ctx, taskName, "git config --global user.name Drellabot"); err != nil {
 		return fmt.Errorf("git config user.name: %w", err)
@@ -328,14 +327,14 @@ func setupSandbox(ctx context.Context, runner *gjoll.Runner, taskName string, ta
 	}
 
 	if profileName != "" {
-		return setupSandboxWithProfile(ctx, runner, taskName, taskDir, cfg, profileName, profileVars)
+		return setupSandboxWithProfile(ctx, runner, taskName, taskDir, cfg, ghRunner, profileName, profileVars)
 	}
 	return setupSandboxDefault(ctx, runner, taskName)
 }
 
 // setupSandboxWithProfile applies a profile's configuration to the sandbox.
-func setupSandboxWithProfile(ctx context.Context, runner *gjoll.Runner, taskName string, taskDir *task.Dir, cfg *config.Config, profileName string, profileVars []string) error {
-	profileSource, cleanup, err := resolveProfileSource(ctx, cfg)
+func setupSandboxWithProfile(ctx context.Context, runner *gjoll.Runner, taskName string, taskDir *task.Dir, cfg *config.Config, ghRunner *gh.Runner, profileName string, profileVars []string) error {
+	profileSource, cleanup, err := resolveProfileSource(ctx, cfg, ghRunner)
 	if err != nil {
 		return err
 	}
@@ -416,7 +415,7 @@ func parseVarFlags(flags []string) map[string]string {
 // resolveProfileSource returns the directory containing profiles.
 // If profiles_dir is set, it's used directly. Otherwise, profiles_repo
 // is shallow-cloned to a temp directory (returned cleanup removes it).
-func resolveProfileSource(ctx context.Context, cfg *config.Config) (dir string, cleanup func(), err error) {
+func resolveProfileSource(ctx context.Context, cfg *config.Config, ghRunner *gh.Runner) (dir string, cleanup func(), err error) {
 	if cfg.ProfilesDir != "" {
 		return cfg.ProfilesDir, nil, nil
 	}
@@ -433,10 +432,7 @@ func resolveProfileSource(ctx context.Context, cfg *config.Config) (dir string, 
 	cloneDir := filepath.Join(tmpDir, "profiles")
 	slog.Debug("Cloning profiles repo", "repo", cfg.ProfilesRepo, "dest", cloneDir)
 
-	cmd := exec.CommandContext(ctx, "gh", "repo", "clone", cfg.ProfilesRepo, cloneDir, "--", "--depth=1")
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
+	if err := ghRunner.CloneRepo(ctx, cfg.ProfilesRepo, cloneDir); err != nil {
 		os.RemoveAll(tmpDir)
 		return "", nil, fmt.Errorf("cloning profiles repo %q: %w", cfg.ProfilesRepo, err)
 	}
