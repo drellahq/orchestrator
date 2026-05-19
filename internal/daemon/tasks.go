@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -131,8 +130,8 @@ func taskNameFromSpec(specFile string) string {
 	return name
 }
 
-// checkForNewSpecs polls the tasks repo for new spec files in in-progress/
-// and spawns tasks for any that haven't been processed yet.
+// checkForNewSpecs clones the tasks repo and scans in-progress/ for new spec
+// files, spawning tasks for any that haven't been processed yet.
 func (d *Daemon) checkForNewSpecs(ctx context.Context) {
 	tasksRepo := d.getTasksRepo()
 	if tasksRepo == "" {
@@ -141,13 +140,33 @@ func (d *Daemon) checkForNewSpecs(ctx context.Context) {
 
 	log := slog.With("tasks_repo", tasksRepo)
 
-	files, err := d.gh.ListRepoFiles(ctx, tasksRepo, "main", "in-progress")
+	// Shallow-clone the tasks repo into a temp directory.
+	tmpDir, err := os.MkdirTemp("", "specs-clone-*")
 	if err != nil {
-		log.Debug("Failed to list in-progress specs", "error", err)
+		log.Warn("Failed to create temp dir for specs clone", "error", err)
+		return
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cloneDir := filepath.Join(tmpDir, "repo")
+	if err := d.gh.CloneRepo(ctx, tasksRepo, cloneDir); err != nil {
+		log.Debug("Failed to clone tasks repo", "error", err)
 		return
 	}
 
-	if len(files) == 0 {
+	// List files in in-progress/
+	inProgressDir := filepath.Join(cloneDir, "in-progress")
+	entries, err := os.ReadDir(inProgressDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			log.Debug("No in-progress/ directory in tasks repo")
+			return
+		}
+		log.Debug("Failed to read in-progress directory", "error", err)
+		return
+	}
+
+	if len(entries) == 0 {
 		log.Debug("No specs in in-progress/")
 		return
 	}
@@ -164,7 +183,13 @@ func (d *Daemon) checkForNewSpecs(ctx context.Context) {
 		return
 	}
 
-	for _, file := range files {
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+
+		file := entry.Name()
+
 		if processed.Specs[file] {
 			continue
 		}
@@ -186,21 +211,14 @@ func (d *Daemon) checkForNewSpecs(ctx context.Context) {
 
 		log.Info("Found new spec", "spec", file, "task", taskName)
 
-		// Fetch the spec content
-		content, err := d.gh.GetFileContent(ctx, tasksRepo, "main", "in-progress/"+file)
+		// Read the spec content from the local clone
+		content, err := os.ReadFile(filepath.Join(inProgressDir, file))
 		if err != nil {
-			log.Warn("Failed to fetch spec content", "spec", file, "error", err)
+			log.Warn("Failed to read spec content", "spec", file, "error", err)
 			continue
 		}
 
-		// GitHub API returns base64-encoded content
-		decoded, err := base64.StdEncoding.DecodeString(strings.ReplaceAll(content, "\n", ""))
-		if err != nil {
-			log.Warn("Failed to decode spec content", "spec", file, "error", err)
-			continue
-		}
-
-		description := string(decoded)
+		description := string(content)
 
 		// Mark as processed before launching to avoid re-processing
 		processed.Specs[file] = true

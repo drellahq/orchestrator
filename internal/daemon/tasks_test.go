@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -97,58 +96,72 @@ func TestLoadProcessedSpecs_NullSpecs(t *testing.T) {
 	}
 }
 
-// writeTasksRepoScript creates a fake gh that simulates the GitHub API
-// for listing files in in-progress/ and fetching file content.
-// files maps filename to content. If files is nil, the listing returns empty.
-func writeTasksRepoScript(t *testing.T, files map[string]string) string {
+// setupSpecsRepo creates a bare git repo containing the given spec files inside
+// an in-progress/ directory, and returns the path to a fake "gh" script that
+// delegates "repo clone" to "git clone".
+func setupSpecsRepo(t *testing.T, specs map[string]string) string {
 	t.Helper()
 
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not found")
+	}
 	if _, err := exec.LookPath("sh"); err != nil {
 		t.Skip("sh not found")
 	}
 
-	dir := t.TempDir()
-	script := filepath.Join(dir, "gh")
-
-	// Build the name listing: one name per line
-	var nameLines string
-	for name := range files {
-		nameLines += name + "\n"
+	// Create a regular repo with files, then clone it bare.
+	workDir := t.TempDir()
+	runGit := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = workDir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test",
+			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test",
+		)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v failed: %v\n%s", args, err, out)
+		}
 	}
 
-	// Build content lookup cases: match on the endpoint argument
-	var contentCases string
-	for name, content := range files {
-		encoded := base64.StdEncoding.EncodeToString([]byte(content))
-		contentCases += fmt.Sprintf("    *contents/in-progress/%s*) printf '%%s' '%s' ;;\n", name, encoded)
+	runGit("init", "-b", "main")
+
+	// Create in-progress/ with spec files
+	inProgress := filepath.Join(workDir, "in-progress")
+	if err := os.MkdirAll(inProgress, 0755); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range specs {
+		if err := os.WriteFile(filepath.Join(inProgress, name), []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
 	}
 
+	runGit("add", ".")
+	runGit("commit", "-m", "add specs")
+
+	// Clone to a bare repo (so git clone works against it)
+	bareDir := t.TempDir()
+	cmd := exec.Command("git", "clone", "--bare", workDir, bareDir)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git clone --bare failed: %v\n%s", err, out)
+	}
+
+	// Write a fake gh script that handles "repo clone" via git clone
+	scriptDir := t.TempDir()
+	script := filepath.Join(scriptDir, "gh")
 	scriptContent := fmt.Sprintf(`#!/bin/sh
-# Determine call type from --jq argument
-jq_arg=""
-for arg in "$@"; do
-  case "$prev" in
-    --jq) jq_arg="$arg" ;;
-  esac
-  prev="$arg"
-done
-
-case "$jq_arg" in
-  ".[].name")
-    printf '%%s' '%s'
-    exit 0
-    ;;
-  ".content")
-    all="$*"
-    case "$all" in
-%s    *) printf 'not found'; exit 1 ;;
-    esac
-    exit 0
-    ;;
-esac
-
+# fake gh: only handles "repo clone <repo> <dest> -- --depth=1"
+if [ "$1" = "repo" ] && [ "$2" = "clone" ]; then
+  dest="$4"
+  shift 4
+  # skip the "--" separator
+  shift
+  exec git clone "$@" "%s" "$dest"
+fi
 printf '[]'
-`, nameLines, contentCases)
+`, bareDir)
 
 	if err := os.WriteFile(script, []byte(scriptContent), 0755); err != nil {
 		t.Fatal(err)
@@ -168,14 +181,10 @@ func TestCheckForNewSpecs_NoTasksRepo(t *testing.T) {
 }
 
 func TestCheckForNewSpecs_PicksUpNewSpec(t *testing.T) {
-	if _, err := exec.LookPath("sh"); err != nil {
-		t.Skip("sh not found")
-	}
-
 	dir := t.TempDir()
 	specContent := "# Add dark mode\n\nAdd a dark mode toggle to the app."
 
-	script := writeTasksRepoScript(t, map[string]string{
+	script := setupSpecsRepo(t, map[string]string{
 		"add-dark-mode.md": specContent,
 	})
 
@@ -229,10 +238,6 @@ func TestCheckForNewSpecs_PicksUpNewSpec(t *testing.T) {
 }
 
 func TestCheckForNewSpecs_SkipsAlreadyProcessed(t *testing.T) {
-	if _, err := exec.LookPath("sh"); err != nil {
-		t.Skip("sh not found")
-	}
-
 	dir := t.TempDir()
 
 	// Pre-mark the spec as processed
@@ -241,7 +246,7 @@ func TestCheckForNewSpecs_SkipsAlreadyProcessed(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	script := writeTasksRepoScript(t, map[string]string{
+	script := setupSpecsRepo(t, map[string]string{
 		"add-dark-mode.md": "content",
 	})
 
@@ -264,13 +269,9 @@ func TestCheckForNewSpecs_SkipsAlreadyProcessed(t *testing.T) {
 }
 
 func TestCheckForNewSpecs_SkipsRunningTask(t *testing.T) {
-	if _, err := exec.LookPath("sh"); err != nil {
-		t.Skip("sh not found")
-	}
-
 	dir := t.TempDir()
 
-	script := writeTasksRepoScript(t, map[string]string{
+	script := setupSpecsRepo(t, map[string]string{
 		"add-dark-mode.md": "content",
 	})
 
@@ -303,13 +304,9 @@ func TestCheckForNewSpecs_SkipsRunningTask(t *testing.T) {
 }
 
 func TestCheckForNewSpecs_SkipsNonMdFiles(t *testing.T) {
-	if _, err := exec.LookPath("sh"); err != nil {
-		t.Skip("sh not found")
-	}
-
 	dir := t.TempDir()
 
-	script := writeTasksRepoScript(t, map[string]string{
+	script := setupSpecsRepo(t, map[string]string{
 		"README.txt": "not a spec",
 	})
 
@@ -332,13 +329,9 @@ func TestCheckForNewSpecs_SkipsNonMdFiles(t *testing.T) {
 }
 
 func TestCheckForNewSpecs_MultipleSpecs(t *testing.T) {
-	if _, err := exec.LookPath("sh"); err != nil {
-		t.Skip("sh not found")
-	}
-
 	dir := t.TempDir()
 
-	script := writeTasksRepoScript(t, map[string]string{
+	script := setupSpecsRepo(t, map[string]string{
 		"feature-a.md": "Feature A description",
 		"feature-b.md": "Feature B description",
 	})
@@ -386,13 +379,9 @@ func TestCheckForNewSpecs_MultipleSpecs(t *testing.T) {
 }
 
 func TestCheckForNewSpecs_SetsRunningState(t *testing.T) {
-	if _, err := exec.LookPath("sh"); err != nil {
-		t.Skip("sh not found")
-	}
-
 	dir := t.TempDir()
 
-	script := writeTasksRepoScript(t, map[string]string{
+	script := setupSpecsRepo(t, map[string]string{
 		"my-task.md": "content",
 	})
 
@@ -431,14 +420,14 @@ func TestCheckForNewSpecs_SetsRunningState(t *testing.T) {
 	}
 }
 
-func TestCheckForNewSpecs_ContextCancelled(t *testing.T) {
+func TestCheckForNewSpecs_CloneFails(t *testing.T) {
 	if _, err := exec.LookPath("sh"); err != nil {
 		t.Skip("sh not found")
 	}
 
 	dir := t.TempDir()
 
-	// Use a script that will fail (simulating cancelled context / API error)
+	// Use a script that will fail (simulating clone failure)
 	scriptDir := t.TempDir()
 	script := filepath.Join(scriptDir, "gh")
 	if err := os.WriteFile(script, []byte("#!/bin/sh\nexit 1\n"), 0755); err != nil {
@@ -454,71 +443,19 @@ func TestCheckForNewSpecs_ContextCancelled(t *testing.T) {
 		return nil
 	})
 
-	// Should not panic or crash on API error
+	// Should not panic or crash on clone failure
 	d.checkForNewSpecs(context.Background())
 
 	if called {
-		t.Error("newTaskFunc should not have been called when listing fails")
-	}
-}
-
-func TestCheckForNewSpecs_ErrorFetchingContent(t *testing.T) {
-	if _, err := exec.LookPath("sh"); err != nil {
-		t.Skip("sh not found")
-	}
-
-	dir := t.TempDir()
-
-	// Script that lists files but fails on content fetch
-	scriptDir := t.TempDir()
-	countFile := filepath.Join(scriptDir, "count")
-	script := filepath.Join(scriptDir, "gh")
-
-	content := fmt.Sprintf(`#!/bin/sh
-if [ -f %s ]; then
-  n=$(cat %s)
-else
-  n=0
-fi
-echo $((n + 1)) > %s
-case $n in
-  0) printf 'broken-spec.md' ;;
-  *) exit 1 ;;
-esac
-`, countFile, countFile, countFile)
-
-	if err := os.WriteFile(script, []byte(content), 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	d := New(gh.New(script), time.Minute, "", dir, nil)
-	d.SetTasksRepo("org/tasks")
-
-	called := false
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int) error {
-		called = true
-		return nil
-	})
-
-	// Should handle gracefully - no crash
-	d.checkForNewSpecs(context.Background())
-
-	time.Sleep(50 * time.Millisecond)
-
-	if called {
-		t.Error("newTaskFunc should not have been called when content fetch fails")
+		t.Error("newTaskFunc should not have been called when clone fails")
 	}
 }
 
 func TestCheckForNewSpecs_IdempotentAcrossCalls(t *testing.T) {
-	if _, err := exec.LookPath("sh"); err != nil {
-		t.Skip("sh not found")
-	}
-
 	dir := t.TempDir()
 	specContent := "Spec content"
 
-	script := writeTasksRepoScript(t, map[string]string{
+	script := setupSpecsRepo(t, map[string]string{
 		"my-feature.md": specContent,
 	})
 
