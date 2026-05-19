@@ -101,7 +101,7 @@ output "init_script" {
     # Configure Claude Code to use Vertex AI via local proxy
     cat >> ~/.bashrc <<'RCEOF'
     export CLAUDE_CODE_USE_VERTEX=1
-    export CLOUD_ML_REGION=us-east5
+    export CLOUD_ML_REGION=global
     export ANTHROPIC_VERTEX_PROJECT_ID=itpc-gcp-core-pe-eng-claude
     export ANTHROPIC_VERTEX_BASE_URL=http://localhost:18080
     export CLAUDE_CODE_SKIP_VERTEX_AUTH=1
