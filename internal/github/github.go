@@ -287,6 +287,66 @@ func (r *Runner) CloneRepo(ctx context.Context, repo, dir string) error {
 	return nil
 }
 
+// ListRepoFiles lists files in a directory of a repo on a given branch.
+// It returns a slice of file paths relative to the directory.
+func (r *Runner) ListRepoFiles(ctx context.Context, repo, branch, dir string) ([]string, error) {
+	endpoint := fmt.Sprintf("/repos/%s/contents/%s?ref=%s", repo, dir, branch)
+	out, err := r.run(ctx, "", r.bin, "api", "--paginate", endpoint, "--jq", ".[].name")
+	if err != nil {
+		return nil, fmt.Errorf("listing repo files: %w", err)
+	}
+	out = strings.TrimSpace(out)
+	if out == "" {
+		return nil, nil
+	}
+	return strings.Split(out, "\n"), nil
+}
+
+// FetchIssue returns a single issue by number (not a pull request).
+func (r *Runner) FetchIssue(ctx context.Context, repo string, number int) (Issue, error) {
+	endpoint := fmt.Sprintf("/repos/%s/issues/%d", repo, number)
+	out, err := r.run(ctx, "", r.bin, "api", endpoint)
+	if err != nil {
+		return Issue{}, fmt.Errorf("fetching issue %d: %w", number, err)
+	}
+	var issue Issue
+	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &issue); err != nil {
+		return Issue{}, fmt.Errorf("parsing issue JSON: %w", err)
+	}
+	if issue.Number == 0 {
+		issue.Number = number
+	}
+	return issue, nil
+}
+
+// FetchIssueBody returns the markdown body of an issue.
+func (r *Runner) FetchIssueBody(ctx context.Context, repo string, number int) (string, error) {
+	issue, err := r.FetchIssue(ctx, repo, number)
+	if err != nil {
+		return "", err
+	}
+	return issue.Body, nil
+}
+
+// AuthToken returns the gh CLI OAuth token for authenticated HTTP requests.
+func (r *Runner) AuthToken(ctx context.Context) (string, error) {
+	out, err := r.run(ctx, "", r.bin, "auth", "token")
+	if err != nil {
+		return "", fmt.Errorf("getting auth token: %w", err)
+	}
+	return strings.TrimSpace(out), nil
+}
+
+// GetFileContent fetches the raw content of a file from a repo.
+func (r *Runner) GetFileContent(ctx context.Context, repo, branch, path string) (string, error) {
+	endpoint := fmt.Sprintf("/repos/%s/contents/%s?ref=%s", repo, path, branch)
+	out, err := r.run(ctx, "", r.bin, "api", endpoint, "--jq", ".content")
+	if err != nil {
+		return "", fmt.Errorf("getting file content: %w", err)
+	}
+	return strings.TrimSpace(out), nil
+}
+
 // Issue represents a GitHub issue (not a pull request).
 type Issue struct {
 	Number int         `json:"number"`

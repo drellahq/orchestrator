@@ -709,6 +709,72 @@ func TestListIssues_FieldValues(t *testing.T) {
 	}
 }
 
+func TestFetchIssue(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not found")
+	}
+
+	stdout := `{"number":7,"title":"Design task","body":"See https://github.com/user-attachments/files/1/doc.md"}`
+	script, outFile := writeArgCapture(t, stdout)
+	r := New(script)
+
+	issue, err := r.FetchIssue(context.Background(), "org/tasks", 7)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if issue.Number != 7 {
+		t.Errorf("Number = %d, want 7", issue.Number)
+	}
+	if !strings.Contains(issue.Body, "user-attachments") {
+		t.Errorf("Body = %q", issue.Body)
+	}
+
+	gotArgs := readArgs(t, outFile)
+	want := []string{"api", "/repos/org/tasks/issues/7"}
+	if !equalArgs(gotArgs, want) {
+		t.Errorf("args = %v, want %v", gotArgs, want)
+	}
+}
+
+func TestFetchIssueBody(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not found")
+	}
+
+	stdout := `{"number":1,"title":"T","body":"hello"}`
+	script, _ := writeArgCapture(t, stdout)
+	r := New(script)
+
+	body, err := r.FetchIssueBody(context.Background(), "org/tasks", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if body != "hello" {
+		t.Errorf("body = %q", body)
+	}
+}
+
+func TestAuthToken(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not found")
+	}
+
+	script, outFile := writeArgCapture(t, "gho_testtoken\n")
+	r := New(script)
+
+	tok, err := r.AuthToken(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tok != "gho_testtoken" {
+		t.Errorf("token = %q", tok)
+	}
+	gotArgs := readArgs(t, outFile)
+	if !equalArgs(gotArgs, []string{"auth", "token"}) {
+		t.Errorf("args = %v", gotArgs)
+	}
+}
+
 func TestPostReview(t *testing.T) {
 	if _, err := exec.LookPath("sh"); err != nil {
 		t.Skip("sh not found")

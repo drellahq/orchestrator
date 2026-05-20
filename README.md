@@ -168,6 +168,10 @@ Use gjoll VMs (same as cloud deployment) but with direct Anthropic API instead o
 | Nested virtualization | Not needed | May be needed |
 | Best for | Local development, iteration | Testing VM workflows, cloud-like setup |
 
+### Issue attachments
+
+When a task is created from a tasks-repo GitHub issue (`--source-repo` / `--source-issue`, set automatically by the daemon), the orchestrator scans the **task description** for `https://github.com/user-attachments/...` links (the daemon passes the full issue body, so no extra API call is needed). If the description has no such links but `--source-issue` is set, the issue body is re-fetched via `gh api` before scanning. Matching files are downloaded on the host using `gh` credentials and copied into the sandbox at `~/attachments/`. The initial Claude prompt includes a manifest listing the local filenames. Requires an authenticated `gh` on the host.
+
 ## Usage
 
 ```bash

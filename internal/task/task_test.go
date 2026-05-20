@@ -52,7 +52,7 @@ func TestCreate(t *testing.T) {
 			}
 
 			// Verify directories exist
-			for _, sub := range []string{"repo", "conversations"} {
+			for _, sub := range []string{"repo", "conversations", "attachments"} {
 				path := filepath.Join(outputDir, tt.taskName, sub)
 				info, err := os.Stat(path)
 				if err != nil {
@@ -71,6 +71,11 @@ func TestCreate(t *testing.T) {
 			wantConv := filepath.Join(outputDir, tt.taskName, "conversations")
 			if got := td.ConversationsPath(); got != wantConv {
 				t.Errorf("ConversationsPath() = %q, want %q", got, wantConv)
+			}
+
+			wantAttach := filepath.Join(outputDir, tt.taskName, "attachments")
+			if got := td.AttachmentsPath(); got != wantAttach {
+				t.Errorf("AttachmentsPath() = %q, want %q", got, wantAttach)
 			}
 
 			wantTranscript := filepath.Join(outputDir, tt.taskName, "transcript.jsonl")

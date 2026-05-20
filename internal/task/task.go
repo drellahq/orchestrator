@@ -113,7 +113,7 @@ func Create(outputDir, taskName string) (*Dir, error) {
 		return nil, fmt.Errorf("task directory already exists: %s", root)
 	}
 
-	for _, sub := range []string{"repo", "conversations"} {
+	for _, sub := range []string{"repo", "conversations", "attachments"} {
 		if err := os.MkdirAll(filepath.Join(root, sub), 0755); err != nil {
 			return nil, fmt.Errorf("creating task directory: %w", err)
 		}
@@ -145,6 +145,11 @@ func (d *Dir) RepoPath() string {
 // ConversationsPath returns the path to the conversations subdirectory.
 func (d *Dir) ConversationsPath() string {
 	return filepath.Join(d.root, "conversations")
+}
+
+// AttachmentsPath returns the path to downloaded issue attachments on the host.
+func (d *Dir) AttachmentsPath() string {
+	return filepath.Join(d.root, "attachments")
 }
 
 // TranscriptPath returns the path to the stream-json transcript file.
