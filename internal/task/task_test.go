@@ -312,6 +312,44 @@ func TestSaveMetadataEmptyAuthor(t *testing.T) {
 	}
 }
 
+func TestSaveSource(t *testing.T) {
+	outputDir := t.TempDir()
+	td, err := Create(outputDir, "source-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := td.SaveSource("org/tasks", 42); err != nil {
+		t.Fatalf("SaveSource() error: %v", err)
+	}
+
+	s, err := td.LoadState()
+	if err != nil {
+		t.Fatalf("LoadState() error: %v", err)
+	}
+	if s.Source == nil {
+		t.Fatal("Source is nil")
+	}
+	if s.Source.TasksRepo != "org/tasks" {
+		t.Errorf("TasksRepo = %q, want %q", s.Source.TasksRepo, "org/tasks")
+	}
+	if s.Source.IssueNumber != 42 {
+		t.Errorf("IssueNumber = %d, want 42", s.Source.IssueNumber)
+	}
+
+	data, err := os.ReadFile(filepath.Join(outputDir, "source-test", "state.json"))
+	if err != nil {
+		t.Fatalf("reading state.json: %v", err)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("unmarshaling state.json: %v", err)
+	}
+	if _, ok := raw["source"]; !ok {
+		t.Errorf("state.json should contain source key, got: %s", data)
+	}
+}
+
 func TestSaveMetadataPreservesExistingState(t *testing.T) {
 	outputDir := t.TempDir()
 	td, err := Create(outputDir, "preserve-test")

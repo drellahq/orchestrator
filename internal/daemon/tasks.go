@@ -12,7 +12,8 @@ import (
 )
 
 // NewTaskFunc is the function signature for launching a new task.
-type NewTaskFunc func(ctx context.Context, taskName, description string) error
+// sourceRepo and sourceIssue are set when the task is spawned from a tasks-repo issue.
+type NewTaskFunc func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int) error
 
 // processedSpecsFile is the filename used to track which specs have been picked up.
 const processedSpecsFile = "processed_specs.json"
@@ -224,7 +225,7 @@ func (d *Daemon) checkForNewSpecs(ctx context.Context) {
 				d.mu.Unlock()
 			}()
 
-			if err := d.newTaskFunc(ctx, name, desc); err != nil {
+			if err := d.newTaskFunc(ctx, name, desc, "", 0); err != nil {
 				slog.Error("task new failed", "task", name, "error", err)
 			}
 		}(taskName, description)
@@ -314,17 +315,17 @@ func (d *Daemon) checkForNewIssues(ctx context.Context) {
 		d.running[taskName] = true
 		d.mu.Unlock()
 
-		go func(name, desc string) {
+		go func(name, desc string, issueNum int) {
 			defer func() {
 				d.mu.Lock()
 				delete(d.running, name)
 				d.mu.Unlock()
 			}()
 
-			if err := d.newTaskFunc(ctx, name, desc); err != nil {
+			if err := d.newTaskFunc(ctx, name, desc, d.tasksRepo, issueNum); err != nil {
 				slog.Error("task new failed", "task", name, "error", err)
 			}
-		}(taskName, description)
+		}(taskName, description, issue.Number)
 	}
 }
 

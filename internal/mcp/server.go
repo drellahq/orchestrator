@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/drellabot/orchestrator/internal/task"
+	"github.com/drellabot/orchestrator/internal/tasksource"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -31,6 +32,7 @@ type PROpener interface {
 	CreatePR(ctx context.Context, upstream, forkOwner, branch, base, title, body string) (string, error)
 	AddCoAuthorTrailers(ctx context.Context, repoDir, upstream, base, sourceRef, trailer string) error
 	CommentOnPR(ctx context.Context, prURL, body string) error
+	CommentOnIssue(ctx context.Context, repo string, issue int, body string) error
 	UpdatePRTitle(ctx context.Context, prURL, title string) error
 	PostReview(ctx context.Context, repo string, pr int, event, body string) error
 }
@@ -115,10 +117,34 @@ func resolvePushTarget(ctx context.Context, repo string, prOpener PROpener) (pus
 	return pushTarget, forkOwner, nil
 }
 
+// resolveOriginatingIssue returns the tasks-repo and issue number for a task
+// spawned from a GitHub issue (state.Source first, then task name parsing).
+func resolveOriginatingIssue(tasksRepo, taskName string, state *task.State) (repo string, issueNum int, ok bool) {
+	if state != nil && state.Source != nil && state.Source.IssueNumber > 0 {
+		repo = state.Source.TasksRepo
+		if repo == "" {
+			repo = tasksRepo
+		}
+		if repo == "" {
+			return "", 0, false
+		}
+		return repo, state.Source.IssueNumber, true
+	}
+	if tasksRepo == "" {
+		return "", 0, false
+	}
+	n, parsed := tasksource.IssueNumberFromTaskName(tasksRepo, taskName)
+	if !parsed {
+		return "", 0, false
+	}
+	return tasksRepo, n, true
+}
+
 // New creates a new MCP server. If prOpener is non-nil and allowedRepos is
 // non-empty, the open_pr tool is registered. When author is non-empty, a
 // Co-authored-by trailer is appended to each new commit before pushing.
-func New(logger *slog.Logger, taskName string, taskDir *task.Dir, puller CodePuller, prOpener PROpener, allowedRepos []string, author string) *Server {
+// tasksRepo is the daemon tasks_repo used to link PRs back to originating issues.
+func New(logger *slog.Logger, taskName string, taskDir *task.Dir, puller CodePuller, prOpener PROpener, allowedRepos []string, author, tasksRepo string) *Server {
 	mcpServer := mcp.NewServer(&mcp.Implementation{
 		Name:    "orchestrator",
 		Version: "0.1.0",
@@ -209,6 +235,18 @@ func New(logger *slog.Logger, taskName string, taskDir *task.Dir, puller CodePul
 				Base:   input.Base,
 			}); err != nil {
 				logger.Warn("Failed to record PR in task state", "task", taskName, "error", err)
+			}
+
+			if tasksRepo != "" {
+				state, err := taskDir.LoadState()
+				if err != nil {
+					logger.Warn("Failed to load task state for issue link", "task", taskName, "error", err)
+				} else if issueRepo, issueNum, ok := resolveOriginatingIssue(tasksRepo, taskName, state); ok {
+					commentBody := fmt.Sprintf("Opened draft pull request for task `%s`:\n\n%s", taskName, prURL)
+					if err := prOpener.CommentOnIssue(ctx, issueRepo, issueNum, commentBody); err != nil {
+						logger.Warn("Failed to comment on originating issue", "task", taskName, "issue", issueNum, "error", err)
+					}
+				}
 			}
 
 			logger.Info("PR created", "task", taskName, "url", prURL, "repo", input.Repo)

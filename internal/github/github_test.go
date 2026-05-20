@@ -565,6 +565,31 @@ func TestCommentOnPR(t *testing.T) {
 	}
 }
 
+func TestCommentOnIssue(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not found")
+	}
+
+	script, outFile := writeArgCapture(t, "")
+	r := New(script)
+
+	err := r.CommentOnIssue(context.Background(), "org/tasks", 42, "Opened PR: https://github.com/org/repo/pull/1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	gotArgs := readArgs(t, outFile)
+	wantArgs := []string{"issue", "comment", "42", "--repo", "org/tasks", "--body", "Opened PR: https://github.com/org/repo/pull/1"}
+	if len(gotArgs) != len(wantArgs) {
+		t.Fatalf("got %d args %v, want %d args %v", len(gotArgs), gotArgs, len(wantArgs), wantArgs)
+	}
+	for i, want := range wantArgs {
+		if gotArgs[i] != want {
+			t.Errorf("arg[%d] = %q, want %q", i, gotArgs[i], want)
+		}
+	}
+}
+
 func TestUpdatePRTitle(t *testing.T) {
 	if _, err := exec.LookPath("sh"); err != nil {
 		t.Skip("sh not found")

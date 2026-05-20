@@ -205,6 +205,16 @@ func (r *Runner) CommentOnPR(ctx context.Context, prURL, body string) error {
 	return nil
 }
 
+// CommentOnIssue posts a comment on an issue in a repository.
+func (r *Runner) CommentOnIssue(ctx context.Context, repo string, issue int, body string) error {
+	_, err := r.run(ctx, "", r.bin, "issue", "comment", fmt.Sprintf("%d", issue),
+		"--repo", repo, "--body", body)
+	if err != nil {
+		return fmt.Errorf("commenting on issue: %w", err)
+	}
+	return nil
+}
+
 // UpdatePRTitle changes the title of a pull request identified by its URL.
 func (r *Runner) UpdatePRTitle(ctx context.Context, prURL, title string) error {
 	_, err := r.run(ctx, "", r.bin, "pr", "edit", prURL, "--title", title)

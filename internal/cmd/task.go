@@ -26,6 +26,8 @@ import (
 var author string
 var profileName string
 var profileVars []string
+var sourceRepo string
+var sourceIssue int
 
 var taskCmd = &cobra.Command{
 	Use:   "task",
@@ -54,6 +56,8 @@ func init() {
 	taskNewCmd.Flags().StringVar(&author, "author", "", "co-author to add to PR commits (e.g. \"Jane Doe <jane@example.com>\")")
 	taskNewCmd.Flags().StringVar(&profileName, "profile", "", "profile to apply to the sandbox (e.g. \"code-review\")")
 	taskNewCmd.Flags().StringSliceVar(&profileVars, "var", nil, "profile variables as KEY=VALUE (e.g. --var PROFILE_PR=42)")
+	taskNewCmd.Flags().StringVar(&sourceRepo, "source-repo", "", "tasks-repo the task was spawned from (e.g. myorg/tasks)")
+	taskNewCmd.Flags().IntVar(&sourceIssue, "source-issue", 0, "GitHub issue number in the tasks-repo")
 	taskCmd.AddCommand(taskNewCmd)
 	taskCmd.AddCommand(taskContinueCmd)
 	taskCmd.AddCommand(taskWatchCmd)
@@ -82,6 +86,12 @@ func runTask(cmd *cobra.Command, args []string) error {
 
 	if err := taskDir.SaveMetadata(taskName, taskDescription, author, time.Now()); err != nil {
 		return fmt.Errorf("saving metadata: %w", err)
+	}
+
+	if sourceRepo != "" && sourceIssue > 0 {
+		if err := taskDir.SaveSource(sourceRepo, sourceIssue); err != nil {
+			return fmt.Errorf("saving source issue: %w", err)
+		}
 	}
 
 	return executeTask(ctx, taskName, taskDescription, taskDir, cfg, ghRunner, false, author, profileName, profileVars)
@@ -147,7 +157,7 @@ func executeTask(ctx context.Context, taskName, taskDescription string, taskDir 
 	logger := slog.Default()
 
 	// Start MCP server
-	mcpSrv := mcpserver.New(logger, taskName, taskDir, runner, ghRunner, cfg.AllowedRepos, author)
+	mcpSrv := mcpserver.New(logger, taskName, taskDir, runner, ghRunner, cfg.AllowedRepos, author, cfg.Daemon.TasksRepo)
 	if err := mcpSrv.Start(); err != nil {
 		return fmt.Errorf("starting MCP server: %w", err)
 	}

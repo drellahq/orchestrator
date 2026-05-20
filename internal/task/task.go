@@ -54,6 +54,12 @@ type Resources struct {
 	GitHub GitHubResources `json:"github"`
 }
 
+// Source records the tasks-repo GitHub issue a task was spawned from.
+type Source struct {
+	TasksRepo   string `json:"tasks_repo,omitempty"`
+	IssueNumber int    `json:"issue_number,omitempty"`
+}
+
 // State holds task metadata and mutable state persisted to state.json.
 type State struct {
 	Name        string    `json:"name"`
@@ -61,6 +67,7 @@ type State struct {
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 	Author      string    `json:"author,omitempty"`
+	Source      *Source   `json:"source,omitempty"`
 	Resources   Resources `json:"resources"`
 }
 
@@ -172,6 +179,22 @@ func (d *Dir) SaveMetadata(name, description, author string, createdAt time.Time
 	s.Author = author
 	s.CreatedAt = createdAt
 	s.UpdatedAt = createdAt
+	return d.saveStateLocked(s)
+}
+
+// SaveSource records the tasks-repo issue this task was spawned from.
+func (d *Dir) SaveSource(tasksRepo string, issueNumber int) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	s, err := d.loadStateLocked()
+	if err != nil {
+		return err
+	}
+	s.Source = &Source{
+		TasksRepo:   tasksRepo,
+		IssueNumber: issueNumber,
+	}
 	return d.saveStateLocked(s)
 }
 
