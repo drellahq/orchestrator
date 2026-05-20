@@ -60,6 +60,12 @@ type stubPROpener struct {
 	gotCommentURL string
 	gotCommentBody string
 
+	issueCommentErr     error
+	issueCommentCalled  bool
+	gotIssueCommentRepo string
+	gotIssueCommentNum  int
+	gotIssueCommentBody string
+
 	titleErr       error
 	titleCalled    bool
 	gotTitleURL    string
@@ -111,6 +117,14 @@ func (s *stubPROpener) CommentOnPR(_ context.Context, prURL, body string) error 
 	return s.commentErr
 }
 
+func (s *stubPROpener) CommentOnIssue(_ context.Context, repo string, issue int, body string) error {
+	s.issueCommentCalled = true
+	s.gotIssueCommentRepo = repo
+	s.gotIssueCommentNum = issue
+	s.gotIssueCommentBody = body
+	return s.issueCommentErr
+}
+
 func (s *stubPROpener) UpdatePRTitle(_ context.Context, prURL, title string) error {
 	s.titleCalled = true
 	s.gotTitleURL = prURL
@@ -140,7 +154,7 @@ func startTestServer(t *testing.T, puller CodePuller, prOpener PROpener, allowed
 		author = authors[0]
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	s := New(logger, "test-task", td, puller, prOpener, allowedRepos, author)
+	s := New(logger, "test-task", td, puller, prOpener, allowedRepos, author, "")
 	if err := s.StartOn("127.0.0.1:0"); err != nil {
 		t.Fatalf("StartOn() error: %v", err)
 	}
@@ -178,7 +192,7 @@ func TestStartAllocatesDynamicPort(t *testing.T) {
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 
-	s1 := New(logger, "task-1", td, nil, nil, nil, "")
+	s1 := New(logger, "task-1", td, nil, nil, nil, "", "")
 	if err := s1.Start(); err != nil {
 		t.Fatalf("Start() error: %v", err)
 	}
@@ -190,7 +204,7 @@ func TestStartAllocatesDynamicPort(t *testing.T) {
 
 	dir2 := t.TempDir()
 	td2, _ := task.Create(dir2, "dyn-port-test-2")
-	s2 := New(logger, "task-2", td2, nil, nil, nil, "")
+	s2 := New(logger, "task-2", td2, nil, nil, nil, "", "")
 	if err := s2.Start(); err != nil {
 		t.Fatalf("Start() second server: %v", err)
 	}
@@ -606,6 +620,121 @@ func TestOpenPRToolWithAuthor(t *testing.T) {
 			t.Errorf("error text %q does not mention filter-branch", text)
 		}
 	})
+}
+
+func TestResolveOriginatingIssue(t *testing.T) {
+	state := &task.State{
+		Source: &task.Source{TasksRepo: "org/tasks", IssueNumber: 42},
+	}
+	repo, num, ok := resolveOriginatingIssue("org/tasks", "tasks-42-add_dark_mode", state)
+	if !ok || repo != "org/tasks" || num != 42 {
+		t.Errorf("got (%q, %d, %v), want (org/tasks, 42, true)", repo, num, ok)
+	}
+
+	repo, num, ok = resolveOriginatingIssue("org/tasks", "tasks-42-add_dark_mode", &task.State{})
+	if !ok || num != 42 {
+		t.Errorf("fallback parse: got (%q, %d, %v), want (org/tasks, 42, true)", repo, num, ok)
+	}
+
+	_, _, ok = resolveOriginatingIssue("", "tasks-42-add_dark_mode", &task.State{})
+	if ok {
+		t.Error("expected false when tasksRepo is empty and no state source")
+	}
+}
+
+func TestOpenPRLinksOriginatingIssue(t *testing.T) {
+	puller := &stubPuller{}
+	opener := &stubPROpener{
+		user:     "testuser",
+		forkName: "testuser/org",
+		prURL:    "https://github.com/org/repo/pull/99",
+	}
+
+	dir := t.TempDir()
+	td, err := task.Create(dir, "tasks-42-add_dark_mode")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := td.SaveSource("org/tasks", 42); err != nil {
+		t.Fatal(err)
+	}
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	s := New(logger, "tasks-42-add_dark_mode", td, puller, opener, []string{"org/*"}, "", "org/tasks")
+	if err := s.StartOn("127.0.0.1:0"); err != nil {
+		t.Fatalf("StartOn() error: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := s.Stop(context.Background()); err != nil {
+			t.Errorf("Stop() error: %v", err)
+		}
+	})
+
+	endpoint := fmt.Sprintf("http://%s", s.Addr().String())
+	session := connectClient(t, endpoint)
+
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "open_pr",
+		Arguments: map[string]any{
+			"path":   "/test/project",
+			"repo":   "org/repo",
+			"branch": "fix-bug",
+			"title":  "Fix bug",
+			"body":   "body",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool() error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected error result")
+	}
+
+	if !opener.issueCommentCalled {
+		t.Fatal("CommentOnIssue was not called")
+	}
+	if opener.gotIssueCommentRepo != "org/tasks" {
+		t.Errorf("issue repo = %q, want org/tasks", opener.gotIssueCommentRepo)
+	}
+	if opener.gotIssueCommentNum != 42 {
+		t.Errorf("issue number = %d, want 42", opener.gotIssueCommentNum)
+	}
+	wantBody := "Opened draft pull request for task `tasks-42-add_dark_mode`:\n\nhttps://github.com/org/repo/pull/99"
+	if opener.gotIssueCommentBody != wantBody {
+		t.Errorf("comment body = %q, want %q", opener.gotIssueCommentBody, wantBody)
+	}
+}
+
+func TestOpenPRSkipsIssueLinkWithoutSource(t *testing.T) {
+	puller := &stubPuller{}
+	opener := &stubPROpener{
+		user:     "testuser",
+		forkName: "testuser/org",
+		prURL:    "https://github.com/org/repo/pull/99",
+	}
+
+	_, _, endpoint := startTestServer(t, puller, opener, []string{"org/*"})
+	session := connectClient(t, endpoint)
+
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "open_pr",
+		Arguments: map[string]any{
+			"path":   "/test/project",
+			"repo":   "org/repo",
+			"branch": "fix-bug",
+			"title":  "Fix bug",
+			"body":   "body",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool() error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected error result")
+	}
+	if opener.issueCommentCalled {
+		t.Error("CommentOnIssue should not be called without originating issue")
+	}
 }
 
 func TestUpdatePRToolWithAuthor(t *testing.T) {

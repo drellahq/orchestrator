@@ -287,10 +287,17 @@ func TestProcessPR_SkipsClosedPR(t *testing.T) {
 	}
 }
 
+func TestBuildNewTaskArgs_WithSourceIssue(t *testing.T) {
+	args := buildNewTaskArgs("/etc/config.yaml", "tasks-42-add_dark_mode", "Fix it", "org/tasks", 42)
+
+	assertContains(t, args, "--source-repo", "org/tasks")
+	assertContains(t, args, "--source-issue", "42")
+}
+
 func TestBuildNewTaskArgs_WithFrontMatter(t *testing.T) {
 	description := "---\nprofile: code-review\nrepo: org/repo\npr: 42\n---\n\nReview this pull request."
 
-	args := buildNewTaskArgs("/etc/config.yaml", "my-task", description)
+	args := buildNewTaskArgs("/etc/config.yaml", "my-task", description, "", 0)
 
 	// Should have: task new --config <path> --profile code-review --var ... --var ... <name> <desc>
 	assertContains(t, args, "--config", "/etc/config.yaml")
@@ -317,7 +324,7 @@ func TestBuildNewTaskArgs_WithFrontMatter(t *testing.T) {
 func TestBuildNewTaskArgs_NoFrontMatter(t *testing.T) {
 	description := "Just a regular task description."
 
-	args := buildNewTaskArgs("/etc/config.yaml", "my-task", description)
+	args := buildNewTaskArgs("/etc/config.yaml", "my-task", description, "", 0)
 
 	// Should have: task new --config <path> <name> <desc>
 	if len(args) != 6 {
@@ -346,7 +353,7 @@ func TestBuildNewTaskArgs_NoFrontMatter(t *testing.T) {
 func TestBuildNewTaskArgs_MalformedFrontMatter(t *testing.T) {
 	description := "---\n{{invalid yaml\n---\n\nBody."
 
-	args := buildNewTaskArgs("/etc/config.yaml", "my-task", description)
+	args := buildNewTaskArgs("/etc/config.yaml", "my-task", description, "", 0)
 
 	// Should fall back to raw description
 	if args[len(args)-1] != description {
@@ -367,7 +374,7 @@ func TestBuildNewTaskArgs_MalformedFrontMatter(t *testing.T) {
 func TestBuildNewTaskArgs_ProfileOnly(t *testing.T) {
 	description := "---\nprofile: deploy\n---\n\nDeploy the service."
 
-	args := buildNewTaskArgs("/etc/config.yaml", "my-task", description)
+	args := buildNewTaskArgs("/etc/config.yaml", "my-task", description, "", 0)
 
 	assertContains(t, args, "--profile", "deploy")
 
@@ -386,7 +393,7 @@ func TestBuildNewTaskArgs_ProfileOnly(t *testing.T) {
 func TestBuildNewTaskArgs_VarsOnly(t *testing.T) {
 	description := "---\nrepo: org/repo\n---\n\nBody."
 
-	args := buildNewTaskArgs("/etc/config.yaml", "my-task", description)
+	args := buildNewTaskArgs("/etc/config.yaml", "my-task", description, "", 0)
 
 	// No --profile flag expected
 	for _, a := range args {

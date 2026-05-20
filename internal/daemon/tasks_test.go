@@ -184,7 +184,7 @@ func TestCheckForNewSpecs_PicksUpNewSpec(t *testing.T) {
 	var mu sync.Mutex
 	var capturedTasks []struct{ name, desc string }
 	done := make(chan struct{}, 1)
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description string) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int) error {
 		mu.Lock()
 		capturedTasks = append(capturedTasks, struct{ name, desc string }{taskName, description})
 		mu.Unlock()
@@ -248,7 +248,7 @@ func TestCheckForNewSpecs_SkipsAlreadyProcessed(t *testing.T) {
 	d.SetTasksRepo("org/tasks")
 
 	called := false
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description string) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int) error {
 		called = true
 		return nil
 	})
@@ -278,7 +278,7 @@ func TestCheckForNewSpecs_SkipsRunningTask(t *testing.T) {
 	d.SetTaskRunning("add-dark-mode", true)
 
 	called := false
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description string) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int) error {
 		called = true
 		return nil
 	})
@@ -316,7 +316,7 @@ func TestCheckForNewSpecs_SkipsNonMdFiles(t *testing.T) {
 	d.SetTasksRepo("org/tasks")
 
 	called := false
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description string) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int) error {
 		called = true
 		return nil
 	})
@@ -348,7 +348,7 @@ func TestCheckForNewSpecs_MultipleSpecs(t *testing.T) {
 	var mu sync.Mutex
 	var capturedNames []string
 	done := make(chan struct{}, 2)
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description string) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int) error {
 		mu.Lock()
 		capturedNames = append(capturedNames, taskName)
 		mu.Unlock()
@@ -400,7 +400,7 @@ func TestCheckForNewSpecs_SetsRunningState(t *testing.T) {
 
 	started := make(chan struct{})
 	finish := make(chan struct{})
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description string) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int) error {
 		close(started)
 		<-finish
 		return nil
@@ -448,7 +448,7 @@ func TestCheckForNewSpecs_ContextCancelled(t *testing.T) {
 	d.SetTasksRepo("org/tasks")
 
 	called := false
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description string) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int) error {
 		called = true
 		return nil
 	})
@@ -494,7 +494,7 @@ esac
 	d.SetTasksRepo("org/tasks")
 
 	called := false
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description string) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int) error {
 		called = true
 		return nil
 	})
@@ -527,7 +527,7 @@ func TestCheckForNewSpecs_IdempotentAcrossCalls(t *testing.T) {
 	var mu sync.Mutex
 	callCount := 0
 	done := make(chan struct{}, 2)
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description string) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int) error {
 		mu.Lock()
 		callCount++
 		mu.Unlock()
@@ -726,11 +726,17 @@ func TestCheckForNewIssues_PicksUpNewIssue(t *testing.T) {
 	d.SetTasksRepo("org/tasks")
 
 	var mu sync.Mutex
-	var capturedTasks []struct{ name, desc string }
+	var capturedTasks []struct {
+		name, desc, sourceRepo string
+		sourceIssue          int
+	}
 	done := make(chan struct{}, 1)
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description string) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int) error {
 		mu.Lock()
-		capturedTasks = append(capturedTasks, struct{ name, desc string }{taskName, description})
+		capturedTasks = append(capturedTasks, struct {
+			name, desc, sourceRepo string
+			sourceIssue          int
+		}{taskName, description, sourceRepo, sourceIssue})
 		mu.Unlock()
 		done <- struct{}{}
 		return nil
@@ -757,6 +763,12 @@ func TestCheckForNewIssues_PicksUpNewIssue(t *testing.T) {
 	}
 	if capturedTasks[0].desc != "Please add a dark mode toggle." {
 		t.Errorf("task description = %q, want %q", capturedTasks[0].desc, "Please add a dark mode toggle.")
+	}
+	if capturedTasks[0].sourceRepo != "org/tasks" {
+		t.Errorf("sourceRepo = %q, want org/tasks", capturedTasks[0].sourceRepo)
+	}
+	if capturedTasks[0].sourceIssue != 7 {
+		t.Errorf("sourceIssue = %d, want 7", capturedTasks[0].sourceIssue)
 	}
 
 	// Verify issue is marked as processed
@@ -786,7 +798,7 @@ func TestCheckForNewIssues_FallsBackToTitle(t *testing.T) {
 
 	var capturedDesc string
 	done := make(chan struct{}, 1)
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description string) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int) error {
 		capturedDesc = description
 		done <- struct{}{}
 		return nil
@@ -821,7 +833,7 @@ func TestCheckForNewIssues_SkipsUnallowedAuthor(t *testing.T) {
 	d.SetTasksRepo("org/tasks")
 
 	called := false
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description string) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int) error {
 		called = true
 		return nil
 	})
@@ -866,7 +878,7 @@ func TestCheckForNewIssues_SkipsAlreadyProcessed(t *testing.T) {
 	d.SetTasksRepo("org/tasks")
 
 	called := false
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description string) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int) error {
 		called = true
 		return nil
 	})
@@ -896,7 +908,7 @@ func TestCheckForNewIssues_SkipsRunningTask(t *testing.T) {
 	d.SetTaskRunning("tasks-7-add_dark_mode", true)
 
 	called := false
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description string) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int) error {
 		called = true
 		return nil
 	})
@@ -935,7 +947,7 @@ func TestCheckForNewIssues_FiltersPullRequests(t *testing.T) {
 	var mu sync.Mutex
 	var capturedNames []string
 	done := make(chan struct{}, 2)
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description string) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int) error {
 		mu.Lock()
 		capturedNames = append(capturedNames, taskName)
 		mu.Unlock()
@@ -983,7 +995,7 @@ func TestCheckForNewIssues_MultipleIssues(t *testing.T) {
 	var mu sync.Mutex
 	var capturedNames []string
 	done := make(chan struct{}, 2)
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description string) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int) error {
 		mu.Lock()
 		capturedNames = append(capturedNames, taskName)
 		mu.Unlock()
@@ -1036,7 +1048,7 @@ func TestCheckForNewIssues_IdempotentAcrossCalls(t *testing.T) {
 	var mu sync.Mutex
 	callCount := 0
 	done := make(chan struct{}, 2)
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description string) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int) error {
 		mu.Lock()
 		callCount++
 		mu.Unlock()
@@ -1081,7 +1093,7 @@ func TestCheckForNewIssues_SetsRunningState(t *testing.T) {
 
 	started := make(chan struct{})
 	finish := make(chan struct{})
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description string) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int) error {
 		close(started)
 		<-finish
 		return nil
