@@ -3,6 +3,9 @@ package cmd
 import (
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/drellabot/orchestrator/internal/task"
 )
 
 func TestParseVarFlags(t *testing.T) {
@@ -127,5 +130,38 @@ func TestBuildRunScript(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestResolveTaskSource(t *testing.T) {
+	outputDir := t.TempDir()
+	td, err := task.Create(outputDir, "my-task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := td.SaveMetadata("my-task", "desc", "", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, ok := resolveTaskSource(td, "org/tasks", 42, ""); !ok {
+		t.Error("expected ok from explicit source")
+	}
+	if repo, num, ok := resolveTaskSource(td, "org/tasks", 42, ""); !ok || repo != "org/tasks" || num != 42 {
+		t.Errorf("got %q %d %v", repo, num, ok)
+	}
+
+	if err := td.SaveSource("org/tasks", 99); err != nil {
+		t.Fatal(err)
+	}
+	if repo, num, ok := resolveTaskSource(td, "", 0, "fallback/tasks"); !ok || repo != "org/tasks" || num != 99 {
+		t.Errorf("from state: got %q %d %v", repo, num, ok)
+	}
+
+	td2, err := task.Create(outputDir, "other-task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, ok := resolveTaskSource(td2, "", 0, ""); ok {
+		t.Error("expected not ok without source")
 	}
 }

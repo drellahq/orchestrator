@@ -14,6 +14,7 @@ import (
 
 	"github.com/drellabot/orchestrator/internal/config"
 	gh "github.com/drellabot/orchestrator/internal/github"
+	"github.com/drellabot/orchestrator/internal/issueattachments"
 	"github.com/drellabot/orchestrator/internal/logging"
 	"github.com/drellabot/orchestrator/internal/sandbox"
 	mcpserver "github.com/drellabot/orchestrator/internal/mcp"
@@ -175,6 +176,20 @@ func executeTask(ctx context.Context, taskName, taskDescription string, taskDir 
 	mcpTunnel := fmt.Sprintf("%d:localhost:%d", mcpserver.MCPRemotePort, mcpPort)
 	slog.Debug("MCP server started", "task", taskName, "port", mcpPort)
 
+	var attachmentFiles []issueattachments.DownloadedFile
+	if !continueSession {
+		repo, num, ok := resolveTaskSource(taskDir, sourceRepo, sourceIssue, cfg.Daemon.TasksRepo)
+		if !ok {
+			repo, num = "", 0
+		}
+		files, err := issueattachments.Sync(ctx, ghRunner, taskDescription, repo, num, taskDir.AttachmentsPath())
+		if err != nil {
+			slog.Warn("Failed to sync issue attachments", "repo", repo, "issue", num, "error", err)
+		} else {
+			attachmentFiles = files
+		}
+	}
+
 	if continueSession {
 		slog.Info("Resuming sandbox", "task", taskName)
 		if err := runner.Start(ctx, taskName); err != nil {
@@ -229,7 +244,13 @@ func executeTask(ctx context.Context, taskName, taskDescription string, taskDir 
 			return fmt.Errorf("setting up sandbox: %w", err)
 		}
 		slog.Debug("Sandbox setup complete", "task", taskName)
+
+		if err := copyAttachmentsToSandbox(ctx, runner, taskName, attachmentFiles); err != nil {
+			return fmt.Errorf("copying attachments to sandbox: %w", err)
+		}
 	}
+
+	taskDescription += issueattachments.Manifest(attachmentFiles)
 
 	// Build the Claude run script
 	slog.Info("Running Claude", "task", taskName)
@@ -472,4 +493,39 @@ func resolveProfileSource(ctx context.Context, cfg *config.Config) (dir string, 
 	}
 
 	return cloneDir, func() { os.RemoveAll(tmpDir) }, nil
+}
+
+func resolveTaskSource(taskDir *task.Dir, explicitRepo string, explicitIssue int, defaultTasksRepo string) (repo string, issueNum int, ok bool) {
+	if explicitRepo != "" && explicitIssue > 0 {
+		return explicitRepo, explicitIssue, true
+	}
+	state, err := taskDir.LoadState()
+	if err != nil || state.Source == nil || state.Source.IssueNumber == 0 {
+		return "", 0, false
+	}
+	repo = state.Source.TasksRepo
+	if repo == "" {
+		repo = defaultTasksRepo
+	}
+	if repo == "" {
+		return "", 0, false
+	}
+	return repo, state.Source.IssueNumber, true
+}
+
+func copyAttachmentsToSandbox(ctx context.Context, runner sandbox.Runner, taskName string, files []issueattachments.DownloadedFile) error {
+	if len(files) == 0 {
+		return nil
+	}
+	if err := runner.SSH(ctx, taskName, "mkdir -p ~/attachments"); err != nil {
+		return fmt.Errorf("mkdir ~/attachments: %w", err)
+	}
+	for _, f := range files {
+		dest := ":~/attachments/" + f.Filename
+		if err := runner.Cp(ctx, taskName, f.LocalPath, dest); err != nil {
+			return fmt.Errorf("copying %q: %w", f.Filename, err)
+		}
+		slog.Debug("Copied attachment to sandbox", "task", taskName, "file", f.Filename)
+	}
+	return nil
 }
