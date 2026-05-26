@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/drellabot/orchestrator/internal/shellutil"
 )
 
 // PodmanRunner implements Runner using podman containers as sandboxes.
@@ -71,7 +73,11 @@ func (r *PodmanRunner) Up(ctx context.Context, name string, config string) error
 	if r.anthropicKey != "" {
 		keyPath := r.anthropicKey
 		if strings.HasPrefix(keyPath, "~/") {
-			home, _ := os.UserHomeDir()
+			home, err := os.UserHomeDir()
+			if err != nil {
+				_ = r.Down(context.Background(), name)
+				return fmt.Errorf("resolving home directory for API key path: %w", err)
+			}
 			keyPath = filepath.Join(home, keyPath[2:])
 		}
 
@@ -185,6 +191,14 @@ func (r *PodmanRunner) Stop(ctx context.Context, name string) error {
 // Down destroys a container.
 func (r *PodmanRunner) Down(ctx context.Context, name string) error {
 	return r.run(ctx, "rm", "-f", name)
+}
+
+// HelperScripts returns shell script contents for sandbox-cp and sandbox-ssh.
+func (r *PodmanRunner) HelperScripts(name string) (cpScript, sshScript string) {
+	quoted := shellutil.Quote(name)
+	cpScript = "#!/bin/bash\nset -euo pipefail\npodman cp \"$1\" \"$2\"\n"
+	sshScript = fmt.Sprintf("#!/bin/bash\nset -euo pipefail\npodman exec %s \"$@\"\n", quoted)
+	return
 }
 
 func (r *PodmanRunner) run(ctx context.Context, args ...string) error {

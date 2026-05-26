@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"context"
+	"fmt"
 	"io"
 )
 
@@ -42,17 +43,22 @@ type Runner interface {
 
 	// Down destroys a sandbox and all its resources.
 	Down(ctx context.Context, name string) error
+
+	// HelperScripts returns shell script contents for sandbox-cp and
+	// sandbox-ssh helpers, used by profile setup.sh scripts. The sandbox
+	// name is properly shell-quoted in the generated scripts.
+	HelperScripts(name string) (cpScript, sshScript string)
 }
 
 // NewFromConfig creates the appropriate Runner based on configuration.
-func NewFromConfig(backend, gjollEnv, podmanImage, anthropicKeyFile string, mcpPort int) Runner {
+// Returns an error if the backend name is not recognized.
+func NewFromConfig(backend, gjollEnv, podmanImage, anthropicKeyFile string, mcpPort int) (Runner, error) {
 	switch backend {
 	case "podman":
-		return NewPodman(podmanImage, anthropicKeyFile, mcpPort)
-	case "gjoll":
-		return NewGjollAdapter(gjollEnv)
+		return NewPodman(podmanImage, anthropicKeyFile, mcpPort), nil
+	case "gjoll", "":
+		return NewGjollAdapter(""), nil
 	default:
-		// Default to gjoll for backward compatibility
-		return NewGjollAdapter(gjollEnv)
+		return nil, fmt.Errorf("unknown sandbox backend %q (supported: gjoll, podman)", backend)
 	}
 }

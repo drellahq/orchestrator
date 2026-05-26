@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/drellabot/orchestrator/internal/sandbox"
+	"github.com/drellabot/orchestrator/internal/shellutil"
 )
 
 // Apply writes the profile's configuration into a sandbox.
@@ -22,16 +23,21 @@ import (
 func Apply(ctx context.Context, p *Profile, runner sandbox.Runner, sbx string, taskDir string, basePrompt string, vars map[string]string) error {
 	// 1. Write combined CLAUDE.md
 	claudemd := basePrompt + "\n\n# Profile: " + p.Name + "\n\n" + p.Claudemd
-	if err := writeToSandbox(ctx, runner, sbx, claudemd, ":~/.claude/CLAUDE.md"); err != nil {
+	if err := writeToSandbox(ctx, runner, sbx, claudemd, sbx+":/home/claude/.claude/CLAUDE.md"); err != nil {
 		return fmt.Errorf("writing CLAUDE.md: %w", err)
 	}
 
 	// 2. Copy settings.json if present
 	if p.Settings != "" {
-		if err := runner.Cp(ctx, sbx, p.Settings, ":~/.claude/settings.json"); err != nil {
+		if err := runner.Cp(ctx, sbx, p.Settings, sbx+":/home/claude/.claude/settings.json"); err != nil {
 			return fmt.Errorf("copying settings.json: %w", err)
 		}
 		slog.Debug("Copied profile settings.json", "profile", p.Name)
+	}
+
+	// Fix ownership of all files copied as root into claude's home
+	if err := runner.SSH(ctx, sbx, "bash", "-c", "chown -R claude:claude /home/claude/.claude"); err != nil {
+		return fmt.Errorf("fixing .claude ownership: %w", err)
 	}
 
 	// 3. Register MCP servers from mcp.yaml
@@ -82,18 +88,21 @@ func registerMCPServer(ctx context.Context, runner sandbox.Runner, sbx string, s
 	case "stdio":
 		args = []string{"claude", "mcp", "add", "--transport", "stdio"}
 		if server.Scope != "" {
-			args = append(args, "--scope", server.Scope)
+			args = append(args, "--scope", shellutil.Quote(server.Scope))
 		}
-		args = append(args, server.Name, server.Command)
-		args = append(args, server.Args...)
+		args = append(args, shellutil.Quote(server.Name), shellutil.Quote(server.Command))
+		for _, a := range server.Args {
+			args = append(args, shellutil.Quote(a))
+		}
 	case "http":
 		args = []string{"claude", "mcp", "add", "--transport", "http"}
 		if server.Scope != "" {
-			args = append(args, "--scope", server.Scope)
+			args = append(args, "--scope", shellutil.Quote(server.Scope))
 		}
-		args = append(args, server.Name, server.URL)
+		args = append(args, shellutil.Quote(server.Name), shellutil.Quote(server.URL))
 	}
-	return runner.SSH(ctx, sbx, "bash", "-c", fmt.Sprintf("su - claude -c '%s'", strings.Join(args, " ")))
+	innerCmd := strings.Join(args, " ")
+	return runner.SSH(ctx, sbx, "bash", "-c", "su - claude -c "+shellutil.Quote(innerCmd))
 }
 
 // runSetup executes setup.sh on the host with helper scripts on PATH.
@@ -105,23 +114,13 @@ func runSetup(ctx context.Context, runner sandbox.Runner, sbx, setupPath, taskDi
 	}
 	defer os.RemoveAll(helpersDir)
 
-	gjollBin := "gjoll"
+	cpScript, sshScript := runner.HelperScripts(sbx)
 
-	// Write sandbox-cp helper
-	sandboxCp := fmt.Sprintf(`#!/bin/bash
-set -euo pipefail
-%s cp %s "$1" "$2"
-`, gjollBin, sbx)
-	if err := os.WriteFile(filepath.Join(helpersDir, "sandbox-cp"), []byte(sandboxCp), 0755); err != nil {
+	if err := os.WriteFile(filepath.Join(helpersDir, "sandbox-cp"), []byte(cpScript), 0755); err != nil {
 		return fmt.Errorf("writing sandbox-cp: %w", err)
 	}
 
-	// Write sandbox-ssh helper
-	sandboxSSH := fmt.Sprintf(`#!/bin/bash
-set -euo pipefail
-%s ssh %s -- "$@"
-`, gjollBin, sbx)
-	if err := os.WriteFile(filepath.Join(helpersDir, "sandbox-ssh"), []byte(sandboxSSH), 0755); err != nil {
+	if err := os.WriteFile(filepath.Join(helpersDir, "sandbox-ssh"), []byte(sshScript), 0755); err != nil {
 		return fmt.Errorf("writing sandbox-ssh: %w", err)
 	}
 
