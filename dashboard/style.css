@@ -138,6 +138,13 @@ main {
   box-shadow: 0 0 12px rgba(57, 255, 20, 0.05);
 }
 
+.task-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
 .task-name {
   font-size: 1rem;
   font-weight: 600;
@@ -189,6 +196,37 @@ main {
 .pr-closed {
   color: var(--red);
   border-color: #6e2d28;
+}
+
+/* --- Status Badge --- */
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.1rem 0.5rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  border: 1px solid;
+  white-space: nowrap;
+  letter-spacing: 0.03em;
+}
+.status-in_progress {
+  color: var(--green);
+  border-color: var(--green-dim);
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+.status-waiting {
+  color: var(--amber);
+  border-color: #5c4a1a;
+}
+.status-done {
+  color: var(--text-dim);
+  border-color: var(--border);
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: none; }
+  50% { box-shadow: 0 0 6px rgba(57, 255, 20, 0.15); }
 }
 
 /* --- Task Detail --- */

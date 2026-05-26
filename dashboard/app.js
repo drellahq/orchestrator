@@ -121,7 +121,7 @@
   async function fetchTaskMeta(name) {
     let resp = await fetch('/tasks/' + name + '/state.json');
     if (!resp.ok) resp = await fetch('/tasks/' + name + '/metadata.json');
-    if (!resp.ok) return { name, description: '', created_at: '', author: '', prs: [] };
+    if (!resp.ok) return { name, description: '', created_at: '', author: '', prs: [], status: '' };
     const d = await resp.json();
     return {
       name: d.name || name,
@@ -130,7 +130,23 @@
       updated_at: d.updated_at || '',
       author: d.author || '',
       prs: (d.resources && d.resources.github && d.resources.github.prs) || [],
+      status: d.status || '',
+      sandbox_destroyed: !!d.sandbox_destroyed,
     };
+  }
+
+  function computeStatus(task) {
+    if (task.status) return task.status;
+    const hasOpen = (task.prs || []).some((pr) => !pr.closed);
+    if (hasOpen) return 'waiting';
+    return 'done';
+  }
+
+  function statusBadge(task) {
+    const s = computeStatus(task);
+    const labels = { in_progress: 'in-progress', waiting: 'waiting', done: 'done' };
+    const label = labels[s] || s;
+    return '<span class="status-badge status-' + s + '">' + escapeHtml(label) + '</span>';
   }
 
   // ── API: transcript loader ──
@@ -226,7 +242,10 @@
       card.className = 'task-card';
       card.setAttribute('data-task', task.name);
       card.innerHTML =
-        '<div class="task-name">' + escapeHtml(task.name) + '</div>' +
+        '<div class="task-header">' +
+          '<div class="task-name">' + escapeHtml(task.name) + '</div>' +
+          statusBadge(task) +
+        '</div>' +
         '<div class="task-desc">' + escapeHtml(task.description) + '</div>' +
         '<div class="task-footer">' +
           '<span class="task-time">' + timeAgo(task.updated_at || task.created_at) + '</span>' +
@@ -253,6 +272,7 @@
       .join('');
 
     let html =
+      '<div><span class="meta-label">status:</span>' + statusBadge(task) + '</div>' +
       '<div><span class="meta-label">created:</span><span class="task-time">' +
       timeAgo(task.created_at) + ' (' + escapeHtml(task.created_at || '') + ')</span></div>' +
       '<div><span class="meta-label">updated:</span><span class="task-time">' +
