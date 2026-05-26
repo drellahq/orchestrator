@@ -928,3 +928,121 @@ func TestProcessPR_UsesReloadedCommenters(t *testing.T) {
 		}
 	}
 }
+
+func TestRun_WaitsForRunningTasks(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not found")
+	}
+
+	dir := t.TempDir()
+	createTaskWithPRs(t, dir, "wait-task", []task.PR{
+		{URL: "https://github.com/org/repo/pull/1", Repo: "org/repo", Branch: "fix", Base: "main", Number: 1},
+	})
+
+	// Comment from allowed user
+	commentsJSON := `[{"id":100,"body":"Do this","user":{"login":"alice"},"created_at":"2025-01-01T00:00:00Z"}]`
+	script, _ := writePRWithCommentsScript(t, commentsJSON, "[]")
+
+	d := New(ghNew(script), 10*time.Millisecond, "", dir, []string{"alice"})
+
+	// Set up a continueFunc that blocks on a channel
+	unblock := make(chan struct{})
+	taskStarted := make(chan struct{})
+	d.SetContinueFunc(func(ctx context.Context, taskName, prompt string) error {
+		close(taskStarted)
+		<-unblock
+		return nil
+	})
+
+	// Run in background with a cancellable context
+	ctx, cancel := context.WithCancel(context.Background())
+	runDone := make(chan error, 1)
+	go func() {
+		runDone <- d.Run(ctx)
+	}()
+
+	// Wait for the task to start
+	select {
+	case <-taskStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for task to start")
+	}
+
+	// Verify task is running
+	if d.RunningCount() != 1 {
+		t.Errorf("expected 1 running task, got %d", d.RunningCount())
+	}
+
+	// Cancel the context (simulates SIGTERM)
+	cancel()
+
+	// Give Run() a moment to process the cancellation
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify Run() hasn't returned yet (should be waiting for the goroutine)
+	select {
+	case <-runDone:
+		t.Fatal("Run() returned before task finished")
+	default:
+		// Good - still waiting
+	}
+
+	// Unblock the task
+	close(unblock)
+
+	// Verify Run() now returns
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Errorf("Run() returned error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run() did not return after unblocking task")
+	}
+
+	// Verify task is no longer running
+	if d.RunningCount() != 0 {
+		t.Errorf("expected 0 running tasks, got %d", d.RunningCount())
+	}
+}
+
+func TestRun_StopsPollingOnShutdown(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not found")
+	}
+
+	dir := t.TempDir()
+
+	// Create a fake gh that reports specs
+	script := writeOpenPRScript(t)
+	d := New(ghNew(script), 10*time.Millisecond, "", dir, []string{"alice"})
+
+	// Set up a slow newTaskFunc that would allow us to detect if it's called
+	taskLaunched := make(chan struct{})
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int) error {
+		taskLaunched <- struct{}{}
+		time.Sleep(time.Second)
+		return nil
+	})
+
+	// Cancel context immediately
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	runDone := make(chan error, 1)
+	go func() {
+		runDone <- d.Run(ctx)
+	}()
+
+	// Verify no tasks were launched
+	select {
+	case <-taskLaunched:
+		t.Fatal("task was launched after context cancellation")
+	case err := <-runDone:
+		if err != nil {
+			t.Errorf("Run() returned error: %v", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		// Good - Run() should have exited quickly without launching tasks
+	}
+}
