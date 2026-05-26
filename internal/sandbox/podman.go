@@ -201,6 +201,16 @@ func (r *PodmanRunner) HelperScripts(name string) (cpScript, sshScript string) {
 	return
 }
 
+// UserHome returns the sandbox user's home directory.
+func (r *PodmanRunner) UserHome() string {
+	return "/home/claude"
+}
+
+// AsUser wraps a command to run as the claude user via su.
+func (r *PodmanRunner) AsUser(cmd string) string {
+	return "su - claude -c " + shellutil.Quote(cmd)
+}
+
 func (r *PodmanRunner) run(ctx context.Context, args ...string) error {
 	cmd := exec.CommandContext(ctx, "podman", args...)
 	cmd.Stdout = os.Stderr
