@@ -21,24 +21,26 @@ import (
 //  3. Register MCP servers from mcp.yaml via "claude mcp add"
 //  4. Run setup.sh on the host with helper scripts and environment variables
 func Apply(ctx context.Context, p *Profile, runner sandbox.Runner, sbx string, taskDir string, basePrompt string, vars map[string]string) error {
+	home := runner.UserHome()
+
 	// 1. Write combined CLAUDE.md
 	claudemd := basePrompt + "\n\n# Profile: " + p.Name + "\n\n" + p.Claudemd
-	if err := writeToSandbox(ctx, runner, sbx, claudemd, sbx+":/home/claude/.claude/CLAUDE.md"); err != nil {
+	if err := writeToSandbox(ctx, runner, sbx, claudemd, sbx+":"+home+"/.claude/CLAUDE.md"); err != nil {
 		return fmt.Errorf("writing CLAUDE.md: %w", err)
 	}
 
 	// 2. Copy settings.json if present
 	if p.Settings != "" {
-		if err := runner.Cp(ctx, sbx, p.Settings, sbx+":/home/claude/.claude/settings.json"); err != nil {
+		if err := runner.Cp(ctx, sbx, p.Settings, sbx+":"+home+"/.claude/settings.json"); err != nil {
 			return fmt.Errorf("copying settings.json: %w", err)
 		}
 		slog.Debug("Copied profile settings.json", "profile", p.Name)
 	}
 
-	// Fix ownership of all files copied as root into claude's home
-	if err := runner.SSH(ctx, sbx, "bash", "-c", "chown -R claude:claude /home/claude/.claude"); err != nil {
-		return fmt.Errorf("fixing .claude ownership: %w", err)
-	}
+	// Fix ownership of copied files (podman cp runs as root; on gjoll this
+	// is a harmless no-op error since the SSH user already owns the files).
+	fixCmd := "chown -R $(stat -c '%U:%G' " + home + ") " + home + "/.claude 2>/dev/null || true"
+	_ = runner.SSH(ctx, sbx, "bash", "-c", fixCmd)
 
 	// 3. Register MCP servers from mcp.yaml
 	if p.MCP != nil {
@@ -64,7 +66,7 @@ func Apply(ctx context.Context, p *Profile, runner sandbox.Runner, sbx string, t
 // writeToSandbox writes content to a file in the sandbox via a temp file + cp.
 func writeToSandbox(ctx context.Context, runner sandbox.Runner, sbx, content, dest string) error {
 	// Ensure the parent directory exists in the sandbox
-	runner.SSH(ctx, sbx, "bash", "-c", "su - claude -c 'mkdir -p ~/.claude'")
+	runner.SSH(ctx, sbx, "bash", "-c", runner.AsUser("mkdir -p ~/.claude"))
 
 	tmpFile, err := os.CreateTemp("", "profile-*")
 	if err != nil {
@@ -102,7 +104,7 @@ func registerMCPServer(ctx context.Context, runner sandbox.Runner, sbx string, s
 		args = append(args, shellutil.Quote(server.Name), shellutil.Quote(server.URL))
 	}
 	innerCmd := strings.Join(args, " ")
-	return runner.SSH(ctx, sbx, "bash", "-c", "su - claude -c "+shellutil.Quote(innerCmd))
+	return runner.SSH(ctx, sbx, "bash", "-c", runner.AsUser(innerCmd))
 }
 
 // runSetup executes setup.sh on the host with helper scripts on PATH.

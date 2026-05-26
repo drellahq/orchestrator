@@ -48,6 +48,15 @@ type Runner interface {
 	// sandbox-ssh helpers, used by profile setup.sh scripts. The sandbox
 	// name is properly shell-quoted in the generated scripts.
 	HelperScripts(name string) (cpScript, sshScript string)
+
+	// UserHome returns the home directory path of the sandbox user.
+	// For podman: "/home/claude". For gjoll: "~" (SSH user's home).
+	UserHome() string
+
+	// AsUser wraps a shell command to run as the sandbox user.
+	// For podman (where exec runs as root), wraps with "su - claude -c".
+	// For gjoll (where SSH connects as the target user), returns as-is.
+	AsUser(cmd string) string
 }
 
 // NewFromConfig creates the appropriate Runner based on configuration.

@@ -14,9 +14,8 @@ import (
 
 	"github.com/drellabot/orchestrator/internal/config"
 	gh "github.com/drellabot/orchestrator/internal/github"
-	"github.com/drellabot/orchestrator/internal/sandbox"
-	"github.com/drellabot/orchestrator/internal/shellutil"
 	"github.com/drellabot/orchestrator/internal/logging"
+	"github.com/drellabot/orchestrator/internal/sandbox"
 	mcpserver "github.com/drellabot/orchestrator/internal/mcp"
 	"github.com/drellabot/orchestrator/internal/profile"
 	"github.com/drellabot/orchestrator/internal/prompts"
@@ -193,15 +192,17 @@ func executeTask(ctx context.Context, taskName, taskDescription string, taskDir 
 		}
 	}
 
+	home := runner.UserHome()
+
 	// After successful provisioning, ensure cleanup on exit
 	defer func() {
 		slog.Debug("Copying transcript", "task", taskName)
-		if copyErr := runner.Cp(context.Background(), taskName, taskName+":/home/claude/transcript.jsonl", taskDir.TranscriptPath()); copyErr != nil {
+		if copyErr := runner.Cp(context.Background(), taskName, taskName+":"+home+"/transcript.jsonl", taskDir.TranscriptPath()); copyErr != nil {
 			slog.Warn("Failed to copy transcript", "task", taskName, "error", copyErr)
 		}
 
 		slog.Debug("Copying conversations", "task", taskName)
-		if copyErr := runner.Cp(context.Background(), taskName, taskName+":/home/claude/.claude/", taskDir.ConversationsPath()); copyErr != nil {
+		if copyErr := runner.Cp(context.Background(), taskName, taskName+":"+home+"/.claude/", taskDir.ConversationsPath()); copyErr != nil {
 			slog.Warn("Failed to copy conversations", "task", taskName, "error", copyErr)
 		}
 
@@ -245,10 +246,11 @@ func executeTask(ctx context.Context, taskName, taskDescription string, taskDir 
 	}
 	tmpRun.Close()
 
-	if err := runner.Cp(ctx, taskName, tmpRun.Name(), taskName+":/home/claude/run-claude.sh"); err != nil {
+	runScriptPath := home + "/run-claude.sh"
+	if err := runner.Cp(ctx, taskName, tmpRun.Name(), taskName+":"+runScriptPath); err != nil {
 		return fmt.Errorf("copying run script: %w", err)
 	}
-	if err := runner.SSH(ctx, taskName, "bash", "-c", "chown claude:claude /home/claude/run-claude.sh && chmod +x /home/claude/run-claude.sh"); err != nil {
+	if err := runner.SSH(ctx, taskName, "bash", "-c", "chmod a+rx "+runScriptPath); err != nil {
 		return fmt.Errorf("making run script executable: %w", err)
 	}
 
@@ -273,7 +275,7 @@ func executeTask(ctx context.Context, taskName, taskDescription string, taskDir 
 
 	tw := newTranscriptWriter(os.Stdout, verbose)
 	w := io.MultiWriter(tw, transcriptFile)
-	if err := runner.SSHProxyOutput(ctx, taskName, w, sshOpts, "bash", "-c", "su - claude -c /home/claude/run-claude.sh"); err != nil {
+	if err := runner.SSHProxyOutput(ctx, taskName, w, sshOpts, "bash", "-c", runner.AsUser(runScriptPath)); err != nil {
 		slog.Error("Claude exited with error", "task", taskName, "error", err)
 		// Don't return error - still want to archive results
 	}
@@ -313,8 +315,8 @@ func buildRunScript(taskDescription string, continueSession bool) string {
 
 	return fmt.Sprintf(`#!/bin/bash
 source ~/.bashrc
-export PATH="/home/claude/.local/bin:$PATH"
-export ANTHROPIC_API_KEY="$(cat ~/.anthropic/api_key)"
+export PATH="$HOME/.local/bin:$PATH"
+export ANTHROPIC_API_KEY="$(cat ~/.anthropic/api_key 2>/dev/null || true)"
 stdbuf -oL claude --dangerously-skip-permissions -p --verbose \
   --effort max \
   --output-format stream-json --append-system-prompt-file ~/system-prompt.md \
@@ -324,18 +326,18 @@ stdbuf -oL claude --dangerously-skip-permissions -p --verbose \
 }
 
 func setupSandbox(ctx context.Context, runner sandbox.Runner, taskName string, taskDir *task.Dir, cfg *config.Config, profileName string, profileVars []string) error {
-	// Always: configure git (run as claude user)
-	if err := runner.SSH(ctx, taskName, "bash", "-c", "su - claude -c 'git config --global user.name Drellabot'"); err != nil {
+	// Always: configure git (run as sandbox user)
+	if err := runner.SSH(ctx, taskName, "bash", "-c", runner.AsUser("git config --global user.name Drellabot")); err != nil {
 		return fmt.Errorf("git config user.name: %w", err)
 	}
-	if err := runner.SSH(ctx, taskName, "bash", "-c", "su - claude -c 'git config --global user.email imagebuilder-bots+drella@redhat.com'"); err != nil {
+	if err := runner.SSH(ctx, taskName, "bash", "-c", runner.AsUser("git config --global user.email imagebuilder-bots+drella@redhat.com")); err != nil {
 		return fmt.Errorf("git config user.email: %w", err)
 	}
 
 	// Always: register orchestrator MCP server
 	mcpURL := fmt.Sprintf("http://localhost:%d/mcp", mcpserver.MCPRemotePort)
 	mcpCmd := fmt.Sprintf("claude mcp add --transport http orchestrator %s --scope user", mcpURL)
-	if err := runner.SSH(ctx, taskName, "bash", "-c", "su - claude -c "+shellutil.Quote(mcpCmd)); err != nil {
+	if err := runner.SSH(ctx, taskName, "bash", "-c", runner.AsUser(mcpCmd)); err != nil {
 		return fmt.Errorf("registering MCP server: %w", err)
 	}
 
@@ -381,12 +383,13 @@ func setupSandboxWithProfile(ctx context.Context, runner sandbox.Runner, taskNam
 	}
 	tmpFile.Close()
 
-	if err := runner.Cp(ctx, taskName, tmpFile.Name(), taskName+":/home/claude/system-prompt.md"); err != nil {
+	home := runner.UserHome()
+	promptDest := home + "/system-prompt.md"
+	if err := runner.Cp(ctx, taskName, tmpFile.Name(), taskName+":"+promptDest); err != nil {
 		return fmt.Errorf("copying system prompt: %w", err)
 	}
-
-	if err := runner.SSH(ctx, taskName, "bash", "-c", "chown claude:claude /home/claude/system-prompt.md"); err != nil {
-		return fmt.Errorf("chowning system prompt: %w", err)
+	if err := runner.SSH(ctx, taskName, "bash", "-c", "chmod a+r "+promptDest); err != nil {
+		return fmt.Errorf("fixing system prompt permissions: %w", err)
 	}
 
 	return nil
@@ -407,13 +410,13 @@ func setupSandboxDefault(ctx context.Context, runner sandbox.Runner, taskName st
 	}
 	tmpFile.Close()
 
-	if err := runner.Cp(ctx, taskName, tmpFile.Name(), taskName+":/home/claude/system-prompt.md"); err != nil {
+	home := runner.UserHome()
+	promptDest := home + "/system-prompt.md"
+	if err := runner.Cp(ctx, taskName, tmpFile.Name(), taskName+":"+promptDest); err != nil {
 		return fmt.Errorf("copying system prompt: %w", err)
 	}
-
-	// Fix ownership of system prompt
-	if err := runner.SSH(ctx, taskName, "bash", "-c", "chown claude:claude /home/claude/system-prompt.md"); err != nil {
-		return fmt.Errorf("chowning system prompt: %w", err)
+	if err := runner.SSH(ctx, taskName, "bash", "-c", "chmod a+r "+promptDest); err != nil {
+		return fmt.Errorf("fixing system prompt permissions: %w", err)
 	}
 
 	return nil

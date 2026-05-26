@@ -34,18 +34,33 @@ func (a *GjollAdapter) Start(ctx context.Context, name string) error {
 }
 
 // SSH runs a command without proxy/tunnels.
+// When callers pass "bash", "-c", <cmd>, the adapter collapses the command
+// into a single string because SSH concatenates arguments with spaces and
+// the remote shell re-splits them, breaking multi-word bash -c commands.
 func (a *GjollAdapter) SSH(ctx context.Context, name string, command ...string) error {
-	return a.runner.SSH(ctx, name, command...)
+	return a.runner.SSH(ctx, name, collapseBashC(command)...)
 }
 
 // SSHProxy runs a command with proxy and reverse tunnels.
 func (a *GjollAdapter) SSHProxy(ctx context.Context, name string, opts *SSHOpts, command ...string) error {
-	return a.runner.SSHProxy(ctx, name, toGjollOpts(opts), command...)
+	return a.runner.SSHProxy(ctx, name, toGjollOpts(opts), collapseBashC(command)...)
 }
 
 // SSHProxyOutput runs a command with proxy, writing stdout to w.
 func (a *GjollAdapter) SSHProxyOutput(ctx context.Context, name string, w io.Writer, opts *SSHOpts, command ...string) error {
-	return a.runner.SSHProxyOutput(ctx, name, w, toGjollOpts(opts), command...)
+	return a.runner.SSHProxyOutput(ctx, name, w, toGjollOpts(opts), collapseBashC(command)...)
+}
+
+// collapseBashC detects the "bash", "-c", <cmd> pattern and collapses it
+// into a single string. SSH transports concatenate arguments with spaces
+// before the remote shell re-parses them, which breaks multi-word bash -c
+// commands. Collapsing lets the remote sshd's shell interpret the command
+// string directly (sshd always runs commands through the user's login shell).
+func collapseBashC(command []string) []string {
+	if len(command) >= 3 && command[0] == "bash" && command[1] == "-c" {
+		return []string{strings.Join(command[2:], " ")}
+	}
+	return command
 }
 
 // toGjollOpts converts sandbox.SSHOpts to gjoll.SSHOpts, handling nil safely.
@@ -90,6 +105,16 @@ func (a *GjollAdapter) Stop(ctx context.Context, name string) error {
 // Down destroys a sandbox.
 func (a *GjollAdapter) Down(ctx context.Context, name string) error {
 	return a.runner.Down(ctx, name)
+}
+
+// UserHome returns the SSH user's home directory.
+func (a *GjollAdapter) UserHome() string {
+	return "~"
+}
+
+// AsUser returns the command unchanged since SSH connects as the target user.
+func (a *GjollAdapter) AsUser(cmd string) string {
+	return cmd
 }
 
 // HelperScripts returns shell script contents for sandbox-cp and sandbox-ssh.
