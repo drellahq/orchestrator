@@ -715,8 +715,9 @@ func TestCheckForNewIssues_PicksUpNewIssue(t *testing.T) {
 	if capturedTasks[0].name != "tasks-7-add_dark_mode" {
 		t.Errorf("task name = %q, want %q", capturedTasks[0].name, "tasks-7-add_dark_mode")
 	}
-	if capturedTasks[0].desc != "Please add a dark mode toggle." {
-		t.Errorf("task description = %q, want %q", capturedTasks[0].desc, "Please add a dark mode toggle.")
+	wantDesc := "Add dark mode\n\nPlease add a dark mode toggle."
+	if capturedTasks[0].desc != wantDesc {
+		t.Errorf("task description = %q, want %q", capturedTasks[0].desc, wantDesc)
 	}
 	if capturedTasks[0].sourceRepo != "org/tasks" {
 		t.Errorf("sourceRepo = %q, want org/tasks", capturedTasks[0].sourceRepo)
@@ -735,7 +736,7 @@ func TestCheckForNewIssues_PicksUpNewIssue(t *testing.T) {
 	}
 }
 
-func TestCheckForNewIssues_FallsBackToTitle(t *testing.T) {
+func TestCheckForNewIssues_TitleOnlyWhenNoBody(t *testing.T) {
 	if _, err := exec.LookPath("sh"); err != nil {
 		t.Skip("sh not found")
 	}
@@ -767,7 +768,7 @@ func TestCheckForNewIssues_FallsBackToTitle(t *testing.T) {
 	}
 
 	if capturedDesc != "Fix the login bug" {
-		t.Errorf("description = %q, want title fallback %q", capturedDesc, "Fix the login bug")
+		t.Errorf("description = %q, want %q", capturedDesc, "Fix the login bug")
 	}
 }
 
