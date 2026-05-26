@@ -39,6 +39,7 @@ type Daemon struct {
 	newTaskFunc  NewTaskFunc
 	mu           sync.Mutex
 	running      map[string]bool
+	wg           sync.WaitGroup
 
 	// Reloadable fields protected by configMu
 	configMu          sync.RWMutex
@@ -104,7 +105,7 @@ func (d *Daemon) Reload(interval time.Duration, allowedCommenters []string, task
 // round-robin, and re-discovers after each full cycle. It also checks
 // the tasks repo for new specs in in-progress/.
 func (d *Daemon) Run(ctx context.Context) error {
-	for {
+	for ctx.Err() == nil {
 		// Check for new specs and issues in the tasks repo
 		d.checkForNewSpecs(ctx)
 		d.checkForNewIssues(ctx)
@@ -114,7 +115,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 		if len(refs) == 0 {
 			slog.Info("No open PRs found, waiting before re-discovery", "interval", interval)
 			if err := sleep(ctx, interval); err != nil {
-				return ctx.Err()
+				break
 			}
 			continue
 		}
@@ -129,16 +130,27 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 		for _, ref := range refs {
 			if ctx.Err() != nil {
-				return ctx.Err()
+				break
 			}
 
 			d.processPR(ctx, ref)
 
 			if err := sleep(ctx, perPR); err != nil {
-				return ctx.Err()
+				break
 			}
 		}
 	}
+
+	// Wait for running tasks to finish
+	d.mu.Lock()
+	count := len(d.running)
+	d.mu.Unlock()
+	if count > 0 {
+		slog.Info("Shutting down, waiting for running tasks to finish", "count", count)
+		d.wg.Wait()
+		slog.Info("All tasks finished, exiting")
+	}
+	return nil
 }
 
 func sleep(ctx context.Context, d time.Duration) error {
@@ -294,14 +306,16 @@ func (d *Daemon) processPR(ctx context.Context, ref PRRef) {
 	// React rocket to allowed comments just before handoff
 	d.reactToComments(ctx, ref.PR.Repo, newComments, "rocket")
 
+	d.wg.Add(1)
 	go func() {
+		defer d.wg.Done()
 		defer func() {
 			d.mu.Lock()
 			delete(d.running, ref.TaskName)
 			d.mu.Unlock()
 		}()
 
-		if err := d.continueFunc(ctx, ref.TaskName, prompt); err != nil {
+		if err := d.continueFunc(context.WithoutCancel(ctx), ref.TaskName, prompt); err != nil {
 			log.Error("task continue failed", "error", err)
 		}
 	}()
@@ -571,4 +585,11 @@ func (d *Daemon) SetNewTaskFunc(fn NewTaskFunc) {
 // ProcessPR is an exported wrapper for testing.
 func (d *Daemon) ProcessPR(ctx context.Context, ref PRRef) {
 	d.processPR(ctx, ref)
+}
+
+// RunningCount returns the number of tasks currently running.
+func (d *Daemon) RunningCount() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return len(d.running)
 }

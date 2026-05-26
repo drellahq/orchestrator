@@ -219,14 +219,16 @@ func (d *Daemon) checkForNewSpecs(ctx context.Context) {
 		d.running[taskName] = true
 		d.mu.Unlock()
 
+		d.wg.Add(1)
 		go func(name, desc string) {
+			defer d.wg.Done()
 			defer func() {
 				d.mu.Lock()
 				delete(d.running, name)
 				d.mu.Unlock()
 			}()
 
-			if err := d.newTaskFunc(ctx, name, desc, "", 0); err != nil {
+			if err := d.newTaskFunc(context.WithoutCancel(ctx), name, desc, "", 0); err != nil {
 				slog.Error("task new failed", "task", name, "error", err)
 			}
 		}(taskName, description)
@@ -325,14 +327,16 @@ func (d *Daemon) checkForNewIssues(ctx context.Context) {
 			log.Debug("Failed to add rocket reaction to issue", "issue", issue.Number, "error", err)
 		}
 
+		d.wg.Add(1)
 		go func(name, desc, repo string, issueNum int) {
+			defer d.wg.Done()
 			defer func() {
 				d.mu.Lock()
 				delete(d.running, name)
 				d.mu.Unlock()
 			}()
 
-			if err := d.newTaskFunc(ctx, name, desc, repo, issueNum); err != nil {
+			if err := d.newTaskFunc(context.WithoutCancel(ctx), name, desc, repo, issueNum); err != nil {
 				slog.Error("task new failed", "task", name, "error", err)
 			}
 		}(taskName, description, tasksRepo, issue.Number)
