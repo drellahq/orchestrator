@@ -796,27 +796,6 @@ func TestRepoURL(t *testing.T) {
 	}
 }
 
-func TestCloneRepo(t *testing.T) {
-	if _, err := exec.LookPath("sh"); err != nil {
-		t.Skip("sh not found")
-	}
-
-	script, outFile := writeArgCapture(t, "")
-	r := New(script)
-
-	dir := t.TempDir()
-	err := r.CloneRepo(context.Background(), "org/repo", dir+"/clone")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	gotArgs := readArgs(t, outFile)
-	wantArgs := []string{"repo", "clone", "org/repo", dir + "/clone", "--", "--depth=1"}
-	if !equalArgs(gotArgs, wantArgs) {
-		t.Errorf("args = %v, want %v", gotArgs, wantArgs)
-	}
-}
-
 func TestReactToComment_IssueComment(t *testing.T) {
 	if _, err := exec.LookPath("sh"); err != nil {
 		t.Skip("sh not found")

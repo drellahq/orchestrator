@@ -3,6 +3,7 @@ package github
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -348,13 +349,34 @@ func (r *Runner) ListIssues(ctx context.Context, repo string) ([]vcs.Issue, erro
 	return issues, nil
 }
 
-// CloneRepo clones a repo to the given directory using gh repo clone.
-func (r *Runner) CloneRepo(ctx context.Context, repo, dir string) error {
-	_, err := r.run(ctx, "", r.bin, "repo", "clone", repo, dir, "--", "--depth=1")
+// ListRepoFiles lists files in a directory of a GitHub repository at a given branch/ref.
+func (r *Runner) ListRepoFiles(ctx context.Context, repo, branch, dir string) ([]string, error) {
+	endpoint := fmt.Sprintf("/repos/%s/contents/%s?ref=%s", repo, dir, branch)
+	out, err := r.run(ctx, "", r.bin, "api", endpoint, "--jq", ".[].name")
 	if err != nil {
-		return fmt.Errorf("cloning repo %s: %w", repo, err)
+		return nil, fmt.Errorf("listing repo files: %w", err)
 	}
-	return nil
+	out = strings.TrimSpace(out)
+	if out == "" {
+		return nil, nil
+	}
+	return strings.Split(out, "\n"), nil
+}
+
+// GetFileContent fetches the content of a file from a GitHub repository at a given branch/ref.
+func (r *Runner) GetFileContent(ctx context.Context, repo, branch, path string) (string, error) {
+	endpoint := fmt.Sprintf("/repos/%s/contents/%s?ref=%s", repo, path, branch)
+	out, err := r.run(ctx, "", r.bin, "api", endpoint, "--jq", ".content")
+	if err != nil {
+		return "", fmt.Errorf("getting file content: %w", err)
+	}
+	out = strings.TrimSpace(out)
+	// GitHub returns base64-encoded content
+	decoded, err := base64.StdEncoding.DecodeString(strings.ReplaceAll(out, "\n", ""))
+	if err != nil {
+		return "", fmt.Errorf("decoding file content: %w", err)
+	}
+	return string(decoded), nil
 }
 
 // PRNumberFromURL extracts the pull request number from a GitHub PR URL

@@ -699,7 +699,7 @@ func TestResolveOriginatingIssue(t *testing.T) {
 
 func TestOpenPRLinksOriginatingIssue(t *testing.T) {
 	puller := &stubPuller{}
-	opener := &stubPROpener{
+	opener := &stubVCSProvider{
 		user:     "testuser",
 		forkName: "testuser/org",
 		prURL:    "https://github.com/org/repo/pull/99",
@@ -762,7 +762,7 @@ func TestOpenPRLinksOriginatingIssue(t *testing.T) {
 
 func TestOpenPRSkipsIssueLinkWithoutSource(t *testing.T) {
 	puller := &stubPuller{}
-	opener := &stubPROpener{
+	opener := &stubVCSProvider{
 		user:     "testuser",
 		forkName: "testuser/org",
 		prURL:    "https://github.com/org/repo/pull/99",
