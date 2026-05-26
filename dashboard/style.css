@@ -539,6 +539,12 @@ main {
 /* --- Responsive --- */
 
 @media (max-width: 600px) {
+  html {
+    overflow-x: hidden;
+  }
+  #header {
+    padding: 0.75rem;
+  }
   main {
     padding: 1rem 0.75rem;
   }
