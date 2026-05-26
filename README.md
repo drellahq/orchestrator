@@ -43,6 +43,27 @@ go build -o orchestrator ./cmd/orchestrator
    sudo virsh net-start default
    ```
 
+4. (Optional) Install the systemd user service for daemon mode:
+
+   ```bash
+   cp dist/orchestrator.service ~/.config/systemd/user/
+   systemctl --user daemon-reload
+   systemctl --user enable --now orchestrator.service
+   ```
+
+   Check status and view logs:
+
+   ```bash
+   systemctl --user status orchestrator
+   journalctl --user -u orchestrator -f
+   ```
+
+   To enable the service to run without an active login session:
+
+   ```bash
+   loginctl enable-linger $USER
+   ```
+
 ## Configuration
 
 The `orchestrator.yaml` file supports:
