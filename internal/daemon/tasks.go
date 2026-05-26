@@ -319,9 +319,9 @@ func (d *Daemon) checkForNewIssues(ctx context.Context) {
 
 		log.Info("Found new issue", "issue", issue.Number, "title", issue.Title, "task", taskName)
 
-		description := issue.Body
-		if description == "" {
-			description = issue.Title
+		description := issue.Title
+		if issue.Body != "" {
+			description = issue.Title + "\n\n" + issue.Body
 		}
 
 		// Mark as processed before launching to avoid re-processing
