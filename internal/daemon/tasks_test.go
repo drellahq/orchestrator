@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -557,9 +558,16 @@ func TestCheckForNewSpecs_IdempotentAcrossCalls(t *testing.T) {
 
 // --- Issue intake tests ---
 
-// writeIssuesScript creates a fake gh that returns canned JSON for the issues API.
-// issues is the JSON-encoded list of issues to return.
+// writeIssuesScript creates a fake gh that returns canned JSON for the issues API
+// and handles reaction POST calls.
 func writeIssuesScript(t *testing.T, issuesJSON string) string {
+	script, _ := writeIssuesScriptWithCapture(t, issuesJSON)
+	return script
+}
+
+// writeIssuesScriptWithCapture creates a fake gh that returns canned JSON for
+// the issues API, handles reaction POST calls, and captures reactions to a file.
+func writeIssuesScriptWithCapture(t *testing.T, issuesJSON string) (string, string) {
 	t.Helper()
 
 	if _, err := exec.LookPath("sh"); err != nil {
@@ -568,15 +576,24 @@ func writeIssuesScript(t *testing.T, issuesJSON string) string {
 
 	dir := t.TempDir()
 	script := filepath.Join(dir, "gh")
+	reactionsFile := filepath.Join(dir, "reactions.txt")
 
 	content := fmt.Sprintf(`#!/bin/sh
+# Handle reaction API calls (POST method)
+for arg in "$@"; do
+  if [ "$arg" = "--method" ]; then
+    printf '%%s\n' "$*" >> %s
+    printf '{}'
+    exit 0
+  fi
+done
 printf '%%s' '%s'
-`, issuesJSON)
+`, reactionsFile, issuesJSON)
 
 	if err := os.WriteFile(script, []byte(content), 0755); err != nil {
 		t.Fatal(err)
 	}
-	return script
+	return script, reactionsFile
 }
 
 func makeIssuesJSON(t *testing.T, issues []gh.Issue) string {
@@ -1117,4 +1134,104 @@ func TestCheckForNewIssues_SetsRunningState(t *testing.T) {
 	if d.IsTaskRunning("tasks-5-my_task") {
 		t.Error("expected task to no longer be running")
 	}
+}
+
+func TestCheckForNewIssues_ReactsRocketOnAccepted(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not found")
+	}
+
+	dir := t.TempDir()
+
+	issues := []gh.Issue{
+		{Number: 7, Title: "Add dark mode", Body: "Please add a dark mode toggle.", User: gh.CommentUser{Login: "alice"}},
+	}
+	script, reactionsFile := writeIssuesScriptWithCapture(t, makeIssuesJSON(t, issues))
+
+	d := New(gh.New(script), time.Minute, "", dir, []string{"alice"})
+	d.SetTasksRepo("org/tasks")
+
+	done := make(chan struct{}, 1)
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int) error {
+		done <- struct{}{}
+		return nil
+	})
+
+	d.checkForNewIssues(context.Background())
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for newTaskFunc")
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	reactions := parseIssueReactions(t, reactionsFile)
+	foundRocket := false
+	for _, r := range reactions {
+		if strings.Contains(r, "content=rocket") && strings.Contains(r, "issues/7/reactions") {
+			foundRocket = true
+			break
+		}
+	}
+	if !foundRocket {
+		t.Errorf("expected rocket reaction on issue 7, got: %v", reactions)
+	}
+}
+
+func TestCheckForNewIssues_ReactsConfusedOnRejected(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not found")
+	}
+
+	dir := t.TempDir()
+
+	issues := []gh.Issue{
+		{Number: 7, Title: "Add dark mode", Body: "content", User: gh.CommentUser{Login: "stranger"}},
+	}
+	script, reactionsFile := writeIssuesScriptWithCapture(t, makeIssuesJSON(t, issues))
+
+	d := New(gh.New(script), time.Minute, "", dir, []string{"alice", "bob"})
+	d.SetTasksRepo("org/tasks")
+
+	called := false
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int) error {
+		called = true
+		return nil
+	})
+
+	d.checkForNewIssues(context.Background())
+	time.Sleep(50 * time.Millisecond)
+
+	if called {
+		t.Error("newTaskFunc should not have been called for issue from unallowed author")
+	}
+
+	reactions := parseIssueReactions(t, reactionsFile)
+	foundConfused := false
+	for _, r := range reactions {
+		if strings.Contains(r, "content=confused") && strings.Contains(r, "issues/7/reactions") {
+			foundConfused = true
+			break
+		}
+	}
+	if !foundConfused {
+		t.Errorf("expected confused reaction on issue 7, got: %v", reactions)
+	}
+}
+
+func parseIssueReactions(t *testing.T, path string) []string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		t.Fatalf("reading reactions file: %v", err)
+	}
+	s := strings.TrimSpace(string(data))
+	if s == "" {
+		return nil
+	}
+	return strings.Split(s, "\n")
 }

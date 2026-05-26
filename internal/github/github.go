@@ -246,6 +246,38 @@ func (r *Runner) PostReview(ctx context.Context, repo string, pr int, event, bod
 	return nil
 }
 
+// ReactToComment adds a reaction emoji to a PR comment.
+// commentType determines the endpoint: IssueComment uses the issues API,
+// ReviewComment uses the pulls API.
+// reaction must be one of: +1, -1, laugh, confused, heart, hooray, rocket, eyes.
+func (r *Runner) ReactToComment(ctx context.Context, repo string, commentID int64, commentType CommentType, reaction string) error {
+	var endpoint string
+	switch commentType {
+	case IssueComment:
+		endpoint = fmt.Sprintf("/repos/%s/issues/comments/%d/reactions", repo, commentID)
+	case ReviewComment:
+		endpoint = fmt.Sprintf("/repos/%s/pulls/comments/%d/reactions", repo, commentID)
+	default:
+		return fmt.Errorf("unknown comment type %q for comment %d", commentType, commentID)
+	}
+	_, err := r.run(ctx, "", r.bin, "api", "--method", "POST", endpoint, "-f", "content="+reaction)
+	if err != nil {
+		return fmt.Errorf("adding %s reaction to comment %d: %w", reaction, commentID, err)
+	}
+	return nil
+}
+
+// ReactToIssue adds a reaction emoji to a GitHub issue.
+// reaction must be one of: +1, -1, laugh, confused, heart, hooray, rocket, eyes.
+func (r *Runner) ReactToIssue(ctx context.Context, repo string, issueNumber int, reaction string) error {
+	endpoint := fmt.Sprintf("/repos/%s/issues/%d/reactions", repo, issueNumber)
+	_, err := r.run(ctx, "", r.bin, "api", "--method", "POST", endpoint, "-f", "content="+reaction)
+	if err != nil {
+		return fmt.Errorf("adding %s reaction to issue %d: %w", reaction, issueNumber, err)
+	}
+	return nil
+}
+
 // ListRepoFiles lists files in a directory of a repo on a given branch.
 // It returns a slice of file paths relative to the directory.
 func (r *Runner) ListRepoFiles(ctx context.Context, repo, branch, dir string) ([]string, error) {

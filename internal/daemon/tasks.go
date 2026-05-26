@@ -276,6 +276,9 @@ func (d *Daemon) checkForNewIssues(ctx context.Context) {
 
 		if !allowed[issue.User.Login] {
 			log.Debug("Issue author not in allowed_commenters, skipping", "issue", issue.Number, "author", issue.User.Login)
+			if err := d.gh.ReactToIssue(ctx, d.tasksRepo, issue.Number, "confused"); err != nil {
+				log.Debug("Failed to add confused reaction to issue", "issue", issue.Number, "error", err)
+			}
 			continue
 		}
 
@@ -314,6 +317,10 @@ func (d *Daemon) checkForNewIssues(ctx context.Context) {
 		}
 		d.running[taskName] = true
 		d.mu.Unlock()
+
+		if err := d.gh.ReactToIssue(ctx, d.tasksRepo, issue.Number, "rocket"); err != nil {
+			log.Debug("Failed to add rocket reaction to issue", "issue", issue.Number, "error", err)
+		}
 
 		go func(name, desc string, issueNum int) {
 			defer func() {
