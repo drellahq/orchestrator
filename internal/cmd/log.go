@@ -55,9 +55,12 @@ func runLog(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("loading config: %w", err)
 		}
 
-		runner := sandbox.NewFromConfig(cfg.SandboxBackend, cfg.GjollEnv, cfg.PodmanImage, cfg.AnthropicKeyFile, 19090)
+		runner, err := sandbox.NewFromConfig(cfg.SandboxBackend, cfg.GjollEnv, cfg.PodmanImage, cfg.AnthropicKeyFile, 19090)
+		if err != nil {
+			return fmt.Errorf("creating sandbox runner: %w", err)
+		}
 		tw := newTranscriptWriter(os.Stdout, verbose)
-		return runner.SSHProxyOutput(ctx, taskName, tw, &sandbox.SSHOpts{Proxy: true}, "tail -f ~/transcript.jsonl")
+		return runner.SSHProxyOutput(ctx, taskName, tw, &sandbox.SSHOpts{Proxy: true}, "bash", "-c", "tail -f /home/claude/transcript.jsonl")
 	}
 
 	// Read local transcript

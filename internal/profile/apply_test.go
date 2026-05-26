@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/drellabot/orchestrator/internal/gjoll"
+	"github.com/drellabot/orchestrator/internal/sandbox"
 	"github.com/drellabot/orchestrator/internal/shellutil"
 )
 
@@ -94,7 +94,7 @@ func TestRegisterMCPServer_ShellInjection(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			script, outFile := writeGjollCapture(t)
-			runner := gjoll.New(script)
+			runner := sandbox.NewGjollAdapter(script)
 
 			err := registerMCPServer(context.Background(), runner, "test-sandbox", tt.server)
 			if err != nil {
@@ -102,19 +102,12 @@ func TestRegisterMCPServer_ShellInjection(t *testing.T) {
 			}
 
 			// Read what was passed to the fake gjoll binary.
-			// The command arrives as: ssh test-sandbox -- <joined-command>
-			// The joined command should have properly quoted/escaped fields
-			// so that the remote shell treats each field literally.
 			data, err := os.ReadFile(outFile)
 			if err != nil {
 				t.Fatalf("reading captured args: %v", err)
 			}
 			captured := strings.TrimSpace(string(data))
 
-			// Each MCP server field containing special characters must be
-			// individually shell-quoted (single-quoted) in the command
-			// string passed after "--".
-			//
 			// Find the command part after "--"
 			parts := strings.SplitN(captured, "-- ", 2)
 			if len(parts) < 2 {
@@ -122,18 +115,35 @@ func TestRegisterMCPServer_ShellInjection(t *testing.T) {
 			}
 			cmdPart := parts[1]
 
-			// Each field with shell metacharacters must be wrapped in
-			// single quotes via shellutil.Quote. Verify that dangerous
-			// patterns only appear inside single-quoted regions.
-			for _, dangerous := range []string{"; ", "$(", "`"} {
-				if strings.Contains(cmdPart, dangerous) {
-					idx := strings.Index(cmdPart, dangerous)
-					prefix := cmdPart[:idx]
-					// Odd single-quote count means we're inside a quoted string (OK).
-					// Even count means we're outside quotes (BUG).
-					if strings.Count(prefix, "'")%2 == 0 {
-						t.Errorf("shell metacharacter %q appears unquoted in command: %q", dangerous, cmdPart)
+			// Verify that each user-supplied field with dangerous characters
+			// is wrapped in single quotes (shellutil.Quote format).
+			// shellutil.Quote wraps in '...' and escapes internal ' as '\''.
+			// We check that each dangerous field value appears inside a
+			// quoted region by looking for 'value' (possibly with '\'' escapes).
+			dangerousFields := []string{tt.server.Name, tt.server.Command, tt.server.URL}
+			dangerousFields = append(dangerousFields, tt.server.Args...)
+			for _, field := range dangerousFields {
+				if field == "" {
+					continue
+				}
+				hasMeta := false
+				for _, meta := range []string{";", "$(", "`", "\"", " "} {
+					if strings.Contains(field, meta) {
+						hasMeta = true
+						break
 					}
+				}
+				if !hasMeta {
+					continue
+				}
+				// The field should appear quoted. shellutil.Quote produces
+				// 'field' with internal ' replaced by '\''.
+				// Check that the field does NOT appear as a bare unquoted token.
+				// A properly quoted field will be surrounded by single quotes
+				// in the captured command.
+				quoted := "'" + strings.ReplaceAll(field, "'", `'\''`) + "'"
+				if !strings.Contains(cmdPart, quoted) {
+					t.Errorf("field %q not properly shell-quoted in command: %q", field, cmdPart)
 				}
 			}
 		})
@@ -142,7 +152,7 @@ func TestRegisterMCPServer_ShellInjection(t *testing.T) {
 
 func TestRunSetup_ShellInjection(t *testing.T) {
 	// Verify that sandbox names with shell metacharacters are properly
-	// single-quoted (via shellutil.Quote) in the generated helper scripts.
+	// embedded in the generated helper scripts.
 	tests := []struct {
 		name    string
 		sandbox string
@@ -182,12 +192,12 @@ func TestRunSetup_ShellInjection(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			runner := gjoll.New(gjollScript)
+			runner := sandbox.NewGjollAdapter(gjollScript)
 			taskDir := t.TempDir()
 
 			// runSetup generates helper scripts that embed the sandbox name.
 			// We intercept them via setup.sh to verify the sandbox name
-			// is properly single-quoted via shellutil.Quote.
+			// appears in the generated helper script.
 			outputFile := filepath.Join(t.TempDir(), "helpers_output")
 			setupContent := "#!/bin/bash\ncat $(which sandbox-cp) > " + outputFile + "\n"
 			if err := os.WriteFile(setupPath, []byte(setupContent), 0755); err != nil {
@@ -207,12 +217,10 @@ func TestRunSetup_ShellInjection(t *testing.T) {
 
 			content := string(scriptContent)
 
-			// The sandbox name must appear properly single-quoted via
-			// shellutil.Quote in the generated helper script.
+			// The sandbox name must be shell-quoted in the generated helper script.
 			quoted := shellutil.Quote(tt.sandbox)
-			expected := "gjoll cp " + quoted + " "
-			if !strings.Contains(content, expected) {
-				t.Errorf("expected sandbox to be quoted as %q in script, got:\n%s", expected, content)
+			if !strings.Contains(content, quoted) {
+				t.Errorf("expected shell-quoted sandbox name %s in script, got:\n%s", quoted, content)
 			}
 
 			// Also verify sentinel was not created

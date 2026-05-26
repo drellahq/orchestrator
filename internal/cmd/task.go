@@ -15,6 +15,7 @@ import (
 	"github.com/drellabot/orchestrator/internal/config"
 	gh "github.com/drellabot/orchestrator/internal/github"
 	"github.com/drellabot/orchestrator/internal/sandbox"
+	"github.com/drellabot/orchestrator/internal/shellutil"
 	"github.com/drellabot/orchestrator/internal/logging"
 	mcpserver "github.com/drellabot/orchestrator/internal/mcp"
 	"github.com/drellabot/orchestrator/internal/profile"
@@ -151,13 +152,16 @@ func logPreflightWarnings(ctx context.Context, cfg *config.Config) *gh.Runner {
 	return ghRunner
 }
 
-func createSandboxRunner(cfg *config.Config) sandbox.Runner {
+func createSandboxRunner(cfg *config.Config) (sandbox.Runner, error) {
 	slog.Info("Creating sandbox runner", "backend", cfg.SandboxBackend)
 	return sandbox.NewFromConfig(cfg.SandboxBackend, cfg.GjollEnv, cfg.PodmanImage, cfg.AnthropicKeyFile, mcpserver.MCPRemotePort)
 }
 
 func executeTask(ctx context.Context, taskName, taskDescription string, taskDir *task.Dir, cfg *config.Config, ghRunner *gh.Runner, continueSession bool, author string, profileName string, profileVars []string) error {
-	runner := createSandboxRunner(cfg)
+	runner, err := createSandboxRunner(cfg)
+	if err != nil {
+		return fmt.Errorf("creating sandbox runner: %w", err)
+	}
 
 	logger := slog.Default()
 
@@ -331,7 +335,7 @@ func setupSandbox(ctx context.Context, runner sandbox.Runner, taskName string, t
 	// Always: register orchestrator MCP server
 	mcpURL := fmt.Sprintf("http://localhost:%d/mcp", mcpserver.MCPRemotePort)
 	mcpCmd := fmt.Sprintf("claude mcp add --transport http orchestrator %s --scope user", mcpURL)
-	if err := runner.SSH(ctx, taskName, "bash", "-c", fmt.Sprintf("su - claude -c '%s'", mcpCmd)); err != nil {
+	if err := runner.SSH(ctx, taskName, "bash", "-c", "su - claude -c "+shellutil.Quote(mcpCmd)); err != nil {
 		return fmt.Errorf("registering MCP server: %w", err)
 	}
 
@@ -377,8 +381,12 @@ func setupSandboxWithProfile(ctx context.Context, runner sandbox.Runner, taskNam
 	}
 	tmpFile.Close()
 
-	if err := runner.Cp(ctx, taskName, tmpFile.Name(), ":~/system-prompt.md"); err != nil {
+	if err := runner.Cp(ctx, taskName, tmpFile.Name(), taskName+":/home/claude/system-prompt.md"); err != nil {
 		return fmt.Errorf("copying system prompt: %w", err)
+	}
+
+	if err := runner.SSH(ctx, taskName, "bash", "-c", "chown claude:claude /home/claude/system-prompt.md"); err != nil {
+		return fmt.Errorf("chowning system prompt: %w", err)
 	}
 
 	return nil

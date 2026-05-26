@@ -2,9 +2,12 @@ package sandbox
 
 import (
 	"context"
+	"fmt"
 	"io"
+	"strings"
 
 	"github.com/drellabot/orchestrator/internal/gjoll"
+	"github.com/drellabot/orchestrator/internal/shellutil"
 )
 
 // GjollAdapter wraps gjoll.Runner to implement the sandbox.Runner interface.
@@ -37,20 +40,23 @@ func (a *GjollAdapter) SSH(ctx context.Context, name string, command ...string) 
 
 // SSHProxy runs a command with proxy and reverse tunnels.
 func (a *GjollAdapter) SSHProxy(ctx context.Context, name string, opts *SSHOpts, command ...string) error {
-	gjollOpts := &gjoll.SSHOpts{
-		Proxy:          opts.Proxy,
-		ReverseTunnels: opts.ReverseTunnels,
-	}
-	return a.runner.SSHProxy(ctx, name, gjollOpts, command...)
+	return a.runner.SSHProxy(ctx, name, toGjollOpts(opts), command...)
 }
 
 // SSHProxyOutput runs a command with proxy, writing stdout to w.
 func (a *GjollAdapter) SSHProxyOutput(ctx context.Context, name string, w io.Writer, opts *SSHOpts, command ...string) error {
-	gjollOpts := &gjoll.SSHOpts{
+	return a.runner.SSHProxyOutput(ctx, name, w, toGjollOpts(opts), command...)
+}
+
+// toGjollOpts converts sandbox.SSHOpts to gjoll.SSHOpts, handling nil safely.
+func toGjollOpts(opts *SSHOpts) *gjoll.SSHOpts {
+	if opts == nil {
+		return nil
+	}
+	return &gjoll.SSHOpts{
 		Proxy:          opts.Proxy,
 		ReverseTunnels: opts.ReverseTunnels,
 	}
-	return a.runner.SSHProxyOutput(ctx, name, w, gjollOpts, command...)
 }
 
 // Pull fetches committed code from the sandbox.
@@ -59,8 +65,21 @@ func (a *GjollAdapter) Pull(ctx context.Context, name, remotePath, localRepoDir 
 }
 
 // Cp copies files to/from a sandbox.
+// Callers use "name:/path" format for remote paths (podman convention).
+// This adapter translates to gjoll's ":/path" format.
 func (a *GjollAdapter) Cp(ctx context.Context, name, src, dest string) error {
+	src = toGjollPath(name, src)
+	dest = toGjollPath(name, dest)
 	return a.runner.Cp(ctx, name, src, dest)
+}
+
+// toGjollPath converts "name:/path" to ":/path" for gjoll.
+func toGjollPath(name, p string) string {
+	prefix := name + ":"
+	if strings.HasPrefix(p, prefix) {
+		return ":" + p[len(prefix):]
+	}
+	return p
 }
 
 // Stop stops a running sandbox.
@@ -71,4 +90,12 @@ func (a *GjollAdapter) Stop(ctx context.Context, name string) error {
 // Down destroys a sandbox.
 func (a *GjollAdapter) Down(ctx context.Context, name string) error {
 	return a.runner.Down(ctx, name)
+}
+
+// HelperScripts returns shell script contents for sandbox-cp and sandbox-ssh.
+func (a *GjollAdapter) HelperScripts(name string) (cpScript, sshScript string) {
+	quoted := shellutil.Quote(name)
+	cpScript = fmt.Sprintf("#!/bin/bash\nset -euo pipefail\ngjoll cp %s \"$1\" \"$2\"\n", quoted)
+	sshScript = fmt.Sprintf("#!/bin/bash\nset -euo pipefail\ngjoll ssh %s -- \"$@\"\n", quoted)
+	return
 }
