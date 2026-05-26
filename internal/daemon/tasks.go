@@ -218,6 +218,7 @@ func (d *Daemon) checkForNewSpecs(ctx context.Context) {
 		}
 		d.running[taskName] = true
 		d.mu.Unlock()
+		d.persistRunning(taskName, true)
 
 		d.wg.Add(1)
 		go func(name, desc string) {
@@ -226,6 +227,7 @@ func (d *Daemon) checkForNewSpecs(ctx context.Context) {
 				d.mu.Lock()
 				delete(d.running, name)
 				d.mu.Unlock()
+				d.persistRunning(name, false)
 			}()
 
 			if err := d.newTaskFunc(context.WithoutCancel(ctx), name, desc, "", 0); err != nil {
@@ -322,6 +324,7 @@ func (d *Daemon) checkForNewIssues(ctx context.Context) {
 		}
 		d.running[taskName] = true
 		d.mu.Unlock()
+		d.persistRunning(taskName, true)
 
 		if err := d.gh.ReactToIssue(ctx, tasksRepo, issue.Number, "rocket"); err != nil {
 			log.Debug("Failed to add rocket reaction to issue", "issue", issue.Number, "error", err)
@@ -334,6 +337,7 @@ func (d *Daemon) checkForNewIssues(ctx context.Context) {
 				d.mu.Lock()
 				delete(d.running, name)
 				d.mu.Unlock()
+				d.persistRunning(name, false)
 			}()
 
 			if err := d.newTaskFunc(context.WithoutCancel(ctx), name, desc, repo, issueNum); err != nil {

@@ -533,6 +533,93 @@ func TestUpdatePR(t *testing.T) {
 	}
 }
 
+func TestSetRunning(t *testing.T) {
+	outputDir := t.TempDir()
+	td, err := Create(outputDir, "running-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := td.SaveMetadata("running-test", "desc", "", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := td.SetRunning(true); err != nil {
+		t.Fatalf("SetRunning(true) error: %v", err)
+	}
+
+	s, err := td.LoadState()
+	if err != nil {
+		t.Fatalf("LoadState() error: %v", err)
+	}
+	if !s.Running {
+		t.Error("expected Running = true")
+	}
+
+	if err := td.SetRunning(false); err != nil {
+		t.Fatalf("SetRunning(false) error: %v", err)
+	}
+
+	s, err = td.LoadState()
+	if err != nil {
+		t.Fatalf("LoadState() error: %v", err)
+	}
+	if s.Running {
+		t.Error("expected Running = false")
+	}
+
+	// Verify omitempty: running key should not appear when false
+	data, err := os.ReadFile(filepath.Join(outputDir, "running-test", "state.json"))
+	if err != nil {
+		t.Fatalf("reading state.json: %v", err)
+	}
+	if strings.Contains(string(data), `"running"`) {
+		t.Errorf("state.json should omit running when false, got: %s", data)
+	}
+}
+
+func TestSetRunningPreservesState(t *testing.T) {
+	outputDir := t.TempDir()
+	td, err := Create(outputDir, "preserve-running")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now().Truncate(time.Second)
+	if err := td.SaveMetadata("preserve-running", "my desc", "author", now); err != nil {
+		t.Fatal(err)
+	}
+	pr := PR{URL: "https://github.com/org/repo/pull/1", Repo: "org/repo", Branch: "fix", Base: "main"}
+	if err := td.AddPR(pr); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := td.SetRunning(true); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := td.LoadState()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if s.Name != "preserve-running" {
+		t.Errorf("Name = %q, want %q", s.Name, "preserve-running")
+	}
+	if s.Description != "my desc" {
+		t.Errorf("Description changed")
+	}
+	if s.Author != "author" {
+		t.Errorf("Author changed")
+	}
+	if len(s.Resources.GitHub.PRs) != 1 {
+		t.Errorf("PRs lost: got %d, want 1", len(s.Resources.GitHub.PRs))
+	}
+	if !s.Running {
+		t.Error("Running should be true")
+	}
+}
+
 func TestAddPR_PopulatesNumber(t *testing.T) {
 	outputDir := t.TempDir()
 	td, err := Create(outputDir, "number-test")

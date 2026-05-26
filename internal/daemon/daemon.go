@@ -105,6 +105,8 @@ func (d *Daemon) Reload(interval time.Duration, allowedCommenters []string, task
 // round-robin, and re-discovers after each full cycle. It also checks
 // the tasks repo for new specs in in-progress/.
 func (d *Daemon) Run(ctx context.Context) error {
+	clearRunningState(d.outputDir)
+
 	for ctx.Err() == nil {
 		// Check for new specs and issues in the tasks repo
 		d.checkForNewSpecs(ctx)
@@ -302,6 +304,7 @@ func (d *Daemon) processPR(ctx context.Context, ref PRRef) {
 	}
 	d.running[ref.TaskName] = true
 	d.mu.Unlock()
+	d.persistRunning(ref.TaskName, true)
 
 	// React rocket to allowed comments just before handoff
 	d.reactToComments(ctx, ref.PR.Repo, newComments, "rocket")
@@ -313,6 +316,7 @@ func (d *Daemon) processPR(ctx context.Context, ref PRRef) {
 			d.mu.Lock()
 			delete(d.running, ref.TaskName)
 			d.mu.Unlock()
+			d.persistRunning(ref.TaskName, false)
 		}()
 
 		if err := d.continueFunc(context.WithoutCancel(ctx), ref.TaskName, prompt); err != nil {
@@ -580,6 +584,40 @@ func (d *Daemon) SetContinueFunc(fn ContinueFunc) {
 // SetNewTaskFunc overrides the function used to launch new tasks (for testing).
 func (d *Daemon) SetNewTaskFunc(fn NewTaskFunc) {
 	d.newTaskFunc = fn
+}
+
+// persistRunning writes the running flag to a task's state.json.
+func (d *Daemon) persistRunning(taskName string, running bool) {
+	td, err := task.Open(d.outputDir, taskName)
+	if err != nil {
+		slog.Warn("Failed to open task dir for running state", "task", taskName, "error", err)
+		return
+	}
+	if err := td.SetRunning(running); err != nil {
+		slog.Warn("Failed to persist running state", "task", taskName, "error", err)
+	}
+}
+
+// clearRunningState resets the running flag in all task state files.
+// Called at daemon startup to clear stale flags from previous crashes.
+func clearRunningState(outputDir string) {
+	names, err := ListTaskDirs(outputDir)
+	if err != nil {
+		return
+	}
+	for _, name := range names {
+		td, err := task.Open(outputDir, name)
+		if err != nil {
+			continue
+		}
+		s, err := td.LoadState()
+		if err != nil || !s.Running {
+			continue
+		}
+		if err := td.SetRunning(false); err != nil {
+			slog.Warn("Failed to clear running state", "task", name, "error", err)
+		}
+	}
 }
 
 // ProcessPR is an exported wrapper for testing.

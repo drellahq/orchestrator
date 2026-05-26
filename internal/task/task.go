@@ -68,6 +68,7 @@ type State struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 	Author      string    `json:"author,omitempty"`
 	Source      *Source   `json:"source,omitempty"`
+	Running     bool      `json:"running,omitempty"`
 	Resources   Resources `json:"resources"`
 }
 
@@ -208,6 +209,19 @@ func (d *Dir) TouchUpdatedAt(t time.Time) error {
 		return err
 	}
 	s.UpdatedAt = t
+	return d.saveStateLocked(s)
+}
+
+// SetRunning updates the running flag in state.json.
+func (d *Dir) SetRunning(running bool) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	s, err := d.loadStateLocked()
+	if err != nil {
+		return err
+	}
+	s.Running = running
 	return d.saveStateLocked(s)
 }
 

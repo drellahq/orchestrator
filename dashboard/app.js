@@ -128,6 +128,7 @@
       created_at: d.created_at || '',
       updated_at: d.updated_at || '',
       author: d.author || '',
+      running: d.running || false,
       prs: (d.resources && d.resources.github && d.resources.github.prs) || [],
     };
   }
@@ -222,10 +223,11 @@
         .join('');
 
       const card = document.createElement('div');
-      card.className = 'task-card';
+      card.className = 'task-card' + (task.running ? ' task-running' : '');
       card.setAttribute('data-task', task.name);
+      const activeIndicator = task.running ? '<span class="active-indicator">⏺️</span> ' : '';
       card.innerHTML =
-        '<div class="task-name">' + escapeHtml(task.name) + '</div>' +
+        '<div class="task-name">' + activeIndicator + escapeHtml(task.name) + '</div>' +
         '<div class="task-desc">' + escapeHtml(task.description) + '</div>' +
         '<div class="task-footer">' +
           '<span class="task-time">' + timeAgo(task.updated_at || task.created_at) + '</span>' +
@@ -475,7 +477,9 @@
       state.tasks.clear();
       for (const m of metas) state.tasks.set(m.name, m);
       if (!state.currentTask) renderTaskList();
-      setStatus(names.length + ' tasks | ' + new Date().toLocaleTimeString());
+      const activeCount = metas.filter((m) => m.running).length;
+      const activePart = activeCount > 0 ? ' (' + activeCount + ' active)' : '';
+      setStatus(names.length + ' tasks' + activePart + ' | ' + new Date().toLocaleTimeString());
     } catch (e) {
       showToast('Error refreshing: ' + e.message);
     }

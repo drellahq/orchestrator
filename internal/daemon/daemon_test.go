@@ -778,6 +778,54 @@ func collectVarArgs(args []string) map[string]string {
 	return result
 }
 
+func TestClearRunningState(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create two tasks, one running and one not
+	createTaskWithPRs(t, dir, "task-running", nil)
+	createTaskWithPRs(t, dir, "task-idle", nil)
+
+	tdRunning, err := task.Open(dir, "task-running")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tdRunning.SetRunning(true); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify precondition
+	s, err := tdRunning.LoadState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !s.Running {
+		t.Fatal("expected task-running to be running before clear")
+	}
+
+	clearRunningState(dir)
+
+	// Both tasks should now have running=false
+	s, err = tdRunning.LoadState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Running {
+		t.Error("expected task-running to have running=false after clear")
+	}
+
+	tdIdle, err := task.Open(dir, "task-idle")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err = tdIdle.LoadState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Running {
+		t.Error("expected task-idle to still have running=false")
+	}
+}
+
 func ghNew(bin string) *gh.Runner {
 	return gh.New(bin)
 }

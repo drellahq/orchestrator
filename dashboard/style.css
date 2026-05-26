@@ -138,6 +138,15 @@ main {
   box-shadow: 0 0 12px rgba(57, 255, 20, 0.05);
 }
 
+.task-card.task-running {
+  border-color: var(--green-dim);
+}
+
+.active-indicator {
+  font-size: 0.7rem;
+  vertical-align: middle;
+}
+
 .task-name {
   font-size: 1rem;
   font-weight: 600;
