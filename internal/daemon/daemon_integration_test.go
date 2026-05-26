@@ -34,6 +34,13 @@ func TestProcessPR_NewCommentsFlow(t *testing.T) {
 	script := filepath.Join(scriptDir, "gh")
 
 	content := `#!/bin/sh
+# Handle reaction API calls without counting
+for arg in "$@"; do
+  if [ "$arg" = "--method" ]; then
+    printf '{}'
+    exit 0
+  fi
+done
 if [ -f ` + countFile + ` ]; then
   n=$(cat ` + countFile + `)
 else
@@ -129,6 +136,13 @@ func TestProcessPR_FiltersUnallowedCommenters(t *testing.T) {
 	script := filepath.Join(scriptDir, "gh")
 
 	content := `#!/bin/sh
+# Handle reaction API calls without counting
+for arg in "$@"; do
+  if [ "$arg" = "--method" ]; then
+    printf '{}'
+    exit 0
+  fi
+done
 if [ -f ` + countFile + ` ]; then
   n=$(cat ` + countFile + `)
 else
@@ -167,7 +181,8 @@ esac
 		t.Error("expected task NOT to be running (all comments filtered)")
 	}
 
-	// LastCommentID should NOT be updated
+	// LastCommentID should be advanced past the rejected comment so it
+	// is not re-processed on the next poll cycle.
 	td, err := task.Open(dir, "filter-test")
 	if err != nil {
 		t.Fatal(err)
@@ -176,7 +191,7 @@ esac
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state.Resources.GitHub.PRs[0].LastCommentID != 0 {
-		t.Errorf("LastCommentID = %d, want 0 (unchanged)", state.Resources.GitHub.PRs[0].LastCommentID)
+	if state.Resources.GitHub.PRs[0].LastCommentID != 1 {
+		t.Errorf("LastCommentID = %d, want 1 (advanced past rejected comment)", state.Resources.GitHub.PRs[0].LastCommentID)
 	}
 }

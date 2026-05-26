@@ -217,6 +217,109 @@ func TestFilterNewComments(t *testing.T) {
 	}
 }
 
+func TestFilterRejectedComments(t *testing.T) {
+	comments := []gh.Comment{
+		{ID: 10, Body: "old", User: gh.CommentUser{Login: "alice"}},
+		{ID: 20, Body: "new from alice", User: gh.CommentUser{Login: "alice"}},
+		{ID: 30, Body: "new from stranger", User: gh.CommentUser{Login: "stranger"}},
+		{ID: 40, Body: "new from bob", User: gh.CommentUser{Login: "bob"}},
+		{ID: 50, Body: "new from another stranger", User: gh.CommentUser{Login: "mallory"}},
+	}
+
+	tests := []struct {
+		name              string
+		lastCommentID     int64
+		allowedCommenters []string
+		wantIDs           []int64
+	}{
+		{
+			name:              "returns only non-allowed new comments",
+			lastCommentID:     15,
+			allowedCommenters: []string{"alice", "bob"},
+			wantIDs:           []int64{30, 50},
+		},
+		{
+			name:              "all comments old",
+			lastCommentID:     100,
+			allowedCommenters: []string{"alice"},
+			wantIDs:           nil,
+		},
+		{
+			name:              "all commenters allowed",
+			lastCommentID:     0,
+			allowedCommenters: []string{"alice", "bob", "stranger", "mallory"},
+			wantIDs:           nil,
+		},
+		{
+			name:              "no allowed commenters means all rejected",
+			lastCommentID:     0,
+			allowedCommenters: []string{},
+			wantIDs:           []int64{10, 20, 30, 40, 50},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := FilterRejectedComments(comments, tt.lastCommentID, tt.allowedCommenters)
+			var gotIDs []int64
+			for _, c := range got {
+				gotIDs = append(gotIDs, c.ID)
+			}
+			if len(gotIDs) != len(tt.wantIDs) {
+				t.Fatalf("got %v, want %v", gotIDs, tt.wantIDs)
+			}
+			for i := range gotIDs {
+				if gotIDs[i] != tt.wantIDs[i] {
+					t.Errorf("ID[%d] = %d, want %d", i, gotIDs[i], tt.wantIDs[i])
+				}
+			}
+		})
+	}
+}
+
+func TestMaxCommentID(t *testing.T) {
+	tests := []struct {
+		name   string
+		slices [][]gh.Comment
+		want   int64
+	}{
+		{
+			name:   "single slice",
+			slices: [][]gh.Comment{{
+				{ID: 10}, {ID: 30}, {ID: 20},
+			}},
+			want: 30,
+		},
+		{
+			name: "multiple slices",
+			slices: [][]gh.Comment{
+				{{ID: 10}, {ID: 20}},
+				{{ID: 50}, {ID: 5}},
+			},
+			want: 50,
+		},
+		{
+			name:   "empty slices",
+			slices: [][]gh.Comment{nil, nil},
+			want:   0,
+		},
+		{
+			name:   "no slices",
+			slices: nil,
+			want:   0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := maxCommentID(tt.slices...)
+			if got != tt.want {
+				t.Errorf("maxCommentID() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestProcessPR_SkipsRunningTask(t *testing.T) {
 	if _, err := exec.LookPath("sh"); err != nil {
 		t.Skip("sh not found")
@@ -284,6 +387,240 @@ func TestProcessPR_SkipsClosedPR(t *testing.T) {
 	}
 	if !state.Resources.GitHub.PRs[0].Closed {
 		t.Error("expected PR to be marked closed")
+	}
+}
+
+// writePRWithCommentsScript creates a fake gh that returns "open" for PR state
+// checks, the given comment JSON for comment fetches, and captures reaction
+// API calls to a file for verification.
+func writePRWithCommentsScript(t *testing.T, issueComments, reviewComments string) (string, string) {
+	t.Helper()
+	dir := t.TempDir()
+	script := filepath.Join(dir, "gh")
+	reactionsFile := filepath.Join(dir, "reactions.txt")
+
+	content := `#!/bin/sh
+REACTIONS_FILE="` + reactionsFile + `"
+ISSUE_COMMENTS='` + issueComments + `'
+REVIEW_COMMENTS='` + reviewComments + `'
+
+# Handle reaction API calls (POST method)
+for arg in "$@"; do
+  if [ "$arg" = "--method" ]; then
+    printf '%s\n' "$*" >> "$REACTIONS_FILE"
+    printf '{}'
+    exit 0
+  fi
+done
+
+# PR state check
+for arg in "$@"; do
+  if [ "$arg" = "--jq" ]; then
+    printf 'open'
+    exit 0
+  fi
+done
+
+# Distinguish issue comments from review comments by URL pattern
+for arg in "$@"; do
+  case "$arg" in
+    */issues/*/comments) printf '%s' "$ISSUE_COMMENTS"; exit 0 ;;
+    */pulls/*/comments) printf '%s' "$REVIEW_COMMENTS"; exit 0 ;;
+  esac
+done
+
+printf '[]'
+`
+	if err := os.WriteFile(script, []byte(content), 0755); err != nil {
+		t.Fatal(err)
+	}
+	return script, reactionsFile
+}
+
+// parseReactions reads the reactions capture file and returns each reaction
+// call as a string of args.
+func parseReactions(t *testing.T, path string) []string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		t.Fatalf("reading reactions file: %v", err)
+	}
+	s := strings.TrimSpace(string(data))
+	if s == "" {
+		return nil
+	}
+	return strings.Split(s, "\n")
+}
+
+func TestProcessPR_ReactsRocketOnAllowed(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not found")
+	}
+
+	dir := t.TempDir()
+	createTaskWithPRs(t, dir, "react-task", []task.PR{
+		{URL: "https://github.com/org/repo/pull/1", Repo: "org/repo", Branch: "fix", Base: "main", Number: 1},
+	})
+
+	commentsJSON := `[{"id":100,"body":"Please fix this","user":{"login":"alice"},"created_at":"2025-01-01T00:00:00Z"}]`
+	script, reactionsFile := writePRWithCommentsScript(t, commentsJSON, "[]")
+
+	d := New(ghNew(script), time.Minute, "", dir, []string{"alice"})
+
+	done := make(chan struct{}, 1)
+	d.SetContinueFunc(func(ctx context.Context, taskName, prompt string) error {
+		done <- struct{}{}
+		return nil
+	})
+
+	d.ProcessPR(context.Background(), PRRef{
+		TaskName:  "react-task",
+		OutputDir: dir,
+		PR:        task.PR{URL: "https://github.com/org/repo/pull/1", Repo: "org/repo", Number: 1},
+	})
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for continueFunc")
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	reactions := parseReactions(t, reactionsFile)
+	if len(reactions) == 0 {
+		t.Fatal("expected at least one reaction call")
+	}
+
+	// Should contain a rocket reaction for the allowed comment
+	found := false
+	for _, r := range reactions {
+		if strings.Contains(r, "content=rocket") && strings.Contains(r, "issues/comments/100") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected rocket reaction on comment 100, got reactions: %v", reactions)
+	}
+}
+
+func TestProcessPR_ReactsConfusedOnRejected(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not found")
+	}
+
+	dir := t.TempDir()
+	createTaskWithPRs(t, dir, "reject-task", []task.PR{
+		{URL: "https://github.com/org/repo/pull/1", Repo: "org/repo", Branch: "fix", Base: "main", Number: 1},
+	})
+
+	// Two comments: one from allowed alice, one from stranger
+	commentsJSON := `[{"id":100,"body":"allowed","user":{"login":"alice"},"created_at":"2025-01-01T00:00:00Z"},{"id":200,"body":"rejected","user":{"login":"stranger"},"created_at":"2025-01-01T01:00:00Z"}]`
+	script, reactionsFile := writePRWithCommentsScript(t, commentsJSON, "[]")
+
+	d := New(ghNew(script), time.Minute, "", dir, []string{"alice"})
+
+	done := make(chan struct{}, 1)
+	d.SetContinueFunc(func(ctx context.Context, taskName, prompt string) error {
+		done <- struct{}{}
+		return nil
+	})
+
+	d.ProcessPR(context.Background(), PRRef{
+		TaskName:  "reject-task",
+		OutputDir: dir,
+		PR:        task.PR{URL: "https://github.com/org/repo/pull/1", Repo: "org/repo", Number: 1},
+	})
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for continueFunc")
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	reactions := parseReactions(t, reactionsFile)
+	if len(reactions) < 2 {
+		t.Fatalf("expected at least 2 reaction calls, got %d: %v", len(reactions), reactions)
+	}
+
+	// Should have confused on stranger's comment (200)
+	foundConfused := false
+	for _, r := range reactions {
+		if strings.Contains(r, "content=confused") && strings.Contains(r, "issues/comments/200") {
+			foundConfused = true
+			break
+		}
+	}
+	if !foundConfused {
+		t.Errorf("expected confused reaction on comment 200, got: %v", reactions)
+	}
+
+	// Should have rocket on alice's comment (100)
+	foundRocket := false
+	for _, r := range reactions {
+		if strings.Contains(r, "content=rocket") && strings.Contains(r, "issues/comments/100") {
+			foundRocket = true
+			break
+		}
+	}
+	if !foundRocket {
+		t.Errorf("expected rocket reaction on comment 100, got: %v", reactions)
+	}
+}
+
+func TestProcessPR_AdvancesLastCommentIDPastRejected(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not found")
+	}
+
+	dir := t.TempDir()
+	createTaskWithPRs(t, dir, "advance-task", []task.PR{
+		{URL: "https://github.com/org/repo/pull/1", Repo: "org/repo", Branch: "fix", Base: "main", Number: 1},
+	})
+
+	// Only a comment from a non-allowed user
+	commentsJSON := `[{"id":300,"body":"from stranger","user":{"login":"stranger"},"created_at":"2025-01-01T00:00:00Z"}]`
+	script, _ := writePRWithCommentsScript(t, commentsJSON, "[]")
+
+	d := New(ghNew(script), time.Minute, "", dir, []string{"alice"})
+
+	called := false
+	d.SetContinueFunc(func(ctx context.Context, taskName, prompt string) error {
+		called = true
+		return nil
+	})
+
+	d.ProcessPR(context.Background(), PRRef{
+		TaskName:  "advance-task",
+		OutputDir: dir,
+		PR:        task.PR{URL: "https://github.com/org/repo/pull/1", Repo: "org/repo", Number: 1},
+	})
+
+	time.Sleep(50 * time.Millisecond)
+
+	// Task should NOT have been launched (no allowed comments)
+	if called {
+		t.Error("continueFunc should not have been called with only rejected comments")
+	}
+
+	// LastCommentID should have advanced past the rejected comment
+	td, err := task.Open(dir, "advance-task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := td.LoadState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Resources.GitHub.PRs) != 1 {
+		t.Fatalf("expected 1 PR, got %d", len(state.Resources.GitHub.PRs))
+	}
+	if state.Resources.GitHub.PRs[0].LastCommentID != 300 {
+		t.Errorf("LastCommentID = %d, want 300", state.Resources.GitHub.PRs[0].LastCommentID)
 	}
 }
 
@@ -445,13 +782,20 @@ func ghNew(bin string) *gh.Runner {
 	return gh.New(bin)
 }
 
-// writeOpenPRScript creates a fake gh that returns "open" for PR state checks
-// and empty arrays for comment fetches.
+// writeOpenPRScript creates a fake gh that returns "open" for PR state checks,
+// empty arrays for comment fetches, and handles reaction API calls.
 func writeOpenPRScript(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	script := filepath.Join(dir, "gh")
 	content := `#!/bin/sh
+# Handle reaction API calls (POST method)
+for arg in "$@"; do
+  if [ "$arg" = "--method" ]; then
+    printf '{}'
+    exit 0
+  fi
+done
 # Check if this is a PR state check (has --jq)
 for arg in "$@"; do
   if [ "$arg" = "--jq" ]; then

@@ -205,17 +205,21 @@ func (d *Daemon) processPR(ctx context.Context, ref PRRef) {
 		return
 	}
 
-	// Filter new comments
+	// Partition new comments into allowed and rejected
 	newComments := FilterNewComments(comments, ref.PR.LastCommentID, d.allowedCommenters)
-	if len(newComments) == 0 {
+	rejectedComments := FilterRejectedComments(comments, ref.PR.LastCommentID, d.allowedCommenters)
+
+	if len(newComments) == 0 && len(rejectedComments) == 0 {
 		log.Debug("No new comments")
 		return
 	}
 
-	log.Info("Found new comments", "count", len(newComments))
+	// React confused to comments from non-allowed users
+	d.reactToComments(ctx, ref.PR.Repo, rejectedComments, "confused")
 
-	// Update LastCommentID before launching to avoid re-processing
-	maxID := newComments[len(newComments)-1].ID
+	// Advance LastCommentID past all new comments (both allowed and rejected)
+	// so that rejected comments are not re-processed every poll cycle.
+	maxID := maxCommentID(newComments, rejectedComments)
 	td, err := task.Open(ref.OutputDir, ref.TaskName)
 	if err != nil {
 		log.Warn("Failed to open task dir", "error", err)
@@ -227,6 +231,13 @@ func (d *Daemon) processPR(ctx context.Context, ref PRRef) {
 		log.Warn("Failed to update LastCommentID", "error", err)
 		return
 	}
+
+	if len(newComments) == 0 {
+		log.Debug("No new comments from allowed users")
+		return
+	}
+
+	log.Info("Found new comments", "count", len(newComments))
 
 	prompt := FormatCommentsAsPrompt(newComments)
 
@@ -241,6 +252,9 @@ func (d *Daemon) processPR(ctx context.Context, ref PRRef) {
 	}
 	d.running[ref.TaskName] = true
 	d.mu.Unlock()
+
+	// React rocket to allowed comments just before handoff
+	d.reactToComments(ctx, ref.PR.Repo, newComments, "rocket")
 
 	go func() {
 		defer func() {
@@ -274,6 +288,50 @@ func FilterNewComments(comments []gh.Comment, lastCommentID int64, allowedCommen
 		result = append(result, c)
 	}
 	return result
+}
+
+// FilterRejectedComments returns comments with ID > lastCommentID whose user
+// is NOT in the allowed list. This is the complement of FilterNewComments for
+// the same ID-filtered set.
+func FilterRejectedComments(comments []gh.Comment, lastCommentID int64, allowedCommenters []string) []gh.Comment {
+	allowed := make(map[string]bool, len(allowedCommenters))
+	for _, u := range allowedCommenters {
+		allowed[u] = true
+	}
+
+	var result []gh.Comment
+	for _, c := range comments {
+		if c.ID <= lastCommentID {
+			continue
+		}
+		if !allowed[c.User.Login] {
+			result = append(result, c)
+		}
+	}
+	return result
+}
+
+// maxCommentID returns the highest comment ID across multiple slices.
+func maxCommentID(slices ...[]gh.Comment) int64 {
+	var max int64
+	for _, s := range slices {
+		for _, c := range s {
+			if c.ID > max {
+				max = c.ID
+			}
+		}
+	}
+	return max
+}
+
+// reactToComments adds a reaction to each comment, logging failures without
+// returning an error (reactions are best-effort and must not block task dispatch).
+func (d *Daemon) reactToComments(ctx context.Context, repo string, comments []gh.Comment, reaction string) {
+	for _, c := range comments {
+		if err := d.gh.ReactToComment(ctx, repo, c.ID, c.Type, reaction); err != nil {
+			slog.Debug("Failed to add reaction", "comment_id", c.ID, "reaction", reaction, "error", err)
+		}
+	}
 }
 
 // FormatCommentsAsPrompt formats comments as a chronological prompt.

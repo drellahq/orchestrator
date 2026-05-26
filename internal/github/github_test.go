@@ -802,6 +802,78 @@ func TestPostReview(t *testing.T) {
 	}
 }
 
+func TestReactToComment_IssueComment(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not found")
+	}
+
+	script, outFile := writeArgCapture(t, "{}")
+	r := New(script)
+
+	err := r.ReactToComment(context.Background(), "org/repo", 42, IssueComment, "rocket")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	gotArgs := readArgs(t, outFile)
+	wantArgs := []string{"api", "--method", "POST", "/repos/org/repo/issues/comments/42/reactions", "-f", "content=rocket"}
+	if !equalArgs(gotArgs, wantArgs) {
+		t.Errorf("got args %v, want %v", gotArgs, wantArgs)
+	}
+}
+
+func TestReactToComment_ReviewComment(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not found")
+	}
+
+	script, outFile := writeArgCapture(t, "{}")
+	r := New(script)
+
+	err := r.ReactToComment(context.Background(), "org/repo", 99, ReviewComment, "confused")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	gotArgs := readArgs(t, outFile)
+	wantArgs := []string{"api", "--method", "POST", "/repos/org/repo/pulls/comments/99/reactions", "-f", "content=confused"}
+	if !equalArgs(gotArgs, wantArgs) {
+		t.Errorf("got args %v, want %v", gotArgs, wantArgs)
+	}
+}
+
+func TestReactToComment_UnknownType(t *testing.T) {
+	r := New("echo")
+
+	err := r.ReactToComment(context.Background(), "org/repo", 1, CommentType("unknown"), "rocket")
+	if err == nil {
+		t.Fatal("expected error for unknown comment type")
+	}
+	if !strings.Contains(err.Error(), "unknown comment type") {
+		t.Errorf("error = %q, want mention of unknown comment type", err.Error())
+	}
+}
+
+func TestReactToIssue(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not found")
+	}
+
+	script, outFile := writeArgCapture(t, "{}")
+	r := New(script)
+
+	err := r.ReactToIssue(context.Background(), "org/tasks", 7, "rocket")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	gotArgs := readArgs(t, outFile)
+	wantArgs := []string{"api", "--method", "POST", "/repos/org/tasks/issues/7/reactions", "-f", "content=rocket"}
+	if !equalArgs(gotArgs, wantArgs) {
+		t.Errorf("got args %v, want %v", gotArgs, wantArgs)
+	}
+}
+
 func equalArgs(got, want []string) bool {
 	if len(got) != len(want) {
 		return false
