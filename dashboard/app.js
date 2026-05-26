@@ -225,7 +225,7 @@
       const card = document.createElement('div');
       card.className = 'task-card' + (task.running ? ' task-running' : '');
       card.setAttribute('data-task', task.name);
-      const activeIndicator = task.running ? '<span class="active-indicator">⏺️</span> ' : '';
+      const activeIndicator = task.running ? '<span class="active-indicator" title="Task is in progress">⚙️</span> ' : '';
       card.innerHTML =
         '<div class="task-name">' + activeIndicator + escapeHtml(task.name) + '</div>' +
         '<div class="task-desc">' + escapeHtml(task.description) + '</div>' +

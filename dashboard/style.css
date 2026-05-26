@@ -145,6 +145,13 @@ main {
 .active-indicator {
   font-size: 0.7rem;
   vertical-align: middle;
+  display: inline-block;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
 }
 
 .task-name {
