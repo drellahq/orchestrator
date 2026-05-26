@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -132,19 +133,26 @@ func TestFormatCommentsAsPrompt(t *testing.T) {
 		want     string
 	}{
 		{
-			name: "single comment",
+			name: "single comment without URL",
 			comments: []gh.Comment{
 				{ID: 1, Body: "Please fix this", User: gh.CommentUser{Login: "alice"}, CreatedAt: "2025-01-01T00:00:00Z", Type: gh.IssueComment},
 			},
 			want: prompts.OnPRComment + "\n@alice at 2025-01-01T00:00:00Z:\n\nPlease fix this\n",
 		},
 		{
+			name: "single comment with URL",
+			comments: []gh.Comment{
+				{ID: 1, Body: "Please fix this", User: gh.CommentUser{Login: "alice"}, CreatedAt: "2025-01-01T00:00:00Z", Type: gh.IssueComment, HTMLURL: "https://github.com/org/repo/pull/42#issuecomment-1"},
+			},
+			want: prompts.OnPRComment + "\n@alice at 2025-01-01T00:00:00Z (https://github.com/org/repo/pull/42#issuecomment-1):\n\nPlease fix this\n",
+		},
+		{
 			name: "multiple comments with review",
 			comments: []gh.Comment{
 				{ID: 1, Body: "First", User: gh.CommentUser{Login: "alice"}, CreatedAt: "2025-01-01T00:00:00Z", Type: gh.IssueComment},
-				{ID: 2, Body: "Nit here", User: gh.CommentUser{Login: "bob"}, CreatedAt: "2025-01-01T01:00:00Z", Type: gh.ReviewComment, Path: "main.go"},
+				{ID: 2, Body: "Nit here", User: gh.CommentUser{Login: "bob"}, CreatedAt: "2025-01-01T01:00:00Z", Type: gh.ReviewComment, Path: "main.go", HTMLURL: "https://github.com/org/repo/pull/42#discussion_r2"},
 			},
-			want: prompts.OnPRComment + "\n@alice at 2025-01-01T00:00:00Z:\n\nFirst\n\n---\n\n@bob at 2025-01-01T01:00:00Z on main.go:\n\nNit here\n",
+			want: prompts.OnPRComment + "\n@alice at 2025-01-01T00:00:00Z:\n\nFirst\n\n---\n\n@bob at 2025-01-01T01:00:00Z on main.go (https://github.com/org/repo/pull/42#discussion_r2):\n\nNit here\n",
 		},
 	}
 
@@ -776,6 +784,106 @@ func collectVarArgs(args []string) map[string]string {
 		}
 	}
 	return result
+}
+
+func TestWriteTriggerEntry(t *testing.T) {
+	dir := t.TempDir()
+	transcriptPath := filepath.Join(dir, "transcript.jsonl")
+
+	comments := []gh.Comment{
+		{
+			ID:        100,
+			HTMLURL:   "https://github.com/org/repo/pull/42#issuecomment-100",
+			Body:      "Please fix the typo",
+			User:      gh.CommentUser{Login: "alice"},
+			CreatedAt: "2025-01-15T10:00:00Z",
+			Type:      gh.IssueComment,
+		},
+		{
+			ID:        200,
+			HTMLURL:   "https://github.com/org/repo/pull/42#discussion_r200",
+			Body:      "Rename this variable",
+			User:      gh.CommentUser{Login: "bob"},
+			CreatedAt: "2025-01-15T11:00:00Z",
+			Type:      gh.ReviewComment,
+			Path:      "main.go",
+		},
+	}
+
+	if err := WriteTriggerEntry(transcriptPath, comments); err != nil {
+		t.Fatalf("WriteTriggerEntry() error: %v", err)
+	}
+
+	data, err := os.ReadFile(transcriptPath)
+	if err != nil {
+		t.Fatalf("reading transcript: %v", err)
+	}
+
+	// Should be valid JSON ending with newline
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("expected 1 line, got %d", len(lines))
+	}
+
+	var entry struct {
+		Type     string `json:"type"`
+		Comments []struct {
+			User      string `json:"user"`
+			CreatedAt string `json:"created_at"`
+			HTMLURL   string `json:"html_url"`
+			Path      string `json:"path"`
+			Body      string `json:"body"`
+		} `json:"comments"`
+	}
+	if err := json.Unmarshal([]byte(lines[0]), &entry); err != nil {
+		t.Fatalf("unmarshaling trigger entry: %v", err)
+	}
+
+	if entry.Type != "trigger" {
+		t.Errorf("type = %q, want %q", entry.Type, "trigger")
+	}
+	if len(entry.Comments) != 2 {
+		t.Fatalf("got %d comments, want 2", len(entry.Comments))
+	}
+	if entry.Comments[0].User != "alice" {
+		t.Errorf("comment[0].user = %q, want %q", entry.Comments[0].User, "alice")
+	}
+	if entry.Comments[0].HTMLURL != "https://github.com/org/repo/pull/42#issuecomment-100" {
+		t.Errorf("comment[0].html_url = %q", entry.Comments[0].HTMLURL)
+	}
+	if entry.Comments[1].Path != "main.go" {
+		t.Errorf("comment[1].path = %q, want %q", entry.Comments[1].Path, "main.go")
+	}
+}
+
+func TestWriteTriggerEntry_Appends(t *testing.T) {
+	dir := t.TempDir()
+	transcriptPath := filepath.Join(dir, "transcript.jsonl")
+
+	// Write some existing content
+	if err := os.WriteFile(transcriptPath, []byte(`{"type":"system","subtype":"init"}`+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	comments := []gh.Comment{
+		{ID: 1, Body: "test", User: gh.CommentUser{Login: "alice"}, Type: gh.IssueComment},
+	}
+
+	if err := WriteTriggerEntry(transcriptPath, comments); err != nil {
+		t.Fatalf("WriteTriggerEntry() error: %v", err)
+	}
+
+	data, err := os.ReadFile(transcriptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 lines (existing + trigger), got %d", len(lines))
+	}
+	if !strings.Contains(lines[1], `"type":"trigger"`) {
+		t.Errorf("second line should be trigger entry: %s", lines[1])
+	}
 }
 
 func ghNew(bin string) *gh.Runner {

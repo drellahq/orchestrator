@@ -20,6 +20,7 @@ const (
 // review-level PR comments.
 type Comment struct {
 	ID        int64       `json:"id"`
+	HTMLURL   string      `json:"html_url,omitempty"`
 	Body      string      `json:"body"`
 	User      CommentUser `json:"user"`
 	CreatedAt string      `json:"created_at"`

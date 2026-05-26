@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -291,6 +292,13 @@ func (d *Daemon) processPR(ctx context.Context, ref PRRef) {
 
 	prompt := FormatCommentsAsPrompt(newComments)
 
+	// Write a trigger entry to the transcript so the dashboard can show
+	// which GitHub comments triggered this sub-run.
+	transcriptPath := task.TranscriptPathFor(ref.OutputDir, ref.TaskName)
+	if err := WriteTriggerEntry(transcriptPath, newComments); err != nil {
+		log.Warn("Failed to write trigger entry", "error", err)
+	}
+
 	// Re-check and set running atomically — between the first check
 	// above and here, another goroutine could have started a continue
 	// for the same task (e.g. via concurrent ProcessPR calls).
@@ -401,6 +409,9 @@ func FormatCommentsAsPrompt(comments []gh.Comment) string {
 		header := fmt.Sprintf("@%s at %s", c.User.Login, c.CreatedAt)
 		if c.Type == gh.ReviewComment && c.Path != "" {
 			header += fmt.Sprintf(" on %s", c.Path)
+		}
+		if c.HTMLURL != "" {
+			header += fmt.Sprintf(" (%s)", c.HTMLURL)
 		}
 		sb.WriteString(header + ":\n\n")
 		sb.WriteString(c.Body)
@@ -592,4 +603,46 @@ func (d *Daemon) RunningCount() int {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return len(d.running)
+}
+
+// triggerEntry is a JSON-serializable entry written to the transcript
+// before a sub-run to record what triggered it.
+type triggerEntry struct {
+	Type     string           `json:"type"`
+	Comments []triggerComment `json:"comments"`
+}
+
+type triggerComment struct {
+	User      string `json:"user"`
+	CreatedAt string `json:"created_at"`
+	HTMLURL   string `json:"html_url,omitempty"`
+	Path      string `json:"path,omitempty"`
+	Body      string `json:"body"`
+}
+
+// WriteTriggerEntry appends a trigger entry to the transcript file
+// recording which GitHub comments triggered this sub-run.
+func WriteTriggerEntry(transcriptPath string, comments []gh.Comment) error {
+	entry := triggerEntry{Type: "trigger"}
+	for _, c := range comments {
+		entry.Comments = append(entry.Comments, triggerComment{
+			User:      c.User.Login,
+			CreatedAt: c.CreatedAt,
+			HTMLURL:   c.HTMLURL,
+			Path:      c.Path,
+			Body:      c.Body,
+		})
+	}
+	data, err := json.Marshal(entry)
+	if err != nil {
+		return fmt.Errorf("marshaling trigger entry: %w", err)
+	}
+	f, err := os.OpenFile(transcriptPath, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
+	if err != nil {
+		return fmt.Errorf("opening transcript: %w", err)
+	}
+	defer f.Close()
+	data = append(data, '\n')
+	_, err = f.Write(data)
+	return err
 }

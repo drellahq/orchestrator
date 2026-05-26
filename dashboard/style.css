@@ -193,6 +193,50 @@ main {
 
 /* --- Task Detail --- */
 
+#task-detail {
+  display: flex;
+  gap: 0;
+}
+
+.run-nav {
+  position: sticky;
+  top: 50px;
+  align-self: flex-start;
+  width: 110px;
+  flex-shrink: 0;
+  padding: 0.5rem 0;
+  font-size: 0.7rem;
+  border-right: 1px solid var(--border);
+  max-height: calc(100vh - 50px);
+  overflow-y: auto;
+}
+.run-nav:empty {
+  display: none;
+}
+.run-nav a {
+  display: block;
+  padding: 0.3rem 0.75rem;
+  color: var(--text-dim);
+  text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.run-nav a:hover {
+  color: var(--cyan);
+  background: rgba(88, 166, 255, 0.05);
+  text-decoration: none;
+}
+.run-nav .run-label {
+  color: var(--cyan);
+  font-weight: 600;
+}
+
+.detail-content {
+  flex: 1;
+  min-width: 0;
+}
+
 .detail-nav {
   display: flex;
   align-items: center;
@@ -289,6 +333,37 @@ main {
 .entry-system .sys-label {
   color: var(--cyan);
   font-weight: 600;
+}
+
+/* Trigger reference */
+.entry-trigger {
+  background: var(--bg-card);
+  border-left-color: var(--amber);
+  color: var(--text-dim);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+.entry-trigger .trigger-header {
+  color: var(--amber);
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+.entry-trigger .trigger-comment {
+  padding: 0.25rem 0;
+}
+.entry-trigger .trigger-comment + .trigger-comment {
+  border-top: 1px solid var(--border);
+}
+.entry-trigger .trigger-meta {
+  color: var(--text-dim);
+}
+.entry-trigger .trigger-meta a {
+  color: var(--cyan);
+}
+.entry-trigger .trigger-body {
+  color: var(--text);
+  margin-top: 0.15rem;
+  white-space: pre-wrap;
 }
 
 /* Assistant text */
@@ -435,5 +510,8 @@ main {
   .entry {
     padding: 0.4rem 0.5rem;
     font-size: 0.75rem;
+  }
+  .run-nav {
+    display: none;
   }
 }
