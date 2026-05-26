@@ -210,6 +210,10 @@ func executeTask(ctx context.Context, taskName, taskDescription string, taskDir 
 
 	slog.Info("Sandbox provisioned", "task", taskName)
 
+	if err := taskDir.SetStatus(task.StatusInProgress); err != nil {
+		slog.Warn("Failed to set status to in_progress", "task", taskName, "error", err)
+	}
+
 	if !continueSession {
 		if err := setupSandbox(ctx, runner, taskName, taskDir, cfg, profileName, profileVars); err != nil {
 			return fmt.Errorf("setting up sandbox: %w", err)
@@ -269,6 +273,19 @@ func executeTask(ctx context.Context, taskName, taskDescription string, taskDir 
 
 	if err := taskDir.TouchUpdatedAt(time.Now()); err != nil {
 		slog.Warn("Failed to update updated_at", "task", taskName, "error", err)
+	}
+
+	state, err := taskDir.LoadState()
+	if err != nil {
+		slog.Warn("Failed to load state for status update", "task", taskName, "error", err)
+	} else {
+		finalStatus := task.StatusDone
+		if state.HasOpenPRs() {
+			finalStatus = task.StatusWaiting
+		}
+		if err := taskDir.SetStatus(finalStatus); err != nil {
+			slog.Warn("Failed to set final status", "task", taskName, "error", err)
+		}
 	}
 
 	slog.Info("Task completed", "task", taskName)
