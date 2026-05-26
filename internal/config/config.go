@@ -16,6 +16,7 @@ type DaemonConfig struct {
 }
 
 type Config struct {
+	VCSProvider  string       `yaml:"vcs_provider"`
 	SlackWebhook string       `yaml:"slack_webhook"`
 	OutputDir    string       `yaml:"output_dir"`
 	GjollEnv     string       `yaml:"gjoll_env"`

@@ -111,11 +111,11 @@ esac
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(state.Resources.GitHub.PRs) != 1 {
-		t.Fatalf("expected 1 PR, got %d", len(state.Resources.GitHub.PRs))
+	if len(state.Resources.PRs()) != 1 {
+		t.Fatalf("expected 1 PR, got %d", len(state.Resources.PRs()))
 	}
-	if state.Resources.GitHub.PRs[0].LastCommentID != 52 {
-		t.Errorf("LastCommentID = %d, want 52", state.Resources.GitHub.PRs[0].LastCommentID)
+	if state.Resources.PRs()[0].LastCommentID != 52 {
+		t.Errorf("LastCommentID = %d, want 52", state.Resources.PRs()[0].LastCommentID)
 	}
 }
 
@@ -191,7 +191,7 @@ esac
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state.Resources.GitHub.PRs[0].LastCommentID != 1 {
-		t.Errorf("LastCommentID = %d, want 1 (advanced past rejected comment)", state.Resources.GitHub.PRs[0].LastCommentID)
+	if state.Resources.PRs()[0].LastCommentID != 1 {
+		t.Errorf("LastCommentID = %d, want 1 (advanced past rejected comment)", state.Resources.PRs()[0].LastCommentID)
 	}
 }

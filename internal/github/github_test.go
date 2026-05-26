@@ -755,6 +755,47 @@ func TestPostReview(t *testing.T) {
 	}
 }
 
+func TestPRNumberFromURL(t *testing.T) {
+	r := New("")
+	tests := []struct {
+		url     string
+		want    int
+		wantErr bool
+	}{
+		{"https://github.com/org/repo/pull/42", 42, false},
+		{"https://github.com/org/repo/pull/1", 1, false},
+		{"https://github.com/org/repo/pull/123/files", 123, false},
+		{"https://github.com/org/repo/issues/5", 0, true},
+		{"not-a-url", 0, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.url, func(t *testing.T) {
+			got, err := r.PRNumberFromURL(tt.url)
+			if tt.wantErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("got %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRepoURL(t *testing.T) {
+	r := New("")
+	got := r.RepoURL("org/repo")
+	want := "https://github.com/org/repo.git"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
 func TestReactToComment_IssueComment(t *testing.T) {
 	if _, err := exec.LookPath("sh"); err != nil {
 		t.Skip("sh not found")
@@ -763,7 +804,7 @@ func TestReactToComment_IssueComment(t *testing.T) {
 	script, outFile := writeArgCapture(t, "{}")
 	r := New(script)
 
-	err := r.ReactToComment(context.Background(), "org/repo", 42, IssueComment, "rocket")
+	err := r.ReactToComment(context.Background(), "org/repo", 0, 42, IssueComment, "rocket")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -783,7 +824,7 @@ func TestReactToComment_ReviewComment(t *testing.T) {
 	script, outFile := writeArgCapture(t, "{}")
 	r := New(script)
 
-	err := r.ReactToComment(context.Background(), "org/repo", 99, ReviewComment, "confused")
+	err := r.ReactToComment(context.Background(), "org/repo", 0, 99, ReviewComment, "confused")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -798,7 +839,7 @@ func TestReactToComment_ReviewComment(t *testing.T) {
 func TestReactToComment_UnknownType(t *testing.T) {
 	r := New("echo")
 
-	err := r.ReactToComment(context.Background(), "org/repo", 1, CommentType("unknown"), "rocket")
+	err := r.ReactToComment(context.Background(), "org/repo", 0, 1, CommentType("unknown"), "rocket")
 	if err == nil {
 		t.Fatal("expected error for unknown comment type")
 	}

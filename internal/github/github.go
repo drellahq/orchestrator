@@ -3,14 +3,25 @@ package github
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 
 	"github.com/drellabot/orchestrator/internal/shellutil"
+	"github.com/drellabot/orchestrator/internal/vcs"
 )
+
+var _ vcs.Provider = (*Runner)(nil)
+
+func init() {
+	vcs.Register("github", func() vcs.Provider {
+		return New("")
+	})
+}
 
 // Runner wraps the gh CLI for GitHub operations (fork, push, PR).
 type Runner struct {
@@ -74,7 +85,7 @@ func (r *Runner) EnsureFork(ctx context.Context, upstream string) (string, error
 // AddCoAuthorTrailers fetches the upstream base branch, identifies new commits
 // on sourceRef, and appends the given trailer to each commit that lacks it.
 func (r *Runner) AddCoAuthorTrailers(ctx context.Context, repoDir, upstream, base, sourceRef, trailer string) error {
-	upstreamURL := "https://github.com/" + upstream + ".git"
+	upstreamURL := r.RepoURL(upstream)
 	return r.addCoAuthorTrailers(ctx, "git", repoDir, upstreamURL, base, sourceRef, trailer)
 }
 
@@ -155,7 +166,7 @@ func (r *Runner) pushBranch(ctx context.Context, gitBin, repoDir, forkFullName, 
 	}
 
 	// Add or update the fork remote
-	forkURL := "https://github.com/" + forkFullName + ".git"
+	forkURL := r.RepoURL(forkFullName)
 	// Try adding first; if it already exists, update the URL
 	if _, err := r.run(ctx, repoDir, gitBin, "remote", "add", "fork", forkURL); err != nil {
 		if _, err := r.run(ctx, repoDir, gitBin, "remote", "set-url", "fork", forkURL); err != nil {
@@ -250,7 +261,7 @@ func (r *Runner) PostReview(ctx context.Context, repo string, pr int, event, bod
 // commentType determines the endpoint: IssueComment uses the issues API,
 // ReviewComment uses the pulls API.
 // reaction must be one of: +1, -1, laugh, confused, heart, hooray, rocket, eyes.
-func (r *Runner) ReactToComment(ctx context.Context, repo string, commentID int64, commentType CommentType, reaction string) error {
+func (r *Runner) ReactToComment(ctx context.Context, repo string, prNumber int, commentID int64, commentType CommentType, reaction string) error {
 	var endpoint string
 	switch commentType {
 	case IssueComment:
@@ -287,16 +298,11 @@ func (r *Runner) CloneRepo(ctx context.Context, repo, dir string) error {
 	return nil
 }
 
-// Issue represents a GitHub issue (not a pull request).
-type Issue struct {
-	Number int         `json:"number"`
-	Title  string      `json:"title"`
-	Body   string      `json:"body"`
-	User   CommentUser `json:"user"`
-}
+// Issue is a type alias for backward compatibility.
+type Issue = vcs.Issue
 
 // ListIssues returns open issues (excluding pull requests) for a repo.
-func (r *Runner) ListIssues(ctx context.Context, repo string) ([]Issue, error) {
+func (r *Runner) ListIssues(ctx context.Context, repo string) ([]vcs.Issue, error) {
 	endpoint := fmt.Sprintf("/repos/%s/issues?state=open&per_page=100", repo)
 	out, err := r.run(ctx, "", r.bin, "api", "--paginate", endpoint)
 	if err != nil {
@@ -309,10 +315,10 @@ func (r *Runner) ListIssues(ctx context.Context, repo string) ([]Issue, error) {
 
 	// gh api --paginate may concatenate JSON arrays.
 	type rawIssue struct {
-		Number      int         `json:"number"`
-		Title       string      `json:"title"`
-		Body        string      `json:"body"`
-		User        CommentUser `json:"user"`
+		Number      int             `json:"number"`
+		Title       string          `json:"title"`
+		Body        string          `json:"body"`
+		User        vcs.CommentUser `json:"user"`
 		PullRequest *struct {
 			URL string `json:"url"`
 		} `json:"pull_request"`
@@ -328,12 +334,12 @@ func (r *Runner) ListIssues(ctx context.Context, repo string) ([]Issue, error) {
 		all = append(all, page...)
 	}
 
-	var issues []Issue
+	var issues []vcs.Issue
 	for _, ri := range all {
 		if ri.PullRequest != nil {
 			continue
 		}
-		issues = append(issues, Issue{
+		issues = append(issues, vcs.Issue{
 			Number: ri.Number,
 			Title:  ri.Title,
 			Body:   ri.Body,
@@ -341,6 +347,60 @@ func (r *Runner) ListIssues(ctx context.Context, repo string) ([]Issue, error) {
 		})
 	}
 	return issues, nil
+}
+
+// ListRepoFiles lists files in a directory of a GitHub repository at a given branch/ref.
+func (r *Runner) ListRepoFiles(ctx context.Context, repo, branch, dir string) ([]string, error) {
+	endpoint := fmt.Sprintf("/repos/%s/contents/%s?ref=%s", repo, dir, branch)
+	out, err := r.run(ctx, "", r.bin, "api", endpoint, "--jq", ".[].name")
+	if err != nil {
+		return nil, fmt.Errorf("listing repo files: %w", err)
+	}
+	out = strings.TrimSpace(out)
+	if out == "" {
+		return nil, nil
+	}
+	return strings.Split(out, "\n"), nil
+}
+
+// GetFileContent fetches the content of a file from a GitHub repository at a given branch/ref.
+func (r *Runner) GetFileContent(ctx context.Context, repo, branch, path string) (string, error) {
+	endpoint := fmt.Sprintf("/repos/%s/contents/%s?ref=%s", repo, path, branch)
+	out, err := r.run(ctx, "", r.bin, "api", endpoint, "--jq", ".content")
+	if err != nil {
+		return "", fmt.Errorf("getting file content: %w", err)
+	}
+	out = strings.TrimSpace(out)
+	// GitHub returns base64-encoded content
+	decoded, err := base64.StdEncoding.DecodeString(strings.ReplaceAll(out, "\n", ""))
+	if err != nil {
+		return "", fmt.Errorf("decoding file content: %w", err)
+	}
+	return string(decoded), nil
+}
+
+// PRNumberFromURL extracts the pull request number from a GitHub PR URL
+// of the form https://github.com/owner/repo/pull/42.
+func (r *Runner) PRNumberFromURL(url string) (int, error) {
+	const prefix = "/pull/"
+	idx := strings.LastIndex(url, prefix)
+	if idx == -1 {
+		return 0, fmt.Errorf("URL does not contain /pull/: %s", url)
+	}
+	numStr := url[idx+len(prefix):]
+	if i := strings.Index(numStr, "/"); i != -1 {
+		numStr = numStr[:i]
+	}
+	n, err := strconv.Atoi(numStr)
+	if err != nil {
+		return 0, fmt.Errorf("invalid PR number in URL %s: %w", url, err)
+	}
+	return n, nil
+}
+
+// RepoURL returns the HTTPS clone URL for a GitHub repository.
+func (r *Runner) RepoURL(repo string) string {
+	return "https://github.com/" + repo + ".git"
 }
 
 func (r *Runner) run(ctx context.Context, dir, name string, args ...string) (string, error) {

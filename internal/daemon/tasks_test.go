@@ -13,6 +13,7 @@ import (
 	"time"
 
 	gh "github.com/drellabot/orchestrator/internal/github"
+	"github.com/drellabot/orchestrator/internal/vcs"
 )
 
 func TestTaskNameFromSpec(t *testing.T) {
@@ -533,7 +534,7 @@ printf '%%s' '%s'
 	return script, reactionsFile
 }
 
-func makeIssuesJSON(t *testing.T, issues []gh.Issue) string {
+func makeIssuesJSON(t *testing.T, issues []vcs.Issue) string {
 	t.Helper()
 	data, err := json.Marshal(issues)
 	if err != nil {
@@ -671,8 +672,8 @@ func TestCheckForNewIssues_PicksUpNewIssue(t *testing.T) {
 
 	dir := t.TempDir()
 
-	issues := []gh.Issue{
-		{Number: 7, Title: "Add dark mode", Body: "Please add a dark mode toggle.", User: gh.CommentUser{Login: "alice"}},
+	issues := []vcs.Issue{
+		{Number: 7, Title: "Add dark mode", Body: "Please add a dark mode toggle.", User: vcs.CommentUser{Login: "alice"}},
 	}
 	script := writeIssuesScript(t, makeIssuesJSON(t, issues))
 
@@ -742,8 +743,8 @@ func TestCheckForNewIssues_FallsBackToTitle(t *testing.T) {
 
 	dir := t.TempDir()
 
-	issues := []gh.Issue{
-		{Number: 3, Title: "Fix the login bug", Body: "", User: gh.CommentUser{Login: "alice"}},
+	issues := []vcs.Issue{
+		{Number: 3, Title: "Fix the login bug", Body: "", User: vcs.CommentUser{Login: "alice"}},
 	}
 	script := writeIssuesScript(t, makeIssuesJSON(t, issues))
 
@@ -778,8 +779,8 @@ func TestCheckForNewIssues_SkipsUnallowedAuthor(t *testing.T) {
 
 	dir := t.TempDir()
 
-	issues := []gh.Issue{
-		{Number: 7, Title: "Add dark mode", Body: "content", User: gh.CommentUser{Login: "stranger"}},
+	issues := []vcs.Issue{
+		{Number: 7, Title: "Add dark mode", Body: "content", User: vcs.CommentUser{Login: "stranger"}},
 	}
 	script := writeIssuesScript(t, makeIssuesJSON(t, issues))
 
@@ -823,8 +824,8 @@ func TestCheckForNewIssues_SkipsAlreadyProcessed(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	issues := []gh.Issue{
-		{Number: 7, Title: "Add dark mode", Body: "content", User: gh.CommentUser{Login: "alice"}},
+	issues := []vcs.Issue{
+		{Number: 7, Title: "Add dark mode", Body: "content", User: vcs.CommentUser{Login: "alice"}},
 	}
 	script := writeIssuesScript(t, makeIssuesJSON(t, issues))
 
@@ -852,8 +853,8 @@ func TestCheckForNewIssues_SkipsRunningTask(t *testing.T) {
 
 	dir := t.TempDir()
 
-	issues := []gh.Issue{
-		{Number: 7, Title: "Add dark mode", Body: "content", User: gh.CommentUser{Login: "alice"}},
+	issues := []vcs.Issue{
+		{Number: 7, Title: "Add dark mode", Body: "content", User: vcs.CommentUser{Login: "alice"}},
 	}
 	script := writeIssuesScript(t, makeIssuesJSON(t, issues))
 
@@ -937,9 +938,9 @@ func TestCheckForNewIssues_MultipleIssues(t *testing.T) {
 
 	dir := t.TempDir()
 
-	issues := []gh.Issue{
-		{Number: 1, Title: "Issue A", Body: "Body A", User: gh.CommentUser{Login: "alice"}},
-		{Number: 2, Title: "Issue B", Body: "Body B", User: gh.CommentUser{Login: "alice"}},
+	issues := []vcs.Issue{
+		{Number: 1, Title: "Issue A", Body: "Body A", User: vcs.CommentUser{Login: "alice"}},
+		{Number: 2, Title: "Issue B", Body: "Body B", User: vcs.CommentUser{Login: "alice"}},
 	}
 	script := writeIssuesScript(t, makeIssuesJSON(t, issues))
 
@@ -991,8 +992,8 @@ func TestCheckForNewIssues_IdempotentAcrossCalls(t *testing.T) {
 
 	dir := t.TempDir()
 
-	issues := []gh.Issue{
-		{Number: 42, Title: "Feature", Body: "Description", User: gh.CommentUser{Login: "alice"}},
+	issues := []vcs.Issue{
+		{Number: 42, Title: "Feature", Body: "Description", User: vcs.CommentUser{Login: "alice"}},
 	}
 	script := writeIssuesScript(t, makeIssuesJSON(t, issues))
 
@@ -1037,8 +1038,8 @@ func TestCheckForNewIssues_SetsRunningState(t *testing.T) {
 
 	dir := t.TempDir()
 
-	issues := []gh.Issue{
-		{Number: 5, Title: "My task", Body: "content", User: gh.CommentUser{Login: "alice"}},
+	issues := []vcs.Issue{
+		{Number: 5, Title: "My task", Body: "content", User: vcs.CommentUser{Login: "alice"}},
 	}
 	script := writeIssuesScript(t, makeIssuesJSON(t, issues))
 

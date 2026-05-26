@@ -9,10 +9,9 @@ import (
 	"syscall"
 	"time"
 
-	gh "github.com/drellabot/orchestrator/internal/github"
-
 	"github.com/drellabot/orchestrator/internal/config"
 	"github.com/drellabot/orchestrator/internal/daemon"
+	"github.com/drellabot/orchestrator/internal/vcs"
 	"github.com/spf13/cobra"
 )
 
@@ -58,16 +57,19 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	ghRunner := gh.New("")
-	if _, err := ghRunner.AuthenticatedUser(ctx); err != nil {
-		return fmt.Errorf("GitHub CLI not authenticated: %w", err)
+	vcsProvider, err := vcs.NewProvider(cfg.VCSProvider)
+	if err != nil {
+		return fmt.Errorf("creating VCS provider: %w", err)
+	}
+	if _, err := vcsProvider.AuthenticatedUser(ctx); err != nil {
+		return fmt.Errorf("VCS provider not authenticated: %w", err)
 	}
 
 	if len(cfg.Daemon.AllowedCommenters) == 0 {
 		slog.Warn("daemon.allowed_commenters is empty; no comments will trigger task continue")
 	}
 
-	d := daemon.New(ghRunner, interval, configPath, cfg.OutputDir, cfg.Daemon.AllowedCommenters)
+	d := daemon.New(vcsProvider, interval, configPath, cfg.OutputDir, cfg.Daemon.AllowedCommenters)
 
 	if cfg.Daemon.TasksRepo != "" {
 		d.SetTasksRepo(cfg.Daemon.TasksRepo)

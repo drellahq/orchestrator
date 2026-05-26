@@ -13,6 +13,7 @@ import (
 	gh "github.com/drellabot/orchestrator/internal/github"
 	"github.com/drellabot/orchestrator/internal/prompts"
 	"github.com/drellabot/orchestrator/internal/task"
+	"github.com/drellabot/orchestrator/internal/vcs"
 )
 
 func createTaskWithPRs(t *testing.T, outputDir, taskName string, prs []task.PR) {
@@ -103,7 +104,11 @@ func TestDiscoverPRs(t *testing.T) {
 			dir := t.TempDir()
 			tt.setup(t, dir)
 
-			refs := DiscoverPRs(dir)
+			d := &Daemon{
+				vcs:       gh.New(""),
+				outputDir: dir,
+			}
+			refs := d.DiscoverPRs()
 			if len(refs) != tt.wantCount {
 				t.Errorf("got %d PRRefs, want %d", len(refs), tt.wantCount)
 			}
@@ -117,7 +122,11 @@ func TestDiscoverPRs_PopulatesNumber(t *testing.T) {
 		{URL: "https://github.com/org/repo/pull/42", Repo: "org/repo", Branch: "fix", Base: "main"},
 	})
 
-	refs := DiscoverPRs(dir)
+	d := &Daemon{
+		vcs:       gh.New(""),
+		outputDir: dir,
+	}
+	refs := d.DiscoverPRs()
 	if len(refs) != 1 {
 		t.Fatalf("got %d refs, want 1", len(refs))
 	}
@@ -129,28 +138,28 @@ func TestDiscoverPRs_PopulatesNumber(t *testing.T) {
 func TestFormatCommentsAsPrompt(t *testing.T) {
 	tests := []struct {
 		name     string
-		comments []gh.Comment
+		comments []vcs.Comment
 		want     string
 	}{
 		{
 			name: "single comment without URL",
-			comments: []gh.Comment{
-				{ID: 1, Body: "Please fix this", User: gh.CommentUser{Login: "alice"}, CreatedAt: "2025-01-01T00:00:00Z", Type: gh.IssueComment},
+			comments: []vcs.Comment{
+				{ID: 1, Body: "Please fix this", User: vcs.CommentUser{Login: "alice"}, CreatedAt: "2025-01-01T00:00:00Z", Type: vcs.IssueComment},
 			},
 			want: prompts.OnPRComment + "\n@alice at 2025-01-01T00:00:00Z:\n\nPlease fix this\n",
 		},
 		{
 			name: "single comment with URL",
-			comments: []gh.Comment{
-				{ID: 1, Body: "Please fix this", User: gh.CommentUser{Login: "alice"}, CreatedAt: "2025-01-01T00:00:00Z", Type: gh.IssueComment, HTMLURL: "https://github.com/org/repo/pull/42#issuecomment-1"},
+			comments: []vcs.Comment{
+				{ID: 1, Body: "Please fix this", User: vcs.CommentUser{Login: "alice"}, CreatedAt: "2025-01-01T00:00:00Z", Type: vcs.IssueComment, HTMLURL: "https://github.com/org/repo/pull/42#issuecomment-1"},
 			},
 			want: prompts.OnPRComment + "\n@alice at 2025-01-01T00:00:00Z (https://github.com/org/repo/pull/42#issuecomment-1):\n\nPlease fix this\n",
 		},
 		{
 			name: "multiple comments with review",
-			comments: []gh.Comment{
-				{ID: 1, Body: "First", User: gh.CommentUser{Login: "alice"}, CreatedAt: "2025-01-01T00:00:00Z", Type: gh.IssueComment},
-				{ID: 2, Body: "Nit here", User: gh.CommentUser{Login: "bob"}, CreatedAt: "2025-01-01T01:00:00Z", Type: gh.ReviewComment, Path: "main.go", HTMLURL: "https://github.com/org/repo/pull/42#discussion_r2"},
+			comments: []vcs.Comment{
+				{ID: 1, Body: "First", User: vcs.CommentUser{Login: "alice"}, CreatedAt: "2025-01-01T00:00:00Z", Type: vcs.IssueComment},
+				{ID: 2, Body: "Nit here", User: vcs.CommentUser{Login: "bob"}, CreatedAt: "2025-01-01T01:00:00Z", Type: vcs.ReviewComment, Path: "main.go", HTMLURL: "https://github.com/org/repo/pull/42#discussion_r2"},
 			},
 			want: prompts.OnPRComment + "\n@alice at 2025-01-01T00:00:00Z:\n\nFirst\n\n---\n\n@bob at 2025-01-01T01:00:00Z on main.go (https://github.com/org/repo/pull/42#discussion_r2):\n\nNit here\n",
 		},
@@ -167,11 +176,11 @@ func TestFormatCommentsAsPrompt(t *testing.T) {
 }
 
 func TestFilterNewComments(t *testing.T) {
-	comments := []gh.Comment{
-		{ID: 10, Body: "old", User: gh.CommentUser{Login: "alice"}},
-		{ID: 20, Body: "new from alice", User: gh.CommentUser{Login: "alice"}},
-		{ID: 30, Body: "new from stranger", User: gh.CommentUser{Login: "stranger"}},
-		{ID: 40, Body: "new from bob", User: gh.CommentUser{Login: "bob"}},
+	comments := []vcs.Comment{
+		{ID: 10, Body: "old", User: vcs.CommentUser{Login: "alice"}},
+		{ID: 20, Body: "new from alice", User: vcs.CommentUser{Login: "alice"}},
+		{ID: 30, Body: "new from stranger", User: vcs.CommentUser{Login: "stranger"}},
+		{ID: 40, Body: "new from bob", User: vcs.CommentUser{Login: "bob"}},
 	}
 
 	tests := []struct {
@@ -226,12 +235,12 @@ func TestFilterNewComments(t *testing.T) {
 }
 
 func TestFilterRejectedComments(t *testing.T) {
-	comments := []gh.Comment{
-		{ID: 10, Body: "old", User: gh.CommentUser{Login: "alice"}},
-		{ID: 20, Body: "new from alice", User: gh.CommentUser{Login: "alice"}},
-		{ID: 30, Body: "new from stranger", User: gh.CommentUser{Login: "stranger"}},
-		{ID: 40, Body: "new from bob", User: gh.CommentUser{Login: "bob"}},
-		{ID: 50, Body: "new from another stranger", User: gh.CommentUser{Login: "mallory"}},
+	comments := []vcs.Comment{
+		{ID: 10, Body: "old", User: vcs.CommentUser{Login: "alice"}},
+		{ID: 20, Body: "new from alice", User: vcs.CommentUser{Login: "alice"}},
+		{ID: 30, Body: "new from stranger", User: vcs.CommentUser{Login: "stranger"}},
+		{ID: 40, Body: "new from bob", User: vcs.CommentUser{Login: "bob"}},
+		{ID: 50, Body: "new from another stranger", User: vcs.CommentUser{Login: "mallory"}},
 	}
 
 	tests := []struct {
@@ -288,19 +297,19 @@ func TestFilterRejectedComments(t *testing.T) {
 func TestMaxCommentID(t *testing.T) {
 	tests := []struct {
 		name   string
-		slices [][]gh.Comment
+		slices [][]vcs.Comment
 		want   int64
 	}{
 		{
 			name:   "single slice",
-			slices: [][]gh.Comment{{
+			slices: [][]vcs.Comment{{
 				{ID: 10}, {ID: 30}, {ID: 20},
 			}},
 			want: 30,
 		},
 		{
 			name: "multiple slices",
-			slices: [][]gh.Comment{
+			slices: [][]vcs.Comment{
 				{{ID: 10}, {ID: 20}},
 				{{ID: 50}, {ID: 5}},
 			},
@@ -308,7 +317,7 @@ func TestMaxCommentID(t *testing.T) {
 		},
 		{
 			name:   "empty slices",
-			slices: [][]gh.Comment{nil, nil},
+			slices: [][]vcs.Comment{nil, nil},
 			want:   0,
 		},
 		{
@@ -390,10 +399,10 @@ func TestProcessPR_SkipsClosedPR(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(state.Resources.GitHub.PRs) != 1 {
-		t.Fatalf("expected 1 PR, got %d", len(state.Resources.GitHub.PRs))
+	if len(state.Resources.PRs()) != 1 {
+		t.Fatalf("expected 1 PR, got %d", len(state.Resources.PRs()))
 	}
-	if !state.Resources.GitHub.PRs[0].Closed {
+	if !state.Resources.PRs()[0].Closed {
 		t.Error("expected PR to be marked closed")
 	}
 }
@@ -790,22 +799,22 @@ func TestWriteTriggerEntry(t *testing.T) {
 	dir := t.TempDir()
 	transcriptPath := filepath.Join(dir, "transcript.jsonl")
 
-	comments := []gh.Comment{
+	comments := []vcs.Comment{
 		{
 			ID:        100,
 			HTMLURL:   "https://github.com/org/repo/pull/42#issuecomment-100",
 			Body:      "Please fix the typo",
-			User:      gh.CommentUser{Login: "alice"},
+			User:      vcs.CommentUser{Login: "alice"},
 			CreatedAt: "2025-01-15T10:00:00Z",
-			Type:      gh.IssueComment,
+			Type:      vcs.IssueComment,
 		},
 		{
 			ID:        200,
 			HTMLURL:   "https://github.com/org/repo/pull/42#discussion_r200",
 			Body:      "Rename this variable",
-			User:      gh.CommentUser{Login: "bob"},
+			User:      vcs.CommentUser{Login: "bob"},
 			CreatedAt: "2025-01-15T11:00:00Z",
-			Type:      gh.ReviewComment,
+			Type:      vcs.ReviewComment,
 			Path:      "main.go",
 		},
 	}
@@ -865,8 +874,8 @@ func TestWriteTriggerEntry_Appends(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	comments := []gh.Comment{
-		{ID: 1, Body: "test", User: gh.CommentUser{Login: "alice"}, Type: gh.IssueComment},
+	comments := []vcs.Comment{
+		{ID: 1, Body: "test", User: vcs.CommentUser{Login: "alice"}, Type: vcs.IssueComment},
 	}
 
 	if err := WriteTriggerEntry(transcriptPath, comments); err != nil {
