@@ -261,7 +261,7 @@ func (r *Runner) PostReview(ctx context.Context, repo string, pr int, event, bod
 // commentType determines the endpoint: IssueComment uses the issues API,
 // ReviewComment uses the pulls API.
 // reaction must be one of: +1, -1, laugh, confused, heart, hooray, rocket, eyes.
-func (r *Runner) ReactToComment(ctx context.Context, repo string, commentID int64, commentType CommentType, reaction string) error {
+func (r *Runner) ReactToComment(ctx context.Context, repo string, prNumber int, commentID int64, commentType CommentType, reaction string) error {
 	var endpoint string
 	switch commentType {
 	case IssueComment:

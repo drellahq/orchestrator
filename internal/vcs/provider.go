@@ -24,7 +24,7 @@ type Provider interface {
 	// PR state + comments
 	IsPROpen(ctx context.Context, repo string, prNumber int) (bool, error)
 	FetchAllComments(ctx context.Context, repo string, prNumber int) ([]Comment, error)
-	ReactToComment(ctx context.Context, repo string, commentID int64, commentType CommentType, reaction string) error
+	ReactToComment(ctx context.Context, repo string, prNumber int, commentID int64, commentType CommentType, reaction string) error
 
 	// Repository content
 	ListRepoFiles(ctx context.Context, repo, branch, dir string) ([]string, error)

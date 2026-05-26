@@ -151,7 +151,7 @@ func (s *stubVCSProvider) FetchAllComments(_ context.Context, repo string, prNum
 	return nil, nil
 }
 
-func (s *stubVCSProvider) ReactToComment(_ context.Context, repo string, commentID int64, commentType vcs.CommentType, reaction string) error {
+func (s *stubVCSProvider) ReactToComment(_ context.Context, repo string, prNumber int, commentID int64, commentType vcs.CommentType, reaction string) error {
 	return nil
 }
 

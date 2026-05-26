@@ -804,7 +804,7 @@ func TestReactToComment_IssueComment(t *testing.T) {
 	script, outFile := writeArgCapture(t, "{}")
 	r := New(script)
 
-	err := r.ReactToComment(context.Background(), "org/repo", 42, IssueComment, "rocket")
+	err := r.ReactToComment(context.Background(), "org/repo", 0, 42, IssueComment, "rocket")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -824,7 +824,7 @@ func TestReactToComment_ReviewComment(t *testing.T) {
 	script, outFile := writeArgCapture(t, "{}")
 	r := New(script)
 
-	err := r.ReactToComment(context.Background(), "org/repo", 99, ReviewComment, "confused")
+	err := r.ReactToComment(context.Background(), "org/repo", 0, 99, ReviewComment, "confused")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -839,7 +839,7 @@ func TestReactToComment_ReviewComment(t *testing.T) {
 func TestReactToComment_UnknownType(t *testing.T) {
 	r := New("echo")
 
-	err := r.ReactToComment(context.Background(), "org/repo", 1, CommentType("unknown"), "rocket")
+	err := r.ReactToComment(context.Background(), "org/repo", 0, 1, CommentType("unknown"), "rocket")
 	if err == nil {
 		t.Fatal("expected error for unknown comment type")
 	}

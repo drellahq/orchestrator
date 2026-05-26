@@ -80,7 +80,7 @@ func (t *testVCSProvider) FetchAllComments(_ context.Context, repo string, prNum
 	return nil, nil
 }
 
-func (t *testVCSProvider) ReactToComment(_ context.Context, repo string, commentID int64, commentType vcs.CommentType, reaction string) error {
+func (t *testVCSProvider) ReactToComment(_ context.Context, repo string, prNumber int, commentID int64, commentType vcs.CommentType, reaction string) error {
 	return nil
 }
 

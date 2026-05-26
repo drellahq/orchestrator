@@ -285,7 +285,7 @@ func (d *Daemon) processPR(ctx context.Context, ref PRRef) {
 	}
 
 	// React confused to comments from non-allowed users
-	d.reactToComments(ctx, ref.PR.Repo, rejectedComments, "confused")
+	d.reactToComments(ctx, ref.PR.Repo, ref.PR.Number, rejectedComments, "confused")
 
 	// Advance LastCommentID past all new comments (both allowed and rejected)
 	// so that rejected comments are not re-processed every poll cycle.
@@ -331,7 +331,7 @@ func (d *Daemon) processPR(ctx context.Context, ref PRRef) {
 	d.mu.Unlock()
 
 	// React rocket to allowed comments just before handoff
-	d.reactToComments(ctx, ref.PR.Repo, newComments, "rocket")
+	d.reactToComments(ctx, ref.PR.Repo, ref.PR.Number, newComments, "rocket")
 
 	d.wg.Add(1)
 	go func() {
@@ -405,9 +405,9 @@ func maxCommentID(slices ...[]vcs.Comment) int64 {
 
 // reactToComments adds a reaction to each comment, logging failures without
 // returning an error (reactions are best-effort and must not block task dispatch).
-func (d *Daemon) reactToComments(ctx context.Context, repo string, comments []vcs.Comment, reaction string) {
+func (d *Daemon) reactToComments(ctx context.Context, repo string, prNumber int, comments []vcs.Comment, reaction string) {
 	for _, c := range comments {
-		if err := d.vcs.ReactToComment(ctx, repo, c.ID, c.Type, reaction); err != nil {
+		if err := d.vcs.ReactToComment(ctx, repo, prNumber, c.ID, c.Type, reaction); err != nil {
 			slog.Debug("Failed to add reaction", "comment_id", c.ID, "reaction", reaction, "error", err)
 		}
 	}
