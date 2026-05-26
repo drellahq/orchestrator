@@ -1152,3 +1152,145 @@ func TestRun_StopsPollingOnShutdown(t *testing.T) {
 		t.Fatal("Run() did not exit within 500ms on cancelled context")
 	}
 }
+
+func TestCleanupSandboxes_DestroysFinishedTasks(t *testing.T) {
+	dir := t.TempDir()
+
+	// Task with no PRs and status done
+	createTaskWithPRs(t, dir, "done-task", nil)
+	td, _ := task.Open(dir, "done-task")
+	td.SetStatus(task.StatusDone)
+
+	var destroyed []string
+	d := New(ghNew(writeOpenPRScript(t)), time.Minute, "", dir, nil)
+	d.SetDownFunc(func(ctx context.Context, taskName string) error {
+		destroyed = append(destroyed, taskName)
+		return nil
+	})
+
+	d.cleanupSandboxes(context.Background())
+
+	if len(destroyed) != 1 || destroyed[0] != "done-task" {
+		t.Errorf("expected [done-task] destroyed, got %v", destroyed)
+	}
+
+	// Verify sandbox_destroyed is set
+	state, err := td.LoadState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !state.SandboxDestroyed {
+		t.Error("expected SandboxDestroyed = true")
+	}
+}
+
+func TestCleanupSandboxes_SkipsRunningTasks(t *testing.T) {
+	dir := t.TempDir()
+	createTaskWithPRs(t, dir, "running-task", nil)
+
+	var destroyed []string
+	d := New(ghNew(writeOpenPRScript(t)), time.Minute, "", dir, nil)
+	d.SetTaskRunning("running-task", true)
+	d.SetDownFunc(func(ctx context.Context, taskName string) error {
+		destroyed = append(destroyed, taskName)
+		return nil
+	})
+
+	d.cleanupSandboxes(context.Background())
+
+	if len(destroyed) != 0 {
+		t.Errorf("expected no destruction, got %v", destroyed)
+	}
+}
+
+func TestCleanupSandboxes_SkipsTasksWithOpenPRs(t *testing.T) {
+	dir := t.TempDir()
+	createTaskWithPRs(t, dir, "waiting-task", []task.PR{
+		{URL: "https://github.com/org/repo/pull/1", Repo: "org/repo", Branch: "fix", Base: "main"},
+	})
+	td, _ := task.Open(dir, "waiting-task")
+	td.SetStatus(task.StatusWaiting)
+
+	var destroyed []string
+	d := New(ghNew(writeOpenPRScript(t)), time.Minute, "", dir, nil)
+	d.SetDownFunc(func(ctx context.Context, taskName string) error {
+		destroyed = append(destroyed, taskName)
+		return nil
+	})
+
+	d.cleanupSandboxes(context.Background())
+
+	if len(destroyed) != 0 {
+		t.Errorf("expected no destruction, got %v", destroyed)
+	}
+}
+
+func TestCleanupSandboxes_SkipsAlreadyDestroyed(t *testing.T) {
+	dir := t.TempDir()
+	createTaskWithPRs(t, dir, "old-task", nil)
+	td, _ := task.Open(dir, "old-task")
+	td.SetSandboxDestroyed()
+
+	var destroyed []string
+	d := New(ghNew(writeOpenPRScript(t)), time.Minute, "", dir, nil)
+	d.SetDownFunc(func(ctx context.Context, taskName string) error {
+		destroyed = append(destroyed, taskName)
+		return nil
+	})
+
+	d.cleanupSandboxes(context.Background())
+
+	if len(destroyed) != 0 {
+		t.Errorf("expected no destruction (already destroyed), got %v", destroyed)
+	}
+}
+
+func TestCleanupSandboxes_SkipsInProgressStatus(t *testing.T) {
+	dir := t.TempDir()
+	createTaskWithPRs(t, dir, "active-task", nil)
+	td, _ := task.Open(dir, "active-task")
+	td.SetStatus(task.StatusInProgress)
+
+	var destroyed []string
+	d := New(ghNew(writeOpenPRScript(t)), time.Minute, "", dir, nil)
+	d.SetDownFunc(func(ctx context.Context, taskName string) error {
+		destroyed = append(destroyed, taskName)
+		return nil
+	})
+
+	d.cleanupSandboxes(context.Background())
+
+	if len(destroyed) != 0 {
+		t.Errorf("expected no destruction (in_progress status), got %v", destroyed)
+	}
+}
+
+func TestProcessPR_SetsStatusDoneWhenAllPRsClosed(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not found")
+	}
+
+	dir := t.TempDir()
+	createTaskWithPRs(t, dir, "all-closed", []task.PR{
+		{URL: "https://github.com/org/repo/pull/1", Repo: "org/repo", Branch: "fix", Base: "main", Number: 1},
+	})
+	td, _ := task.Open(dir, "all-closed")
+	td.SetStatus(task.StatusWaiting)
+
+	script := writeClosedPRScript(t)
+	d := New(ghNew(script), time.Minute, "", dir, []string{"alice"})
+
+	d.ProcessPR(context.Background(), PRRef{
+		TaskName:  "all-closed",
+		OutputDir: dir,
+		PR:        task.PR{URL: "https://github.com/org/repo/pull/1", Repo: "org/repo", Number: 1},
+	})
+
+	state, err := td.LoadState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Status != task.StatusDone {
+		t.Errorf("Status = %q, want %q", state.Status, task.StatusDone)
+	}
+}
