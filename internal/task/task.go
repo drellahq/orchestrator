@@ -60,15 +60,34 @@ type Source struct {
 	IssueNumber int    `json:"issue_number,omitempty"`
 }
 
+// Task status constants.
+const (
+	StatusInProgress = "in_progress"
+	StatusWaiting    = "waiting"
+	StatusDone       = "done"
+)
+
 // State holds task metadata and mutable state persisted to state.json.
 type State struct {
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
-	Author      string    `json:"author,omitempty"`
-	Source      *Source   `json:"source,omitempty"`
-	Resources   Resources `json:"resources"`
+	Name             string    `json:"name"`
+	Description      string    `json:"description"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+	Author           string    `json:"author,omitempty"`
+	Source           *Source   `json:"source,omitempty"`
+	Resources        Resources `json:"resources"`
+	Status           string    `json:"status,omitempty"`
+	SandboxDestroyed bool      `json:"sandbox_destroyed,omitempty"`
+}
+
+// HasOpenPRs reports whether the state has any PRs that are not closed.
+func (s *State) HasOpenPRs() bool {
+	for _, pr := range s.Resources.GitHub.PRs {
+		if !pr.Closed {
+			return true
+		}
+	}
+	return false
 }
 
 // Dir represents a per-task directory structure.
@@ -248,4 +267,31 @@ func (d *Dir) UpdatePR(prURL string, fn func(*PR)) error {
 		}
 	}
 	return fmt.Errorf("PR not found: %s", prURL)
+}
+
+// SetStatus updates the task status and persists it.
+func (d *Dir) SetStatus(status string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	s, err := d.loadStateLocked()
+	if err != nil {
+		return err
+	}
+	s.Status = status
+	return d.saveStateLocked(s)
+}
+
+// SetSandboxDestroyed marks the sandbox as destroyed and sets status to done.
+func (d *Dir) SetSandboxDestroyed() error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	s, err := d.loadStateLocked()
+	if err != nil {
+		return err
+	}
+	s.SandboxDestroyed = true
+	s.Status = StatusDone
+	return d.saveStateLocked(s)
 }
