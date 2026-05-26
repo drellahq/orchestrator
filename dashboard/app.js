@@ -14,6 +14,7 @@
     currentTask: null,
     transcriptLoader: null,
     renderedCount: 0,
+    runCount: 0,
     pollTimers: { taskList: null, transcript: null },
   };
 
@@ -294,6 +295,9 @@
   }
 
   function renderEntry(entry) {
+    if (entry.type === 'trigger') {
+      return renderTrigger(entry);
+    }
     if (entry.type === 'system' && entry.subtype === 'init') {
       return renderSystemInit(entry);
     }
@@ -310,13 +314,65 @@
   }
 
   function renderSystemInit(entry) {
+    state.runCount++;
+    const runId = 'run-' + state.runCount;
+
     const div = document.createElement('div');
     div.className = 'entry entry-system';
+    div.id = runId;
     div.innerHTML =
       '<span><span class="sys-label">model:</span> ' + escapeHtml(entry.model || '') + '</span>' +
       '<span><span class="sys-label">tools:</span> ' + (entry.tools ? entry.tools.length : 0) + '</span>' +
       '<span><span class="sys-label">session:</span> ' + escapeHtml(truncate(entry.session_id || '', 12)) + '</span>' +
       '<span><span class="sys-label">version:</span> ' + escapeHtml(entry.claude_code_version || '') + '</span>';
+
+    addRunNavLink(runId, state.runCount);
+    return div;
+  }
+
+  function addRunNavLink(runId, runNumber) {
+    const nav = $('#run-nav');
+    if (!nav) return;
+    const a = document.createElement('a');
+    a.href = '#' + runId;
+    a.innerHTML = '<span class="run-label">' + runNumber + '</span> ' +
+      (runNumber === 1 ? 'initial' : 'update');
+    a.addEventListener('click', function (e) {
+      e.preventDefault();
+      const target = document.getElementById(runId);
+      if (target) {
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        history.replaceState(null, '', window.location.pathname + window.location.hash.split('#' + 'run-')[0] + '#' + runId);
+      }
+    });
+    nav.appendChild(a);
+  }
+
+  function renderTrigger(entry) {
+    const comments = entry.comments || [];
+    if (comments.length === 0) return null;
+
+    const div = document.createElement('div');
+    div.className = 'entry entry-trigger';
+
+    let html = '<div class="trigger-header">triggered by PR comment' +
+      (comments.length > 1 ? 's' : '') + '</div>';
+    for (const c of comments) {
+      html += '<div class="trigger-comment">';
+      html += '<div class="trigger-meta">';
+      html += '@' + escapeHtml(c.user || '');
+      if (c.created_at) html += ' at ' + escapeHtml(c.created_at);
+      if (c.path) html += ' on ' + escapeHtml(c.path);
+      if (c.html_url) {
+        html += ' <a href="' + escapeHtml(c.html_url) + '" target="_blank" rel="noopener">[view]</a>';
+      }
+      html += '</div>';
+      if (c.body) {
+        html += '<div class="trigger-body">' + escapeHtml(truncate(c.body, 200)) + '</div>';
+      }
+      html += '</div>';
+    }
+    div.innerHTML = html;
     return div;
   }
 
@@ -430,6 +486,7 @@
     state.currentTask = null;
     state.transcriptLoader = null;
     state.renderedCount = 0;
+    state.runCount = 0;
     stopPolling('transcript');
 
     $('#task-list').classList.remove('hidden');
@@ -442,11 +499,13 @@
   async function showTaskDetail(taskName) {
     state.currentTask = taskName;
     state.renderedCount = 0;
+    state.runCount = 0;
     stopPolling('taskList');
 
     $('#task-list').classList.add('hidden');
     $('#task-detail').classList.remove('hidden');
     $('#transcript').innerHTML = '';
+    $('#run-nav').innerHTML = '';
     $('#transcript-loading').classList.remove('hidden');
 
     const meta = state.tasks.get(taskName) || (await fetchTaskMeta(taskName));
