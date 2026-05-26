@@ -824,3 +824,107 @@ printf 'closed'
 	}
 	return script
 }
+
+func TestReload(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not found")
+	}
+
+	script := writeOpenPRScript(t)
+	d := New(ghNew(script), time.Minute, "", t.TempDir(), []string{"alice"})
+	d.SetTasksRepo("org/tasks")
+
+	// Verify initial values
+	if d.getInterval() != time.Minute {
+		t.Errorf("initial interval = %v, want %v", d.getInterval(), time.Minute)
+	}
+	if len(d.getAllowedCommenters()) != 1 || d.getAllowedCommenters()[0] != "alice" {
+		t.Errorf("initial allowed_commenters = %v, want [alice]", d.getAllowedCommenters())
+	}
+	if d.getTasksRepo() != "org/tasks" {
+		t.Errorf("initial tasks_repo = %q, want %q", d.getTasksRepo(), "org/tasks")
+	}
+
+	// Reload with new values
+	d.Reload(30*time.Second, []string{"alice", "bob"}, "org/new-tasks")
+
+	// Verify reloaded values
+	if d.getInterval() != 30*time.Second {
+		t.Errorf("reloaded interval = %v, want %v", d.getInterval(), 30*time.Second)
+	}
+	allowed := d.getAllowedCommenters()
+	if len(allowed) != 2 || allowed[0] != "alice" || allowed[1] != "bob" {
+		t.Errorf("reloaded allowed_commenters = %v, want [alice bob]", allowed)
+	}
+	if d.getTasksRepo() != "org/new-tasks" {
+		t.Errorf("reloaded tasks_repo = %q, want %q", d.getTasksRepo(), "org/new-tasks")
+	}
+}
+
+func TestProcessPR_UsesReloadedCommenters(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not found")
+	}
+
+	dir := t.TempDir()
+	createTaskWithPRs(t, dir, "reload-test", []task.PR{
+		{URL: "https://github.com/org/repo/pull/1", Repo: "org/repo", Branch: "fix", Base: "main", Number: 1},
+	})
+
+	// Comment from bob
+	commentsJSON := `[{"id":100,"body":"Please fix this","user":{"login":"bob"},"created_at":"2025-01-01T00:00:00Z"}]`
+	script, _ := writePRWithCommentsScript(t, commentsJSON, "[]")
+
+	// Create daemon with only alice allowed
+	d := New(ghNew(script), time.Minute, "", dir, []string{"alice"})
+
+	called := false
+	d.SetContinueFunc(func(ctx context.Context, taskName, prompt string) error {
+		called = true
+		return nil
+	})
+
+	// First attempt: bob's comment should be rejected
+	d.ProcessPR(context.Background(), PRRef{
+		TaskName:  "reload-test",
+		OutputDir: dir,
+		PR:        task.PR{URL: "https://github.com/org/repo/pull/1", Repo: "org/repo", Number: 1},
+	})
+
+	time.Sleep(50 * time.Millisecond)
+
+	if called {
+		t.Error("continueFunc should not have been called for bob's comment when only alice is allowed")
+	}
+
+	// Reload to allow bob
+	d.Reload(time.Minute, []string{"alice", "bob"}, "")
+
+	// Reset LastCommentID to re-process bob's comment
+	td, err := task.Open(dir, "reload-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := td.UpdatePR("https://github.com/org/repo/pull/1", func(pr *task.PR) {
+		pr.LastCommentID = 0
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Second attempt: bob's comment should now trigger continueFunc
+	d.ProcessPR(context.Background(), PRRef{
+		TaskName:  "reload-test",
+		OutputDir: dir,
+		PR:        task.PR{URL: "https://github.com/org/repo/pull/1", Repo: "org/repo", Number: 1},
+	})
+
+	select {
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for continueFunc")
+	default:
+		time.Sleep(50 * time.Millisecond)
+		if !called {
+			t.Error("continueFunc should have been called for bob's comment after reload")
+		}
+	}
+}

@@ -32,16 +32,19 @@ type ContinueFunc func(ctx context.Context, taskName, prompt string) error
 // It also monitors a tasks repo for new specs in in-progress/ and spawns
 // new tasks for them.
 type Daemon struct {
-	gh                *gh.Runner
+	gh           *gh.Runner
+	configPath   string
+	outputDir    string
+	continueFunc ContinueFunc
+	newTaskFunc  NewTaskFunc
+	mu           sync.Mutex
+	running      map[string]bool
+
+	// Reloadable fields protected by configMu
+	configMu          sync.RWMutex
 	interval          time.Duration
-	configPath        string
-	outputDir         string
 	allowedCommenters []string
 	tasksRepo         string
-	continueFunc      ContinueFunc
-	newTaskFunc       NewTaskFunc
-	mu                sync.Mutex
-	running           map[string]bool
 }
 
 // New creates a Daemon.
@@ -61,7 +64,40 @@ func New(ghRunner *gh.Runner, interval time.Duration, configPath, outputDir stri
 
 // SetTasksRepo sets the tasks repo to monitor for new specs.
 func (d *Daemon) SetTasksRepo(repo string) {
+	d.configMu.Lock()
+	defer d.configMu.Unlock()
 	d.tasksRepo = repo
+}
+
+// getInterval returns the current poll interval.
+func (d *Daemon) getInterval() time.Duration {
+	d.configMu.RLock()
+	defer d.configMu.RUnlock()
+	return d.interval
+}
+
+// getAllowedCommenters returns the current allowed commenters list.
+func (d *Daemon) getAllowedCommenters() []string {
+	d.configMu.RLock()
+	defer d.configMu.RUnlock()
+	return d.allowedCommenters
+}
+
+// getTasksRepo returns the current tasks repo.
+func (d *Daemon) getTasksRepo() string {
+	d.configMu.RLock()
+	defer d.configMu.RUnlock()
+	return d.tasksRepo
+}
+
+// Reload updates the daemon's reloadable configuration.
+func (d *Daemon) Reload(interval time.Duration, allowedCommenters []string, tasksRepo string) {
+	d.configMu.Lock()
+	defer d.configMu.Unlock()
+	d.interval = interval
+	d.allowedCommenters = allowedCommenters
+	d.tasksRepo = tasksRepo
+	slog.Info("Configuration reloaded", "interval", interval, "allowed_commenters", allowedCommenters, "tasks_repo", tasksRepo)
 }
 
 // Run is the main polling loop. It discovers PRs, iterates through them
@@ -74,9 +110,10 @@ func (d *Daemon) Run(ctx context.Context) error {
 		d.checkForNewIssues(ctx)
 
 		refs := DiscoverPRs(d.outputDir)
+		interval := d.getInterval()
 		if len(refs) == 0 {
-			slog.Info("No open PRs found, waiting before re-discovery", "interval", d.interval)
-			if err := sleep(ctx, d.interval); err != nil {
+			slog.Info("No open PRs found, waiting before re-discovery", "interval", interval)
+			if err := sleep(ctx, interval); err != nil {
 				return ctx.Err()
 			}
 			continue
@@ -84,7 +121,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 		slog.Info("Discovered PRs", "count", len(refs))
 
-		perPR := d.interval / time.Duration(len(refs))
+		perPR := interval / time.Duration(len(refs))
 		const minInterval = 5 * time.Second
 		if perPR < minInterval {
 			perPR = minInterval
@@ -206,8 +243,9 @@ func (d *Daemon) processPR(ctx context.Context, ref PRRef) {
 	}
 
 	// Partition new comments into allowed and rejected
-	newComments := FilterNewComments(comments, ref.PR.LastCommentID, d.allowedCommenters)
-	rejectedComments := FilterRejectedComments(comments, ref.PR.LastCommentID, d.allowedCommenters)
+	allowedCommenters := d.getAllowedCommenters()
+	newComments := FilterNewComments(comments, ref.PR.LastCommentID, allowedCommenters)
+	rejectedComments := FilterRejectedComments(comments, ref.PR.LastCommentID, allowedCommenters)
 
 	if len(newComments) == 0 && len(rejectedComments) == 0 {
 		log.Debug("No new comments")

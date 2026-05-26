@@ -134,13 +134,14 @@ func taskNameFromSpec(specFile string) string {
 // checkForNewSpecs polls the tasks repo for new spec files in in-progress/
 // and spawns tasks for any that haven't been processed yet.
 func (d *Daemon) checkForNewSpecs(ctx context.Context) {
-	if d.tasksRepo == "" {
+	tasksRepo := d.getTasksRepo()
+	if tasksRepo == "" {
 		return
 	}
 
-	log := slog.With("tasks_repo", d.tasksRepo)
+	log := slog.With("tasks_repo", tasksRepo)
 
-	files, err := d.gh.ListRepoFiles(ctx, d.tasksRepo, "main", "in-progress")
+	files, err := d.gh.ListRepoFiles(ctx, tasksRepo, "main", "in-progress")
 	if err != nil {
 		log.Debug("Failed to list in-progress specs", "error", err)
 		return
@@ -186,7 +187,7 @@ func (d *Daemon) checkForNewSpecs(ctx context.Context) {
 		log.Info("Found new spec", "spec", file, "task", taskName)
 
 		// Fetch the spec content
-		content, err := d.gh.GetFileContent(ctx, d.tasksRepo, "main", "in-progress/"+file)
+		content, err := d.gh.GetFileContent(ctx, tasksRepo, "main", "in-progress/"+file)
 		if err != nil {
 			log.Warn("Failed to fetch spec content", "spec", file, "error", err)
 			continue
@@ -235,13 +236,14 @@ func (d *Daemon) checkForNewSpecs(ctx context.Context) {
 // checkForNewIssues polls the tasks repo for open GitHub issues and spawns
 // tasks for any that haven't been processed yet.
 func (d *Daemon) checkForNewIssues(ctx context.Context) {
-	if d.tasksRepo == "" {
+	tasksRepo := d.getTasksRepo()
+	if tasksRepo == "" {
 		return
 	}
 
-	log := slog.With("tasks_repo", d.tasksRepo)
+	log := slog.With("tasks_repo", tasksRepo)
 
-	issues, err := d.gh.ListIssues(ctx, d.tasksRepo)
+	issues, err := d.gh.ListIssues(ctx, tasksRepo)
 	if err != nil {
 		log.Debug("Failed to list issues", "error", err)
 		return
@@ -264,8 +266,9 @@ func (d *Daemon) checkForNewIssues(ctx context.Context) {
 		return
 	}
 
-	allowed := make(map[string]bool, len(d.allowedCommenters))
-	for _, u := range d.allowedCommenters {
+	allowedCommenters := d.getAllowedCommenters()
+	allowed := make(map[string]bool, len(allowedCommenters))
+	for _, u := range allowedCommenters {
 		allowed[u] = true
 	}
 
@@ -276,13 +279,13 @@ func (d *Daemon) checkForNewIssues(ctx context.Context) {
 
 		if !allowed[issue.User.Login] {
 			log.Debug("Issue author not in allowed_commenters, skipping", "issue", issue.Number, "author", issue.User.Login)
-			if err := d.gh.ReactToIssue(ctx, d.tasksRepo, issue.Number, "confused"); err != nil {
+			if err := d.gh.ReactToIssue(ctx, tasksRepo, issue.Number, "confused"); err != nil {
 				log.Debug("Failed to add confused reaction to issue", "issue", issue.Number, "error", err)
 			}
 			continue
 		}
 
-		taskName := taskNameFromIssue(d.tasksRepo, issue.Number, issue.Title)
+		taskName := taskNameFromIssue(tasksRepo, issue.Number, issue.Title)
 
 		// Check if task is already running — skip but don't mark as
 		// processed so it is retried next cycle.
@@ -318,21 +321,21 @@ func (d *Daemon) checkForNewIssues(ctx context.Context) {
 		d.running[taskName] = true
 		d.mu.Unlock()
 
-		if err := d.gh.ReactToIssue(ctx, d.tasksRepo, issue.Number, "rocket"); err != nil {
+		if err := d.gh.ReactToIssue(ctx, tasksRepo, issue.Number, "rocket"); err != nil {
 			log.Debug("Failed to add rocket reaction to issue", "issue", issue.Number, "error", err)
 		}
 
-		go func(name, desc string, issueNum int) {
+		go func(name, desc, repo string, issueNum int) {
 			defer func() {
 				d.mu.Lock()
 				delete(d.running, name)
 				d.mu.Unlock()
 			}()
 
-			if err := d.newTaskFunc(ctx, name, desc, d.tasksRepo, issueNum); err != nil {
+			if err := d.newTaskFunc(ctx, name, desc, repo, issueNum); err != nil {
 				slog.Error("task new failed", "task", name, "error", err)
 			}
-		}(taskName, description, issue.Number)
+		}(taskName, description, tasksRepo, issue.Number)
 	}
 }
 
