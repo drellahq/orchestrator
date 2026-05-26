@@ -878,9 +878,9 @@ func TestProcessPR_UsesReloadedCommenters(t *testing.T) {
 	// Create daemon with only alice allowed
 	d := New(ghNew(script), time.Minute, "", dir, []string{"alice"})
 
-	called := false
+	done := make(chan struct{}, 1)
 	d.SetContinueFunc(func(ctx context.Context, taskName, prompt string) error {
-		called = true
+		done <- struct{}{}
 		return nil
 	})
 
@@ -893,8 +893,10 @@ func TestProcessPR_UsesReloadedCommenters(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 
-	if called {
+	select {
+	case <-done:
 		t.Error("continueFunc should not have been called for bob's comment when only alice is allowed")
+	default:
 	}
 
 	// Reload to allow bob
@@ -919,13 +921,9 @@ func TestProcessPR_UsesReloadedCommenters(t *testing.T) {
 	})
 
 	select {
+	case <-done:
 	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for continueFunc")
-	default:
-		time.Sleep(50 * time.Millisecond)
-		if !called {
-			t.Error("continueFunc should have been called for bob's comment after reload")
-		}
+		t.Fatal("timed out waiting for continueFunc after reload")
 	}
 }
 
@@ -1043,6 +1041,6 @@ func TestRun_StopsPollingOnShutdown(t *testing.T) {
 			t.Errorf("Run() returned error: %v", err)
 		}
 	case <-time.After(500 * time.Millisecond):
-		// Good - Run() should have exited quickly without launching tasks
+		t.Fatal("Run() did not exit within 500ms on cancelled context")
 	}
 }
