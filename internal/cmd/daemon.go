@@ -4,12 +4,14 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
 	gh "github.com/drellabot/orchestrator/internal/github"
 
+	"github.com/drellabot/orchestrator/internal/config"
 	"github.com/drellabot/orchestrator/internal/daemon"
 	"github.com/spf13/cobra"
 )
@@ -71,6 +73,41 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		d.SetTasksRepo(cfg.Daemon.TasksRepo)
 		slog.Info("Tasks repo monitoring enabled", "tasks_repo", cfg.Daemon.TasksRepo)
 	}
+
+	// Set up SIGHUP handler for config reload
+	sighup := make(chan os.Signal, 1)
+	signal.Notify(sighup, syscall.SIGHUP)
+	go func() {
+		for range sighup {
+			slog.Info("Received SIGHUP, reloading configuration")
+			newCfg, err := config.Load(configPath)
+			if err != nil {
+				slog.Error("Failed to reload config", "error", err)
+				continue
+			}
+
+			newInterval := interval // keep the current default
+			if newCfg.Daemon.PollInterval != "" {
+				parsed, err := time.ParseDuration(newCfg.Daemon.PollInterval)
+				if err != nil {
+					slog.Error("Failed to parse reloaded poll_interval", "error", err)
+					continue
+				}
+				newInterval = parsed
+			}
+			// CLI flag still takes precedence
+			if daemonInterval != "" {
+				parsed, err := time.ParseDuration(daemonInterval)
+				if err != nil {
+					slog.Error("Failed to parse --interval on reload", "error", err)
+					continue
+				}
+				newInterval = parsed
+			}
+
+			d.Reload(newInterval, newCfg.Daemon.AllowedCommenters, newCfg.Daemon.TasksRepo)
+		}
+	}()
 
 	slog.Info("Daemon starting", "interval", interval, "output_dir", cfg.OutputDir, "allowed_commenters", cfg.Daemon.AllowedCommenters)
 	return d.Run(ctx)
