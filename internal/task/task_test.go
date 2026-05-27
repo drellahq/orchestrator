@@ -336,6 +336,10 @@ func TestSaveSource(t *testing.T) {
 	if s.Source.IssueNumber != 42 {
 		t.Errorf("IssueNumber = %d, want 42", s.Source.IssueNumber)
 	}
+	wantURL := "https://github.com/org/tasks/issues/42"
+	if s.Source.URL != wantURL {
+		t.Errorf("URL = %q, want %q", s.Source.URL, wantURL)
+	}
 
 	data, err := os.ReadFile(filepath.Join(outputDir, "source-test", "state.json"))
 	if err != nil {
@@ -347,44 +351,6 @@ func TestSaveSource(t *testing.T) {
 	}
 	if _, ok := raw["source"]; !ok {
 		t.Errorf("state.json should contain source key, got: %s", data)
-	}
-}
-
-func TestSourceIssueURL(t *testing.T) {
-	tests := []struct {
-		name   string
-		source *Source
-		want   string
-	}{
-		{
-			name:   "valid source",
-			source: &Source{TasksRepo: "org/tasks", IssueNumber: 42},
-			want:   "https://github.com/org/tasks/issues/42",
-		},
-		{
-			name:   "nil source",
-			source: nil,
-			want:   "",
-		},
-		{
-			name:   "empty repo",
-			source: &Source{TasksRepo: "", IssueNumber: 42},
-			want:   "",
-		},
-		{
-			name:   "zero issue number",
-			source: &Source{TasksRepo: "org/tasks", IssueNumber: 0},
-			want:   "",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := tt.source.IssueURL()
-			if got != tt.want {
-				t.Errorf("IssueURL() = %q, want %q", got, tt.want)
-			}
-		})
 	}
 }
 

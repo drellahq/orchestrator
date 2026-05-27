@@ -313,11 +313,9 @@
       '<div><span class="meta-label">updated:</span><span class="task-time">' +
       timeAgo(task.updated_at || task.created_at) + ' (' + escapeHtml(task.updated_at || task.created_at || '') + ')</span></div>';
 
-    if (task.source && task.source.tasks_repo && task.source.issue_number) {
-      const issueURL = 'https://github.com/' + task.source.tasks_repo + '/issues/' + task.source.issue_number;
-      html += '<div><span class="meta-label">source:</span><a href="' + escapeHtml(issueURL) +
-        '" target="_blank" rel="noopener">' + escapeHtml(task.source.tasks_repo) +
-        '#' + task.source.issue_number + '</a></div>';
+    if (task.source && task.source.url) {
+      html += '<div><span class="meta-label">source:</span><a href="' + escapeHtml(task.source.url) +
+        '" target="_blank" rel="noopener">' + escapeHtml(task.source.url) + '</a></div>';
     }
 
     if (task.author) {
