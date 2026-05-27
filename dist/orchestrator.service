@@ -10,6 +10,7 @@ Restart=on-failure
 RestartSec=10
 TimeoutStopSec=3600
 KillSignal=SIGTERM
+KillMode=process
 StandardOutput=journal
 StandardError=journal
 Environment=HOME=%h
