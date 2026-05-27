@@ -2,12 +2,16 @@ package version
 
 import (
 	"encoding/json"
+	"os"
 	"runtime/debug"
+	"strings"
 )
 
 var (
 	OrchestratorCommit = ""
 	DrellaOSCommit     = ""
+
+	DrellaOSCommitFile = "/usr/lib/drellaos-commit"
 )
 
 type Component struct {
@@ -37,11 +41,23 @@ func Get() Info {
 		},
 	}
 
-	if DrellaOSCommit != "" {
-		info.Components["drellaos"] = Component{Commit: DrellaOSCommit}
+	commit := DrellaOSCommit
+	if commit == "" {
+		commit = readCommitFile(DrellaOSCommitFile)
+	}
+	if commit != "" {
+		info.Components["drellaos"] = Component{Commit: commit}
 	}
 
 	return info
+}
+
+func readCommitFile(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
 }
 
 func (i Info) JSON() ([]byte, error) {
