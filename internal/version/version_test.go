@@ -2,25 +2,29 @@ package version
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
 func TestGetDefault(t *testing.T) {
 	OrchestratorCommit = ""
 	DrellaOSCommit = ""
+	DrellaOSCommitFile = "/nonexistent"
 
 	info := Get()
 	if _, ok := info.Components["orchestrator"]; !ok {
 		t.Fatal("expected orchestrator component")
 	}
 	if _, ok := info.Components["drellaos"]; ok {
-		t.Error("drellaos should not appear when DrellaOSCommit is empty")
+		t.Error("drellaos should not appear when commit is empty and file is missing")
 	}
 }
 
-func TestGetWithCommits(t *testing.T) {
+func TestGetWithBuildTimeCommit(t *testing.T) {
 	OrchestratorCommit = "abc1234"
 	DrellaOSCommit = "def5678"
+	DrellaOSCommitFile = "/nonexistent"
 	t.Cleanup(func() {
 		OrchestratorCommit = ""
 		DrellaOSCommit = ""
@@ -35,9 +39,49 @@ func TestGetWithCommits(t *testing.T) {
 	}
 }
 
+func TestGetDrellaOSFromFile(t *testing.T) {
+	OrchestratorCommit = "abc1234"
+	DrellaOSCommit = ""
+	t.Cleanup(func() {
+		OrchestratorCommit = ""
+	})
+
+	dir := t.TempDir()
+	commitFile := filepath.Join(dir, "drellaos-commit")
+	if err := os.WriteFile(commitFile, []byte("file789\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	DrellaOSCommitFile = commitFile
+
+	info := Get()
+	if info.Components["drellaos"].Commit != "file789" {
+		t.Errorf("drellaos commit = %q, want file789", info.Components["drellaos"].Commit)
+	}
+}
+
+func TestGetDrellaOSBuildTimeOverridesFile(t *testing.T) {
+	DrellaOSCommit = "buildtime"
+	t.Cleanup(func() {
+		DrellaOSCommit = ""
+	})
+
+	dir := t.TempDir()
+	commitFile := filepath.Join(dir, "drellaos-commit")
+	if err := os.WriteFile(commitFile, []byte("fromfile\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	DrellaOSCommitFile = commitFile
+
+	info := Get()
+	if info.Components["drellaos"].Commit != "buildtime" {
+		t.Errorf("drellaos commit = %q, want buildtime (build-time should override file)", info.Components["drellaos"].Commit)
+	}
+}
+
 func TestJSON(t *testing.T) {
 	OrchestratorCommit = "abc1234"
 	DrellaOSCommit = "def5678"
+	DrellaOSCommitFile = "/nonexistent"
 	t.Cleanup(func() {
 		OrchestratorCommit = ""
 		DrellaOSCommit = ""
@@ -64,6 +108,7 @@ func TestJSON(t *testing.T) {
 func TestJSONExtensible(t *testing.T) {
 	OrchestratorCommit = "abc1234"
 	DrellaOSCommit = ""
+	DrellaOSCommitFile = "/nonexistent"
 	t.Cleanup(func() {
 		OrchestratorCommit = ""
 	})
