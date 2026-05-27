@@ -58,14 +58,7 @@ type Resources struct {
 type Source struct {
 	TasksRepo   string `json:"tasks_repo,omitempty"`
 	IssueNumber int    `json:"issue_number,omitempty"`
-}
-
-// IssueURL returns the full GitHub URL for the originating issue.
-func (s *Source) IssueURL() string {
-	if s == nil || s.TasksRepo == "" || s.IssueNumber <= 0 {
-		return ""
-	}
-	return fmt.Sprintf("https://github.com/%s/issues/%d", s.TasksRepo, s.IssueNumber)
+	URL         string `json:"url,omitempty"`
 }
 
 // Task status constants.
@@ -221,6 +214,7 @@ func (d *Dir) SaveSource(tasksRepo string, issueNumber int) error {
 	s.Source = &Source{
 		TasksRepo:   tasksRepo,
 		IssueNumber: issueNumber,
+		URL:         fmt.Sprintf("https://github.com/%s/issues/%d", tasksRepo, issueNumber),
 	}
 	return d.saveStateLocked(s)
 }

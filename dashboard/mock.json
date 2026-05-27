@@ -17,7 +17,8 @@
     "author": "drella",
     "source": {
       "tasks_repo": "drellabot/tasks",
-      "issue_number": 15
+      "issue_number": 15,
+      "url": "https://github.com/drellabot/tasks/issues/15"
     },
     "prs": [],
     "status": "in_progress",
@@ -41,7 +42,8 @@
     "author": "drella",
     "source": {
       "tasks_repo": "drellabot/tasks",
-      "issue_number": 8
+      "issue_number": 8,
+      "url": "https://github.com/drellabot/tasks/issues/8"
     },
     "prs": [
       {
