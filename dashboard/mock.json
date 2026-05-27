@@ -1,0 +1,154 @@
+[
+  {
+    "name": "add-retry-logic-to-sandbox-provisioning",
+    "description": "Implement exponential backoff retry logic for sandbox VM provisioning failures. Currently a transient AWS API error causes the entire task to fail.",
+    "created_at": "2026-05-27T06:12:00Z",
+    "updated_at": "2026-05-27T08:45:00Z",
+    "author": "drella",
+    "prs": [],
+    "status": "in_progress",
+    "sandbox_destroyed": false
+  },
+  {
+    "name": "fix-transcript-encoding-for-unicode",
+    "description": "Fix broken Unicode characters in transcript JSONL output when tool results contain emoji or CJK text.",
+    "created_at": "2026-05-27T07:30:00Z",
+    "updated_at": "2026-05-27T08:40:00Z",
+    "author": "drella",
+    "prs": [],
+    "status": "in_progress",
+    "sandbox_destroyed": false
+  },
+  {
+    "name": "migrate-config-to-yaml-v2",
+    "description": "Migrate orchestrator configuration from the legacy TOML format to YAML v2 schema with validation and default value support.",
+    "created_at": "2026-05-27T05:00:00Z",
+    "updated_at": "2026-05-27T08:30:00Z",
+    "author": "drella",
+    "prs": [],
+    "status": "in_progress",
+    "sandbox_destroyed": false
+  },
+  {
+    "name": "refactor-daemon-pr-polling",
+    "description": "Refactor the daemon's GitHub PR polling loop to use GraphQL batch queries instead of individual REST calls, reducing API rate limit consumption.",
+    "created_at": "2026-05-26T14:00:00Z",
+    "updated_at": "2026-05-27T02:15:00Z",
+    "author": "drella",
+    "prs": [
+      {
+        "url": "https://github.com/drellabot/orchestrator/pull/42",
+        "repo": "orchestrator",
+        "branch": "refactor-pr-polling",
+        "base": "main",
+        "number": 42,
+        "closed": false
+      }
+    ],
+    "status": "waiting",
+    "sandbox_destroyed": true
+  },
+  {
+    "name": "add-caddy-health-endpoint",
+    "description": "Add a /health endpoint to the Caddyfile that returns 200 OK for load balancer health checks.",
+    "created_at": "2026-05-25T10:00:00Z",
+    "updated_at": "2026-05-26T18:30:00Z",
+    "author": "drella",
+    "prs": [
+      {
+        "url": "https://github.com/drellabot/orchestrator/pull/39",
+        "repo": "orchestrator",
+        "branch": "caddy-health",
+        "base": "main",
+        "number": 39,
+        "closed": false
+      },
+      {
+        "url": "https://github.com/drellabot/drellaos/pull/7",
+        "repo": "drellaos",
+        "branch": "caddy-health-config",
+        "base": "main",
+        "number": 7,
+        "closed": false
+      }
+    ],
+    "status": "waiting",
+    "sandbox_destroyed": true
+  },
+  {
+    "name": "improve-mcp-error-messages",
+    "description": "Improve error messages returned by MCP tool handlers to include actionable context (file paths, git refs) instead of raw Go error strings.",
+    "created_at": "2026-05-24T09:00:00Z",
+    "updated_at": "2026-05-26T16:00:00Z",
+    "author": "drella",
+    "prs": [
+      {
+        "url": "https://github.com/drellabot/orchestrator/pull/37",
+        "repo": "orchestrator",
+        "branch": "better-mcp-errors",
+        "base": "main",
+        "number": 37,
+        "closed": false
+      }
+    ],
+    "status": "waiting",
+    "sandbox_destroyed": true
+  },
+  {
+    "name": "update-go-dependencies-may",
+    "description": "Monthly dependency update: bump Go modules to latest patch versions, run tests, fix any breakage.",
+    "created_at": "2026-05-20T08:00:00Z",
+    "updated_at": "2026-05-20T09:45:00Z",
+    "author": "drella",
+    "prs": [
+      {
+        "url": "https://github.com/drellabot/orchestrator/pull/34",
+        "repo": "orchestrator",
+        "branch": "deps-may-2026",
+        "base": "main",
+        "number": 34,
+        "closed": true
+      }
+    ],
+    "status": "done",
+    "sandbox_destroyed": true
+  },
+  {
+    "name": "fix-sandbox-cleanup-race",
+    "description": "Fix race condition where sandbox destroy could run before transcript flush completed, losing the last few lines of output.",
+    "created_at": "2026-05-18T11:00:00Z",
+    "updated_at": "2026-05-19T14:20:00Z",
+    "author": "drella",
+    "prs": [
+      {
+        "url": "https://github.com/drellabot/orchestrator/pull/31",
+        "repo": "orchestrator",
+        "branch": "fix-cleanup-race",
+        "base": "main",
+        "number": 31,
+        "closed": true
+      }
+    ],
+    "status": "done",
+    "sandbox_destroyed": true
+  },
+  {
+    "name": "add-task-description-to-state",
+    "description": "Persist the task description field in state.json so the dashboard can display it without parsing the transcript.",
+    "created_at": "2026-05-15T16:00:00Z",
+    "updated_at": "2026-05-16T10:00:00Z",
+    "author": "drella",
+    "prs": [
+      {
+        "url": "https://github.com/drellabot/orchestrator/pull/28",
+        "repo": "orchestrator",
+        "branch": "task-desc-state",
+        "base": "main",
+        "number": 28,
+        "closed": true
+      }
+    ],
+    "status": "done",
+    "sandbox_destroyed": true
+  }
+]

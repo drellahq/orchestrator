@@ -117,6 +117,38 @@ main {
 /* --- Task List --- */
 
 #task-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* --- Status Lanes --- */
+
+.status-lane {
+  margin-bottom: 2rem;
+}
+
+.status-lane-header {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0.75rem;
+}
+
+.status-lane-in_progress .status-lane-header {
+  color: var(--green);
+  border-bottom-color: var(--green-dim);
+}
+
+.status-lane-waiting .status-lane-header {
+  color: var(--amber);
+  border-bottom-color: #5c4a1a;
+}
+
+.status-lane-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
   gap: 1rem;
@@ -136,6 +168,16 @@ main {
   background: var(--bg-card-hover);
   border-color: var(--border-green);
   box-shadow: 0 0 12px rgba(57, 255, 20, 0.05);
+}
+
+/* --- Running Card --- */
+
+.task-card-running {
+  border-color: var(--green-dim);
+}
+
+.task-card-running .task-name {
+  color: var(--green-soft);
 }
 
 .task-header {
@@ -213,7 +255,24 @@ main {
 .status-in_progress {
   color: var(--green);
   border-color: var(--green-dim);
-  animation: pulse-glow 2s ease-in-out infinite;
+  gap: 0.3rem;
+}
+.status-in_progress::before {
+  animation: braille-spin 0.8s steps(1) infinite;
+  content: '\280B';
+}
+
+@keyframes braille-spin {
+  0%   { content: '\280B'; }
+  10%  { content: '\2819'; }
+  20%  { content: '\2839'; }
+  30%  { content: '\2838'; }
+  40%  { content: '\283C'; }
+  50%  { content: '\2834'; }
+  60%  { content: '\2826'; }
+  70%  { content: '\2827'; }
+  80%  { content: '\2807'; }
+  90%  { content: '\280F'; }
 }
 .status-waiting {
   color: var(--amber);
@@ -222,11 +281,6 @@ main {
 .status-done {
   color: var(--text-dim);
   border-color: var(--border);
-}
-
-@keyframes pulse-glow {
-  0%, 100% { opacity: 1; box-shadow: 0 0 2px rgba(57, 255, 20, 0.2); }
-  50% { opacity: 0.5; box-shadow: 0 0 8px rgba(57, 255, 20, 0.4); }
 }
 
 /* --- Task Detail --- */
@@ -548,7 +602,7 @@ main {
   main {
     padding: 1rem 0.75rem;
   }
-  #task-list {
+  .status-lane-grid {
     grid-template-columns: 1fr;
   }
   .entry {

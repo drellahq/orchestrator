@@ -216,46 +216,80 @@
 
   // ── Render: task list ──
 
+  const STATUS_LANES = [
+    { key: 'in_progress', label: 'running' },
+    { key: 'waiting', label: 'open' },
+    { key: 'done', label: 'done' },
+  ];
+
   function renderTaskList() {
     const container = $('#task-list');
     container.innerHTML = '';
 
-    const sorted = [...state.tasks.values()].sort((a, b) => {
-      return new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0);
-    });
+    const all = [...state.tasks.values()];
 
-    if (sorted.length === 0) {
+    if (all.length === 0) {
       container.innerHTML = '<div class="loading">no tasks found<span class="blink">_</span></div>';
       return;
     }
 
-    for (const task of sorted) {
-      const prs = (task.prs || [])
-        .map((pr) => {
-          const cls = pr.closed ? 'pr-closed' : 'pr-open';
-          return '<a href="' + escapeHtml(pr.url) + '" target="_blank" class="pr-badge ' + cls +
-            '" onclick="event.stopPropagation()">PR #' + pr.number + ' ' + escapeHtml(pr.repo) + '</a>';
-        })
-        .join('');
-
-      const card = document.createElement('div');
-      card.className = 'task-card';
-      card.setAttribute('data-task', task.name);
-      card.innerHTML =
-        '<div class="task-header">' +
-          '<div class="task-name">' + escapeHtml(task.name) + '</div>' +
-          statusBadge(task) +
-        '</div>' +
-        '<div class="task-desc">' + escapeHtml(task.description) + '</div>' +
-        '<div class="task-footer">' +
-          '<span class="task-time">' + timeAgo(task.updated_at || task.created_at) + '</span>' +
-          prs +
-        '</div>';
-      card.addEventListener('click', () => {
-        window.location.hash = 'task/' + task.name;
-      });
-      container.appendChild(card);
+    const groups = { in_progress: [], waiting: [], done: [] };
+    for (const task of all) {
+      const s = computeStatus(task);
+      (groups[s] || groups.done).push(task);
     }
+
+    for (const lane of STATUS_LANES) {
+      const tasks = groups[lane.key];
+      if (tasks.length === 0) continue;
+
+      tasks.sort((a, b) =>
+        new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0)
+      );
+
+      const section = document.createElement('div');
+      section.className = 'status-lane status-lane-' + lane.key;
+      section.innerHTML = '<div class="status-lane-header">' + escapeHtml(lane.label) + '</div>';
+
+      const grid = document.createElement('div');
+      grid.className = 'status-lane-grid';
+
+      for (const task of tasks) {
+        grid.appendChild(renderTaskCard(task));
+      }
+
+      section.appendChild(grid);
+      container.appendChild(section);
+    }
+  }
+
+  function renderTaskCard(task) {
+    const prs = (task.prs || [])
+      .map((pr) => {
+        const cls = pr.closed ? 'pr-closed' : 'pr-open';
+        return '<a href="' + escapeHtml(pr.url) + '" target="_blank" class="pr-badge ' + cls +
+          '" onclick="event.stopPropagation()">PR #' + pr.number + ' ' + escapeHtml(pr.repo) + '</a>';
+      })
+      .join('');
+
+    const isRunning = computeStatus(task) === 'in_progress';
+    const card = document.createElement('div');
+    card.className = 'task-card' + (isRunning ? ' task-card-running' : '');
+    card.setAttribute('data-task', task.name);
+    card.innerHTML =
+      '<div class="task-header">' +
+        '<div class="task-name">' + escapeHtml(task.name) + '</div>' +
+        statusBadge(task) +
+      '</div>' +
+      '<div class="task-desc">' + escapeHtml(task.description) + '</div>' +
+      '<div class="task-footer">' +
+        '<span class="task-time">' + timeAgo(task.updated_at || task.created_at) + '</span>' +
+        prs +
+      '</div>';
+    card.addEventListener('click', () => {
+      window.location.hash = 'task/' + task.name;
+    });
+    return card;
   }
 
   // ── Render: task detail ──
@@ -545,16 +579,33 @@
     startPolling('transcript', refreshTranscript, TRANSCRIPT_POLL_MS);
   }
 
+  // ── Mock mode ──
+
+  function isMockMode() {
+    return new URLSearchParams(window.location.search).has('mock');
+  }
+
+  async function loadMockTasks() {
+    const resp = await fetch('mock.json');
+    if (!resp.ok) throw new Error('Failed to load mock.json: ' + resp.status);
+    return resp.json();
+  }
+
   // ── Refresh ──
 
   async function refreshTaskList() {
     try {
-      const names = await discoverTasks();
-      const metas = await Promise.all(names.map(fetchTaskMeta));
+      let metas;
+      if (isMockMode()) {
+        metas = await loadMockTasks();
+      } else {
+        const names = await discoverTasks();
+        metas = await Promise.all(names.map(fetchTaskMeta));
+      }
       state.tasks.clear();
       for (const m of metas) state.tasks.set(m.name, m);
       if (!state.currentTask) renderTaskList();
-      setStatus(names.length + ' tasks | ' + new Date().toLocaleTimeString());
+      setStatus(metas.length + ' tasks | ' + new Date().toLocaleTimeString());
     } catch (e) {
       showToast('Error refreshing: ' + e.message);
     }
