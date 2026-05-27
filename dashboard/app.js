@@ -731,6 +731,28 @@
     }
   }
 
+  // ── Version footer ──
+
+  async function loadVersionFooter() {
+    try {
+      const resp = await fetch('/version.json');
+      if (!resp.ok) return;
+      const info = await resp.json();
+      const components = info.components || {};
+      const parts = Object.entries(components).map(function ([name, comp]) {
+        var label = escapeHtml(name) + ':';
+        var value = escapeHtml(comp.commit || 'dev');
+        return '<span class="version-component">' + label +
+          ' <span class="version-value">' + value + '</span></span>';
+      });
+      if (parts.length > 0) {
+        $('#version-footer').innerHTML = parts.join('');
+      }
+    } catch (_) {
+      // version info is best-effort
+    }
+  }
+
   // ── Init ──
 
   function init() {
@@ -751,6 +773,7 @@
       }
     });
 
+    loadVersionFooter();
     handleRoute();
   }
 
