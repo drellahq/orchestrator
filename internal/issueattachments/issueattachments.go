@@ -166,6 +166,7 @@ func downloadOne(ctx context.Context, client *http.Client, token, url, dest stri
 	if err != nil {
 		return err
 	}
+	// net/http drops Authorization if the client follows a 301/302 redirect
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/octet-stream")
 
