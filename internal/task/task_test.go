@@ -350,6 +350,44 @@ func TestSaveSource(t *testing.T) {
 	}
 }
 
+func TestSourceIssueURL(t *testing.T) {
+	tests := []struct {
+		name   string
+		source *Source
+		want   string
+	}{
+		{
+			name:   "valid source",
+			source: &Source{TasksRepo: "org/tasks", IssueNumber: 42},
+			want:   "https://github.com/org/tasks/issues/42",
+		},
+		{
+			name:   "nil source",
+			source: nil,
+			want:   "",
+		},
+		{
+			name:   "empty repo",
+			source: &Source{TasksRepo: "", IssueNumber: 42},
+			want:   "",
+		},
+		{
+			name:   "zero issue number",
+			source: &Source{TasksRepo: "org/tasks", IssueNumber: 0},
+			want:   "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.source.IssueURL()
+			if got != tt.want {
+				t.Errorf("IssueURL() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestSaveMetadataPreservesExistingState(t *testing.T) {
 	outputDir := t.TempDir()
 	td, err := Create(outputDir, "preserve-test")

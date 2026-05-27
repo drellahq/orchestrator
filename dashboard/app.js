@@ -121,7 +121,7 @@
   async function fetchTaskMeta(name) {
     let resp = await fetch('/tasks/' + name + '/state.json');
     if (!resp.ok) resp = await fetch('/tasks/' + name + '/metadata.json');
-    if (!resp.ok) return { name, description: '', created_at: '', author: '', prs: [], status: '' };
+    if (!resp.ok) return { name, description: '', created_at: '', author: '', source: null, prs: [], status: '' };
     const d = await resp.json();
     return {
       name: d.name || name,
@@ -129,6 +129,7 @@
       created_at: d.created_at || '',
       updated_at: d.updated_at || '',
       author: d.author || '',
+      source: d.source || null,
       prs: (d.resources && d.resources.github && d.resources.github.prs) || [],
       status: d.status || '',
       sandbox_destroyed: !!d.sandbox_destroyed,
@@ -311,6 +312,13 @@
       timeAgo(task.created_at) + ' (' + escapeHtml(task.created_at || '') + ')</span></div>' +
       '<div><span class="meta-label">updated:</span><span class="task-time">' +
       timeAgo(task.updated_at || task.created_at) + ' (' + escapeHtml(task.updated_at || task.created_at || '') + ')</span></div>';
+
+    if (task.source && task.source.tasks_repo && task.source.issue_number) {
+      const issueURL = 'https://github.com/' + task.source.tasks_repo + '/issues/' + task.source.issue_number;
+      html += '<div><span class="meta-label">source:</span><a href="' + escapeHtml(issueURL) +
+        '" target="_blank" rel="noopener">' + escapeHtml(task.source.tasks_repo) +
+        '#' + task.source.issue_number + '</a></div>';
+    }
 
     if (task.author) {
       html += '<div><span class="meta-label">author:</span>' + escapeHtml(task.author) + '</div>';

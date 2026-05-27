@@ -60,6 +60,14 @@ type Source struct {
 	IssueNumber int    `json:"issue_number,omitempty"`
 }
 
+// IssueURL returns the full GitHub URL for the originating issue.
+func (s *Source) IssueURL() string {
+	if s == nil || s.TasksRepo == "" || s.IssueNumber <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("https://github.com/%s/issues/%d", s.TasksRepo, s.IssueNumber)
+}
+
 // Task status constants.
 const (
 	StatusInProgress = "in_progress"
