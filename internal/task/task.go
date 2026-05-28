@@ -61,6 +61,13 @@ type Source struct {
 	URL         string `json:"url,omitempty"`
 }
 
+// Usage holds aggregated token usage across all runs of a task.
+type Usage struct {
+	InputTokens  int     `json:"input_tokens"`
+	OutputTokens int     `json:"output_tokens"`
+	CostUSD      float64 `json:"cost_usd,omitempty"`
+}
+
 // Task status constants.
 const (
 	StatusInProgress = "in_progress"
@@ -79,6 +86,7 @@ type State struct {
 	Resources        Resources `json:"resources"`
 	Status           string    `json:"status,omitempty"`
 	SandboxDestroyed bool      `json:"sandbox_destroyed,omitempty"`
+	Usage            *Usage    `json:"usage,omitempty"`
 }
 
 // HasOpenPRs reports whether the state has any PRs that are not closed.
@@ -281,6 +289,19 @@ func (d *Dir) SetStatus(status string) error {
 		return err
 	}
 	s.Status = status
+	return d.saveStateLocked(s)
+}
+
+// SaveUsage updates the aggregated token usage and persists it.
+func (d *Dir) SaveUsage(u *Usage) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	s, err := d.loadStateLocked()
+	if err != nil {
+		return err
+	}
+	s.Usage = u
 	return d.saveStateLocked(s)
 }
 

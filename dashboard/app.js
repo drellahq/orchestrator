@@ -47,6 +47,24 @@
     return `${days}d ago`;
   }
 
+  function formatTokens(n) {
+    if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+    if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
+    return '' + n;
+  }
+
+  function formatUsage(usage) {
+    if (!usage) return '';
+    let parts = [];
+    if (usage.input_tokens || usage.output_tokens) {
+      parts.push(formatTokens(usage.input_tokens || 0) + '↑ ' + formatTokens(usage.output_tokens || 0) + '↓');
+    }
+    if (usage.cost_usd) {
+      parts.push('$' + usage.cost_usd.toFixed(4));
+    }
+    return parts.join(' · ');
+  }
+
   function showToast(msg) {
     const el = $('#toast');
     el.textContent = msg;
@@ -133,6 +151,7 @@
       prs: (d.resources && d.resources.github && d.resources.github.prs) || [],
       status: d.status || '',
       sandbox_destroyed: !!d.sandbox_destroyed,
+      usage: d.usage || null,
     };
   }
 
@@ -277,6 +296,11 @@
     const card = document.createElement('div');
     card.className = 'task-card' + (isRunning ? ' task-card-running' : '');
     card.setAttribute('data-task', task.name);
+    const usageStr = formatUsage(task.usage);
+    const usageHtml = usageStr
+      ? '<span class="task-usage">' + escapeHtml(usageStr) + '</span>'
+      : '';
+
     card.innerHTML =
       '<div class="task-header">' +
         '<div class="task-name">' + escapeHtml(task.name) + '</div>' +
@@ -285,6 +309,7 @@
       '<div class="task-desc">' + escapeHtml(task.description) + '</div>' +
       '<div class="task-footer">' +
         '<span class="task-time">' + timeAgo(task.updated_at || task.created_at) + '</span>' +
+        usageHtml +
         prs +
       '</div>';
     card.addEventListener('click', () => {
@@ -329,6 +354,21 @@
 
     if (task.author) {
       html += '<div><span class="meta-label">author:</span>' + escapeHtml(task.author) + '</div>';
+    }
+
+    if (task.usage) {
+      let usageParts = [];
+      if (task.usage.input_tokens || task.usage.output_tokens) {
+        usageParts.push(formatTokens(task.usage.input_tokens || 0) + '↑ ' +
+          formatTokens(task.usage.output_tokens || 0) + '↓');
+      }
+      if (task.usage.cost_usd) {
+        usageParts.push('$' + task.usage.cost_usd.toFixed(4));
+      }
+      if (usageParts.length > 0) {
+        html += '<div><span class="meta-label">usage:</span><span class="meta-usage">' +
+          escapeHtml(usageParts.join(' · ')) + '</span></div>';
+      }
     }
 
     if (prs) {
@@ -376,6 +416,9 @@
     if (entry.type === 'user' && entry.message) {
       return renderUserResult(entry);
     }
+    if (entry.type === 'result') {
+      return renderResult(entry);
+    }
     if (entry.type === 'task_started' || entry.type === 'task_progress') {
       return renderSubagent(entry);
     }
@@ -415,6 +458,30 @@
       }
     });
     nav.appendChild(a);
+  }
+
+  function renderResult(entry) {
+    const div = document.createElement('div');
+    div.className = 'entry entry-run-result';
+
+    const parts = [];
+    const subtype = entry.subtype || 'done';
+    parts.push(subtype);
+
+    if (entry.num_turns) parts.push(entry.num_turns + ' turns');
+    if (entry.duration_ms) parts.push((entry.duration_ms / 1000).toFixed(1) + 's');
+    if (entry.total_cost_usd) parts.push('$' + entry.total_cost_usd.toFixed(4));
+    if (entry.usage) {
+      const input = entry.usage.input_tokens || 0;
+      const output = entry.usage.output_tokens || 0;
+      if (input || output) {
+        parts.push(formatTokens(input) + '↑ ' + formatTokens(output) + '↓');
+      }
+    }
+
+    div.innerHTML =
+      '<span class="result-label">result:</span> ' + escapeHtml(parts.join(' · '));
+    return div;
   }
 
   function renderTrigger(entry) {

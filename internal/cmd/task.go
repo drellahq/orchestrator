@@ -286,6 +286,12 @@ func executeTask(ctx context.Context, taskName, taskDescription string, taskDir 
 		slog.Warn("Failed to update updated_at", "task", taskName, "error", err)
 	}
 
+	if usage, err := task.ParseTranscriptUsage(taskDir.TranscriptPath()); err != nil {
+		slog.Warn("Failed to parse transcript usage", "task", taskName, "error", err)
+	} else if err := taskDir.SaveUsage(usage); err != nil {
+		slog.Warn("Failed to save usage", "task", taskName, "error", err)
+	}
+
 	state, err := taskDir.LoadState()
 	if err != nil {
 		slog.Warn("Failed to load state for status update", "task", taskName, "error", err)

@@ -7,7 +7,8 @@
     "author": "drella",
     "prs": [],
     "status": "in_progress",
-    "sandbox_destroyed": false
+    "sandbox_destroyed": false,
+    "usage": { "input_tokens": 284300, "output_tokens": 18720, "cost_usd": 1.2847 }
   },
   {
     "name": "fix-transcript-encoding-for-unicode",
@@ -56,7 +57,8 @@
       }
     ],
     "status": "waiting",
-    "sandbox_destroyed": true
+    "sandbox_destroyed": true,
+    "usage": { "input_tokens": 1523400, "output_tokens": 87200, "cost_usd": 7.4521 }
   },
   {
     "name": "add-caddy-health-endpoint",
@@ -121,7 +123,8 @@
       }
     ],
     "status": "done",
-    "sandbox_destroyed": true
+    "sandbox_destroyed": true,
+    "usage": { "input_tokens": 95400, "output_tokens": 6800, "cost_usd": 0.4312 }
   },
   {
     "name": "fix-sandbox-cleanup-race",
