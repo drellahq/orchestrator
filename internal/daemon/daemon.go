@@ -51,17 +51,19 @@ type Daemon struct {
 	configMu          sync.RWMutex
 	interval          time.Duration
 	allowedCommenters []string
+	botUsername        string
 	tasksRepo         string
 }
 
 // New creates a Daemon.
-func New(ghRunner *gh.Runner, interval time.Duration, configPath, outputDir string, allowedCommenters []string) *Daemon {
+func New(ghRunner *gh.Runner, interval time.Duration, configPath, outputDir string, allowedCommenters []string, botUsername string) *Daemon {
 	d := &Daemon{
 		gh:                ghRunner,
 		interval:          interval,
 		configPath:        configPath,
 		outputDir:         outputDir,
 		allowedCommenters: allowedCommenters,
+		botUsername:        botUsername,
 		running:           make(map[string]bool),
 	}
 	d.continueFunc = d.defaultContinueFunc
@@ -91,6 +93,13 @@ func (d *Daemon) getAllowedCommenters() []string {
 	return d.allowedCommenters
 }
 
+// getBotUsername returns the current bot username for mention filtering.
+func (d *Daemon) getBotUsername() string {
+	d.configMu.RLock()
+	defer d.configMu.RUnlock()
+	return d.botUsername
+}
+
 // getTasksRepo returns the current tasks repo.
 func (d *Daemon) getTasksRepo() string {
 	d.configMu.RLock()
@@ -99,13 +108,14 @@ func (d *Daemon) getTasksRepo() string {
 }
 
 // Reload updates the daemon's reloadable configuration.
-func (d *Daemon) Reload(interval time.Duration, allowedCommenters []string, tasksRepo string) {
+func (d *Daemon) Reload(interval time.Duration, allowedCommenters []string, botUsername, tasksRepo string) {
 	d.configMu.Lock()
 	defer d.configMu.Unlock()
 	d.interval = interval
 	d.allowedCommenters = allowedCommenters
+	d.botUsername = botUsername
 	d.tasksRepo = tasksRepo
-	slog.Info("Configuration reloaded", "interval", interval, "allowed_commenters", allowedCommenters, "tasks_repo", tasksRepo)
+	slog.Info("Configuration reloaded", "interval", interval, "allowed_commenters", allowedCommenters, "bot_username", botUsername, "tasks_repo", tasksRepo)
 }
 
 // Run is the main polling loop. It discovers PRs, iterates through them
@@ -276,6 +286,7 @@ func (d *Daemon) processPR(ctx context.Context, ref PRRef) {
 
 	// Partition new comments into allowed and rejected
 	allowedCommenters := d.getAllowedCommenters()
+	botUsername := d.getBotUsername()
 	newComments := FilterNewComments(comments, ref.PR.LastCommentID, allowedCommenters)
 	rejectedComments := FilterRejectedComments(comments, ref.PR.LastCommentID, allowedCommenters)
 
@@ -287,8 +298,12 @@ func (d *Daemon) processPR(ctx context.Context, ref PRRef) {
 	// React confused to comments from non-allowed users
 	d.reactToComments(ctx, ref.PR.Repo, rejectedComments, "confused")
 
-	// Advance LastCommentID past all new comments (both allowed and rejected)
-	// so that rejected comments are not re-processed every poll cycle.
+	// Filter allowed comments to only those that mention @botUsername.
+	// When botUsername is empty, all allowed comments pass through.
+	mentionedComments := FilterMentioned(newComments, botUsername)
+
+	// Advance LastCommentID past all new comments (allowed, rejected,
+	// and ignored) so none are re-processed on the next poll cycle.
 	maxID := maxCommentID(newComments, rejectedComments)
 	td, err := task.Open(ref.OutputDir, ref.TaskName)
 	if err != nil {
@@ -302,19 +317,23 @@ func (d *Daemon) processPR(ctx context.Context, ref PRRef) {
 		return
 	}
 
-	if len(newComments) == 0 {
-		log.Debug("No new comments from allowed users")
+	if len(mentionedComments) == 0 {
+		if len(newComments) > 0 {
+			log.Debug("New comments from allowed users but none mention bot", "count", len(newComments))
+		} else {
+			log.Debug("No new comments from allowed users")
+		}
 		return
 	}
 
-	log.Info("Found new comments", "count", len(newComments))
+	log.Info("Found new comments", "count", len(mentionedComments))
 
-	prompt := FormatCommentsAsPrompt(newComments)
+	prompt := FormatCommentsAsPrompt(mentionedComments)
 
 	// Write a trigger entry to the transcript so the dashboard can show
 	// which GitHub comments triggered this sub-run.
 	transcriptPath := task.TranscriptPathFor(ref.OutputDir, ref.TaskName)
-	if err := WriteTriggerEntry(transcriptPath, newComments); err != nil {
+	if err := WriteTriggerEntry(transcriptPath, mentionedComments); err != nil {
 		log.Warn("Failed to write trigger entry", "error", err)
 	}
 
@@ -330,8 +349,8 @@ func (d *Daemon) processPR(ctx context.Context, ref PRRef) {
 	d.running[ref.TaskName] = true
 	d.mu.Unlock()
 
-	// React rocket to allowed comments just before handoff
-	d.reactToComments(ctx, ref.PR.Repo, newComments, "rocket")
+	// React rocket to mentioned comments just before handoff
+	d.reactToComments(ctx, ref.PR.Repo, mentionedComments, "rocket")
 
 	d.wg.Add(1)
 	go func() {
@@ -401,6 +420,29 @@ func maxCommentID(slices ...[]gh.Comment) int64 {
 		}
 	}
 	return max
+}
+
+// ContainsMention reports whether body contains @username (case-insensitive).
+func ContainsMention(body, username string) bool {
+	if username == "" {
+		return false
+	}
+	return strings.Contains(strings.ToLower(body), "@"+strings.ToLower(username))
+}
+
+// FilterMentioned returns comments whose body mentions @username.
+// When username is empty, all comments are returned (no filtering).
+func FilterMentioned(comments []gh.Comment, username string) []gh.Comment {
+	if username == "" {
+		return comments
+	}
+	var result []gh.Comment
+	for _, c := range comments {
+		if ContainsMention(c.Body, username) {
+			result = append(result, c)
+		}
+	}
+	return result
 }
 
 // reactToComments adds a reaction to each comment, logging failures without
@@ -525,9 +567,10 @@ type watchPR struct {
 }
 
 // WatchTask polls all open PRs for a task for new comments from allowed
-// commenters. It returns the formatted prompt on the first new comment(s)
-// found across any PR.
-func WatchTask(ctx context.Context, ghRunner *gh.Runner, outputDir, taskName string, allowedCommenters []string, pollInterval time.Duration) (string, error) {
+// commenters that mention @botUsername. It returns the formatted prompt on
+// the first matching comment(s) found across any PR. When botUsername is
+// empty, all comments from allowed commenters match.
+func WatchTask(ctx context.Context, ghRunner *gh.Runner, outputDir, taskName string, allowedCommenters []string, botUsername string, pollInterval time.Duration) (string, error) {
 	td, err := task.Open(outputDir, taskName)
 	if err != nil {
 		return "", fmt.Errorf("opening task: %w", err)
@@ -573,8 +616,9 @@ func WatchTask(ctx context.Context, ghRunner *gh.Runner, outputDir, taskName str
 			}
 
 			newComments := FilterNewComments(comments, pr.Baseline, allowedCommenters)
-			if len(newComments) > 0 {
-				return FormatCommentsAsPrompt(newComments), nil
+			mentioned := FilterMentioned(newComments, botUsername)
+			if len(mentioned) > 0 {
+				return FormatCommentsAsPrompt(mentioned), nil
 			}
 		}
 

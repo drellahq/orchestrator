@@ -57,7 +57,7 @@ esac
 		t.Fatal(err)
 	}
 
-	d := New(gh.New(script), time.Minute, "", dir, []string{"alice"})
+	d := New(gh.New(script), time.Minute, "", dir, []string{"alice"}, "")
 
 	// Capture the prompt sent to task continue
 	var mu sync.Mutex
@@ -159,7 +159,7 @@ esac
 		t.Fatal(err)
 	}
 
-	d := New(gh.New(script), time.Minute, "", dir, []string{"alice"})
+	d := New(gh.New(script), time.Minute, "", dir, []string{"alice"}, "")
 	d.SetContinueFunc(func(ctx context.Context, taskName, prompt string) error {
 		t.Error("continueFunc should not have been called")
 		return nil

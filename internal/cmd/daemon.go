@@ -67,7 +67,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		slog.Warn("daemon.allowed_commenters is empty; no comments will trigger task continue")
 	}
 
-	d := daemon.New(ghRunner, interval, configPath, cfg.OutputDir, cfg.Daemon.AllowedCommenters)
+	d := daemon.New(ghRunner, interval, configPath, cfg.OutputDir, cfg.Daemon.AllowedCommenters, cfg.Daemon.BotUsername)
 
 	if cfg.Daemon.TasksRepo != "" {
 		d.SetTasksRepo(cfg.Daemon.TasksRepo)
@@ -105,7 +105,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 				newInterval = parsed
 			}
 
-			d.Reload(newInterval, newCfg.Daemon.AllowedCommenters, newCfg.Daemon.TasksRepo)
+			d.Reload(newInterval, newCfg.Daemon.AllowedCommenters, newCfg.Daemon.BotUsername, newCfg.Daemon.TasksRepo)
 		}
 	}()
 

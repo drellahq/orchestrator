@@ -83,6 +83,23 @@ func TestLoad(t *testing.T) {
 			},
 		},
 		{
+			name:      "daemon bot_username parsed",
+			writeFile: true,
+			yaml:      "daemon:\n  poll_interval: \"30s\"\n  allowed_commenters:\n    - alice\n  bot_username: drellabot\n",
+			want: Config{
+				OutputDir:        "./tasks",
+				SandboxBackend:   "gjoll",
+				GjollEnv:         "./configs/sandbox.tf",
+				PodmanImage:      "fedora:43",
+				AnthropicKeyFile: "~/.anthropic/api_key",
+				Daemon: DaemonConfig{
+					PollInterval:      "30s",
+					AllowedCommenters: []string{"alice"},
+					BotUsername:        "drellabot",
+				},
+			},
+		},
+		{
 			name:      "profiles config parsed",
 			writeFile: true,
 			yaml:      "profiles_repo: drellabot/profiles\nprofiles_dir: /tmp/profiles\n",

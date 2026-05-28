@@ -54,7 +54,7 @@ func runTaskWatch(cmd *cobra.Command, args []string) error {
 
 	ghRunner := gh.New("")
 
-	prompt, err := daemon.WatchTask(ctx, ghRunner, cfg.OutputDir, taskName, cfg.Daemon.AllowedCommenters, 5*time.Second)
+	prompt, err := daemon.WatchTask(ctx, ghRunner, cfg.OutputDir, taskName, cfg.Daemon.AllowedCommenters, cfg.Daemon.BotUsername, 5*time.Second)
 	if err != nil {
 		return err
 	}
