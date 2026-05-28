@@ -53,8 +53,12 @@ func runTaskWatch(cmd *cobra.Command, args []string) error {
 	}
 
 	ghRunner := gh.New("")
+	botUsername, err := ghRunner.AuthenticatedUser(ctx)
+	if err != nil {
+		return fmt.Errorf("GitHub CLI not authenticated: %w", err)
+	}
 
-	prompt, err := daemon.WatchTask(ctx, ghRunner, cfg.OutputDir, taskName, cfg.Daemon.AllowedCommenters, cfg.Daemon.BotUsername, 5*time.Second)
+	prompt, err := daemon.WatchTask(ctx, ghRunner, cfg.OutputDir, taskName, cfg.Daemon.AllowedCommenters, botUsername, 5*time.Second)
 	if err != nil {
 		return err
 	}

@@ -341,7 +341,7 @@ func TestProcessPR_SkipsRunningTask(t *testing.T) {
 	// writeArgCapture that says PR is open
 	script := writeOpenPRScript(t)
 
-	d := New(ghNew(script), time.Minute, "", dir, []string{"alice"}, "")
+	d := New(ghNew(script), time.Minute, "", dir, []string{"alice"}, "testbot")
 	d.SetTaskRunning("running-task", true)
 
 	ref := PRRef{
@@ -371,7 +371,7 @@ func TestProcessPR_SkipsClosedPR(t *testing.T) {
 	// writeArgCapture that says PR is closed
 	script := writeClosedPRScript(t)
 
-	d := New(ghNew(script), time.Minute, "", dir, []string{"alice"}, "")
+	d := New(ghNew(script), time.Minute, "", dir, []string{"alice"}, "testbot")
 
 	ref := PRRef{
 		TaskName:  "closed-task",
@@ -473,10 +473,10 @@ func TestProcessPR_ReactsRocketOnAllowed(t *testing.T) {
 		{URL: "https://github.com/org/repo/pull/1", Repo: "org/repo", Branch: "fix", Base: "main", Number: 1},
 	})
 
-	commentsJSON := `[{"id":100,"body":"Please fix this","user":{"login":"alice"},"created_at":"2025-01-01T00:00:00Z"}]`
+	commentsJSON := `[{"id":100,"body":"@testbot Please fix this","user":{"login":"alice"},"created_at":"2025-01-01T00:00:00Z"}]`
 	script, reactionsFile := writePRWithCommentsScript(t, commentsJSON, "[]")
 
-	d := New(ghNew(script), time.Minute, "", dir, []string{"alice"}, "")
+	d := New(ghNew(script), time.Minute, "", dir, []string{"alice"}, "testbot")
 
 	done := make(chan struct{}, 1)
 	d.SetContinueFunc(func(ctx context.Context, taskName, prompt string) error {
@@ -526,10 +526,10 @@ func TestProcessPR_ReactsConfusedOnRejected(t *testing.T) {
 	})
 
 	// Two comments: one from allowed alice, one from stranger
-	commentsJSON := `[{"id":100,"body":"allowed","user":{"login":"alice"},"created_at":"2025-01-01T00:00:00Z"},{"id":200,"body":"rejected","user":{"login":"stranger"},"created_at":"2025-01-01T01:00:00Z"}]`
+	commentsJSON := `[{"id":100,"body":"@testbot allowed","user":{"login":"alice"},"created_at":"2025-01-01T00:00:00Z"},{"id":200,"body":"rejected","user":{"login":"stranger"},"created_at":"2025-01-01T01:00:00Z"}]`
 	script, reactionsFile := writePRWithCommentsScript(t, commentsJSON, "[]")
 
-	d := New(ghNew(script), time.Minute, "", dir, []string{"alice"}, "")
+	d := New(ghNew(script), time.Minute, "", dir, []string{"alice"}, "testbot")
 
 	done := make(chan struct{}, 1)
 	d.SetContinueFunc(func(ctx context.Context, taskName, prompt string) error {
@@ -594,7 +594,7 @@ func TestProcessPR_AdvancesLastCommentIDPastRejected(t *testing.T) {
 	commentsJSON := `[{"id":300,"body":"from stranger","user":{"login":"stranger"},"created_at":"2025-01-01T00:00:00Z"}]`
 	script, _ := writePRWithCommentsScript(t, commentsJSON, "[]")
 
-	d := New(ghNew(script), time.Minute, "", dir, []string{"alice"}, "")
+	d := New(ghNew(script), time.Minute, "", dir, []string{"alice"}, "testbot")
 
 	called := false
 	d.SetContinueFunc(func(ctx context.Context, taskName, prompt string) error {
@@ -939,7 +939,7 @@ func TestReload(t *testing.T) {
 	}
 
 	script := writeOpenPRScript(t)
-	d := New(ghNew(script), time.Minute, "", t.TempDir(), []string{"alice"}, "")
+	d := New(ghNew(script), time.Minute, "", t.TempDir(), []string{"alice"}, "testbot")
 	d.SetTasksRepo("org/tasks")
 
 	// Verify initial values
@@ -954,7 +954,7 @@ func TestReload(t *testing.T) {
 	}
 
 	// Reload with new values
-	d.Reload(30*time.Second, []string{"alice", "bob"}, "", "org/new-tasks")
+	d.Reload(30*time.Second, []string{"alice", "bob"}, "org/new-tasks")
 
 	// Verify reloaded values
 	if d.getInterval() != 30*time.Second {
@@ -980,11 +980,11 @@ func TestProcessPR_UsesReloadedCommenters(t *testing.T) {
 	})
 
 	// Comment from bob
-	commentsJSON := `[{"id":100,"body":"Please fix this","user":{"login":"bob"},"created_at":"2025-01-01T00:00:00Z"}]`
+	commentsJSON := `[{"id":100,"body":"@testbot Please fix this","user":{"login":"bob"},"created_at":"2025-01-01T00:00:00Z"}]`
 	script, _ := writePRWithCommentsScript(t, commentsJSON, "[]")
 
 	// Create daemon with only alice allowed
-	d := New(ghNew(script), time.Minute, "", dir, []string{"alice"}, "")
+	d := New(ghNew(script), time.Minute, "", dir, []string{"alice"}, "testbot")
 
 	done := make(chan struct{}, 1)
 	d.SetContinueFunc(func(ctx context.Context, taskName, prompt string) error {
@@ -1008,7 +1008,7 @@ func TestProcessPR_UsesReloadedCommenters(t *testing.T) {
 	}
 
 	// Reload to allow bob
-	d.Reload(time.Minute, []string{"alice", "bob"}, "", "")
+	d.Reload(time.Minute, []string{"alice", "bob"}, "")
 
 	// Reset LastCommentID to re-process bob's comment
 	td, err := task.Open(dir, "reload-test")
@@ -1046,10 +1046,10 @@ func TestRun_WaitsForRunningTasks(t *testing.T) {
 	})
 
 	// Comment from allowed user
-	commentsJSON := `[{"id":100,"body":"Do this","user":{"login":"alice"},"created_at":"2025-01-01T00:00:00Z"}]`
+	commentsJSON := `[{"id":100,"body":"@testbot Do this","user":{"login":"alice"},"created_at":"2025-01-01T00:00:00Z"}]`
 	script, _ := writePRWithCommentsScript(t, commentsJSON, "[]")
 
-	d := New(ghNew(script), 10*time.Millisecond, "", dir, []string{"alice"}, "")
+	d := New(ghNew(script), 10*time.Millisecond, "", dir, []string{"alice"}, "testbot")
 
 	// Set up a continueFunc that blocks on a channel
 	unblock := make(chan struct{})
@@ -1121,7 +1121,7 @@ func TestRun_StopsPollingOnShutdown(t *testing.T) {
 
 	// Create a fake gh that reports specs
 	script := writeOpenPRScript(t)
-	d := New(ghNew(script), 10*time.Millisecond, "", dir, []string{"alice"}, "")
+	d := New(ghNew(script), 10*time.Millisecond, "", dir, []string{"alice"}, "testbot")
 
 	// Set up a slow newTaskFunc that would allow us to detect if it's called
 	taskLaunched := make(chan struct{})
@@ -1162,7 +1162,7 @@ func TestCleanupSandboxes_DestroysFinishedTasks(t *testing.T) {
 	td.SetStatus(task.StatusDone)
 
 	var destroyed []string
-	d := New(ghNew(writeOpenPRScript(t)), time.Minute, "", dir, nil, "")
+	d := New(ghNew(writeOpenPRScript(t)), time.Minute, "", dir, nil, "testbot")
 	d.SetDownFunc(func(ctx context.Context, taskName string) error {
 		destroyed = append(destroyed, taskName)
 		return nil
@@ -1189,7 +1189,7 @@ func TestCleanupSandboxes_SkipsRunningTasks(t *testing.T) {
 	createTaskWithPRs(t, dir, "running-task", nil)
 
 	var destroyed []string
-	d := New(ghNew(writeOpenPRScript(t)), time.Minute, "", dir, nil, "")
+	d := New(ghNew(writeOpenPRScript(t)), time.Minute, "", dir, nil, "testbot")
 	d.SetTaskRunning("running-task", true)
 	d.SetDownFunc(func(ctx context.Context, taskName string) error {
 		destroyed = append(destroyed, taskName)
@@ -1212,7 +1212,7 @@ func TestCleanupSandboxes_SkipsTasksWithOpenPRs(t *testing.T) {
 	td.SetStatus(task.StatusWaiting)
 
 	var destroyed []string
-	d := New(ghNew(writeOpenPRScript(t)), time.Minute, "", dir, nil, "")
+	d := New(ghNew(writeOpenPRScript(t)), time.Minute, "", dir, nil, "testbot")
 	d.SetDownFunc(func(ctx context.Context, taskName string) error {
 		destroyed = append(destroyed, taskName)
 		return nil
@@ -1232,7 +1232,7 @@ func TestCleanupSandboxes_SkipsAlreadyDestroyed(t *testing.T) {
 	td.SetSandboxDestroyed()
 
 	var destroyed []string
-	d := New(ghNew(writeOpenPRScript(t)), time.Minute, "", dir, nil, "")
+	d := New(ghNew(writeOpenPRScript(t)), time.Minute, "", dir, nil, "testbot")
 	d.SetDownFunc(func(ctx context.Context, taskName string) error {
 		destroyed = append(destroyed, taskName)
 		return nil
@@ -1252,7 +1252,7 @@ func TestCleanupSandboxes_SkipsInProgressStatus(t *testing.T) {
 	td.SetStatus(task.StatusInProgress)
 
 	var destroyed []string
-	d := New(ghNew(writeOpenPRScript(t)), time.Minute, "", dir, nil, "")
+	d := New(ghNew(writeOpenPRScript(t)), time.Minute, "", dir, nil, "testbot")
 	d.SetDownFunc(func(ctx context.Context, taskName string) error {
 		destroyed = append(destroyed, taskName)
 		return nil
@@ -1278,7 +1278,7 @@ func TestProcessPR_SetsStatusDoneWhenAllPRsClosed(t *testing.T) {
 	td.SetStatus(task.StatusWaiting)
 
 	script := writeClosedPRScript(t)
-	d := New(ghNew(script), time.Minute, "", dir, []string{"alice"}, "")
+	d := New(ghNew(script), time.Minute, "", dir, []string{"alice"}, "testbot")
 
 	d.ProcessPR(context.Background(), PRRef{
 		TaskName:  "all-closed",
@@ -1380,9 +1380,9 @@ func TestFilterMentioned(t *testing.T) {
 			wantIDs:  []int64{10, 30},
 		},
 		{
-			name:     "empty username returns all",
+			name:     "empty username returns none",
 			username: "",
-			wantIDs:  []int64{10, 20, 30},
+			wantIDs:  nil,
 		},
 	}
 
@@ -1536,37 +1536,3 @@ func TestProcessPR_TriggersOnMention(t *testing.T) {
 	}
 }
 
-func TestProcessPR_NoBotUsernameProcessesAll(t *testing.T) {
-	if _, err := exec.LookPath("sh"); err != nil {
-		t.Skip("sh not found")
-	}
-
-	dir := t.TempDir()
-	createTaskWithPRs(t, dir, "no-bot-task", []task.PR{
-		{URL: "https://github.com/org/repo/pull/1", Repo: "org/repo", Branch: "fix", Base: "main", Number: 1},
-	})
-
-	commentsJSON := `[{"id":100,"body":"No mention at all","user":{"login":"alice"},"created_at":"2025-01-01T00:00:00Z"}]`
-	script, _ := writePRWithCommentsScript(t, commentsJSON, "[]")
-
-	// Empty botUsername — backward compatible, all allowed comments trigger
-	d := New(ghNew(script), time.Minute, "", dir, []string{"alice"}, "")
-
-	done := make(chan struct{}, 1)
-	d.SetContinueFunc(func(ctx context.Context, taskName, prompt string) error {
-		done <- struct{}{}
-		return nil
-	})
-
-	d.ProcessPR(context.Background(), PRRef{
-		TaskName:  "no-bot-task",
-		OutputDir: dir,
-		PR:        task.PR{URL: "https://github.com/org/repo/pull/1", Repo: "org/repo", Number: 1},
-	})
-
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out — empty botUsername should trigger on all allowed comments")
-	}
-}
