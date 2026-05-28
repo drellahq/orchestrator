@@ -136,6 +136,10 @@ func formatTranscriptLine(line []byte, verbose bool) string {
 		DurationMS   int     `json:"duration_ms"`
 		NumTurns     int     `json:"num_turns"`
 		TotalCostUSD float64 `json:"total_cost_usd"`
+		Usage        *struct {
+			InputTokens  int `json:"input_tokens"`
+			OutputTokens int `json:"output_tokens"`
+		} `json:"usage"`
 	}
 	if err := json.Unmarshal(line, &msg); err != nil {
 		return ""
@@ -177,10 +181,14 @@ func formatTranscriptLine(line []byte, verbose bool) string {
 			subtype = "done"
 		}
 		duration := float64(msg.DurationMS) / 1000
+		tokens := ""
+		if msg.Usage != nil && (msg.Usage.InputTokens > 0 || msg.Usage.OutputTokens > 0) {
+			tokens = fmt.Sprintf(", %s↑ %s↓", formatTokenCount(msg.Usage.InputTokens), formatTokenCount(msg.Usage.OutputTokens))
+		}
 		if msg.TotalCostUSD > 0 {
-			out = fmt.Sprintf("[result] %s (%d turns, %.1fs, $%.2f)\n", subtype, msg.NumTurns, duration, msg.TotalCostUSD)
+			out = fmt.Sprintf("[result] %s (%d turns, %.1fs, $%.4f%s)\n", subtype, msg.NumTurns, duration, msg.TotalCostUSD, tokens)
 		} else if msg.DurationMS > 0 {
-			out = fmt.Sprintf("[result] %s (%d turns, %.1fs)\n", subtype, msg.NumTurns, duration)
+			out = fmt.Sprintf("[result] %s (%d turns, %.1fs%s)\n", subtype, msg.NumTurns, duration, tokens)
 		} else {
 			out = fmt.Sprintf("[result] %s\n", subtype)
 		}
@@ -223,6 +231,18 @@ func toolInputSummary(name string, raw json.RawMessage) string {
 		}
 	}
 	return ""
+}
+
+// formatTokenCount formats a token count for human readability.
+func formatTokenCount(n int) string {
+	switch {
+	case n >= 1_000_000:
+		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
+	case n >= 1_000:
+		return fmt.Sprintf("%.1fk", float64(n)/1_000)
+	default:
+		return fmt.Sprintf("%d", n)
+	}
 }
 
 // firstLine returns the first line of s, truncated to max characters.

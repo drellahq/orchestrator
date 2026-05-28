@@ -68,14 +68,24 @@ func TestFormatTranscriptLine(t *testing.T) {
 			want: "  → [master abc1234] Add file\n",
 		},
 		{
-			name: "result with stats",
+			name: "result with stats and tokens",
+			line: `{"type":"result","subtype":"success","duration_ms":12092,"num_turns":5,"total_cost_usd":0.08,"usage":{"input_tokens":1500,"output_tokens":340}}`,
+			want: "[result] success (5 turns, 12.1s, $0.0800, 1.5k↑ 340↓)\n",
+		},
+		{
+			name: "result with cost but no usage",
 			line: `{"type":"result","subtype":"success","duration_ms":12092,"num_turns":5,"total_cost_usd":0.08}`,
-			want: "[result] success (5 turns, 12.1s, $0.08)\n",
+			want: "[result] success (5 turns, 12.1s, $0.0800)\n",
 		},
 		{
 			name: "result with duration but no cost",
 			line: `{"type":"result","subtype":"success","duration_ms":5000,"num_turns":3}`,
 			want: "[result] success (3 turns, 5.0s)\n",
+		},
+		{
+			name: "result with duration and tokens but no cost",
+			line: `{"type":"result","subtype":"success","duration_ms":5000,"num_turns":3,"usage":{"input_tokens":200000,"output_tokens":8500}}`,
+			want: "[result] success (3 turns, 5.0s, 200.0k↑ 8.5k↓)\n",
 		},
 		{
 			name: "result without stats",
@@ -264,6 +274,32 @@ func TestToolInputSummary(t *testing.T) {
 			got := toolInputSummary(tt.tool, []byte(tt.input))
 			if got != tt.want {
 				t.Errorf("toolInputSummary() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFormatTokenCount(t *testing.T) {
+	tests := []struct {
+		n    int
+		want string
+	}{
+		{0, "0"},
+		{500, "500"},
+		{999, "999"},
+		{1000, "1.0k"},
+		{1500, "1.5k"},
+		{12345, "12.3k"},
+		{999999, "1000.0k"},
+		{1000000, "1.0M"},
+		{2500000, "2.5M"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.want, func(t *testing.T) {
+			got := formatTokenCount(tt.n)
+			if got != tt.want {
+				t.Errorf("formatTokenCount(%d) = %q, want %q", tt.n, got, tt.want)
 			}
 		})
 	}
