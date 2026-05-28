@@ -12,6 +12,7 @@ import (
 type DaemonConfig struct {
 	PollInterval      string   `yaml:"poll_interval"`
 	AllowedCommenters []string `yaml:"allowed_commenters"`
+	BotUsername        string   `yaml:"bot_username"`
 	TasksRepo         string   `yaml:"tasks_repo"`
 }
 
