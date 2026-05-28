@@ -93,13 +93,6 @@ func (d *Daemon) getAllowedCommenters() []string {
 	return d.allowedCommenters
 }
 
-// getBotUsername returns the current bot username for mention filtering.
-func (d *Daemon) getBotUsername() string {
-	d.configMu.RLock()
-	defer d.configMu.RUnlock()
-	return d.botUsername
-}
-
 // getTasksRepo returns the current tasks repo.
 func (d *Daemon) getTasksRepo() string {
 	d.configMu.RLock()
@@ -108,14 +101,13 @@ func (d *Daemon) getTasksRepo() string {
 }
 
 // Reload updates the daemon's reloadable configuration.
-func (d *Daemon) Reload(interval time.Duration, allowedCommenters []string, botUsername, tasksRepo string) {
+func (d *Daemon) Reload(interval time.Duration, allowedCommenters []string, tasksRepo string) {
 	d.configMu.Lock()
 	defer d.configMu.Unlock()
 	d.interval = interval
 	d.allowedCommenters = allowedCommenters
-	d.botUsername = botUsername
 	d.tasksRepo = tasksRepo
-	slog.Info("Configuration reloaded", "interval", interval, "allowed_commenters", allowedCommenters, "bot_username", botUsername, "tasks_repo", tasksRepo)
+	slog.Info("Configuration reloaded", "interval", interval, "allowed_commenters", allowedCommenters, "tasks_repo", tasksRepo)
 }
 
 // Run is the main polling loop. It discovers PRs, iterates through them
@@ -286,7 +278,6 @@ func (d *Daemon) processPR(ctx context.Context, ref PRRef) {
 
 	// Partition new comments into allowed and rejected
 	allowedCommenters := d.getAllowedCommenters()
-	botUsername := d.getBotUsername()
 	newComments := FilterNewComments(comments, ref.PR.LastCommentID, allowedCommenters)
 	rejectedComments := FilterRejectedComments(comments, ref.PR.LastCommentID, allowedCommenters)
 
@@ -299,8 +290,7 @@ func (d *Daemon) processPR(ctx context.Context, ref PRRef) {
 	d.reactToComments(ctx, ref.PR.Repo, rejectedComments, "confused")
 
 	// Filter allowed comments to only those that mention @botUsername.
-	// When botUsername is empty, all allowed comments pass through.
-	mentionedComments := FilterMentioned(newComments, botUsername)
+	mentionedComments := FilterMentioned(newComments, d.botUsername)
 
 	// Advance LastCommentID past all new comments (allowed, rejected,
 	// and ignored) so none are re-processed on the next poll cycle.
@@ -431,11 +421,7 @@ func ContainsMention(body, username string) bool {
 }
 
 // FilterMentioned returns comments whose body mentions @username.
-// When username is empty, all comments are returned (no filtering).
 func FilterMentioned(comments []gh.Comment, username string) []gh.Comment {
-	if username == "" {
-		return comments
-	}
 	var result []gh.Comment
 	for _, c := range comments {
 		if ContainsMention(c.Body, username) {

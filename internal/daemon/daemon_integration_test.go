@@ -49,7 +49,7 @@ fi
 echo $((n + 1)) > ` + countFile + `
 case $n in
   0) printf 'open' ;;
-  1) printf '[{"id":51,"body":"Please fix the typo","user":{"login":"alice"},"created_at":"2025-01-01T00:00:00Z"},{"id":52,"body":"Also update the docs","user":{"login":"alice"},"created_at":"2025-01-01T01:00:00Z"}]' ;;
+  1) printf '[{"id":51,"body":"@testbot Please fix the typo","user":{"login":"alice"},"created_at":"2025-01-01T00:00:00Z"},{"id":52,"body":"@testbot Also update the docs","user":{"login":"alice"},"created_at":"2025-01-01T01:00:00Z"}]' ;;
   2) printf '[]' ;;
 esac
 `
@@ -57,7 +57,7 @@ esac
 		t.Fatal(err)
 	}
 
-	d := New(gh.New(script), time.Minute, "", dir, []string{"alice"}, "")
+	d := New(gh.New(script), time.Minute, "", dir, []string{"alice"}, "testbot")
 
 	// Capture the prompt sent to task continue
 	var mu sync.Mutex
@@ -159,7 +159,7 @@ esac
 		t.Fatal(err)
 	}
 
-	d := New(gh.New(script), time.Minute, "", dir, []string{"alice"}, "")
+	d := New(gh.New(script), time.Minute, "", dir, []string{"alice"}, "testbot")
 	d.SetContinueFunc(func(ctx context.Context, taskName, prompt string) error {
 		t.Error("continueFunc should not have been called")
 		return nil

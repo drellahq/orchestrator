@@ -59,7 +59,8 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	defer cancel()
 
 	ghRunner := gh.New("")
-	if _, err := ghRunner.AuthenticatedUser(ctx); err != nil {
+	botUsername, err := ghRunner.AuthenticatedUser(ctx)
+	if err != nil {
 		return fmt.Errorf("GitHub CLI not authenticated: %w", err)
 	}
 
@@ -67,7 +68,7 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 		slog.Warn("daemon.allowed_commenters is empty; no comments will trigger task continue")
 	}
 
-	d := daemon.New(ghRunner, interval, configPath, cfg.OutputDir, cfg.Daemon.AllowedCommenters, cfg.Daemon.BotUsername)
+	d := daemon.New(ghRunner, interval, configPath, cfg.OutputDir, cfg.Daemon.AllowedCommenters, botUsername)
 
 	if cfg.Daemon.TasksRepo != "" {
 		d.SetTasksRepo(cfg.Daemon.TasksRepo)
@@ -105,10 +106,10 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 				newInterval = parsed
 			}
 
-			d.Reload(newInterval, newCfg.Daemon.AllowedCommenters, newCfg.Daemon.BotUsername, newCfg.Daemon.TasksRepo)
+			d.Reload(newInterval, newCfg.Daemon.AllowedCommenters, newCfg.Daemon.TasksRepo)
 		}
 	}()
 
-	slog.Info("Daemon starting", "interval", interval, "output_dir", cfg.OutputDir, "allowed_commenters", cfg.Daemon.AllowedCommenters)
+	slog.Info("Daemon starting", "interval", interval, "output_dir", cfg.OutputDir, "allowed_commenters", cfg.Daemon.AllowedCommenters, "bot_username", botUsername)
 	return d.Run(ctx)
 }

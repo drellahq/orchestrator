@@ -171,7 +171,7 @@ printf '[]'
 
 func TestCheckForNewSpecs_NoTasksRepo(t *testing.T) {
 	dir := t.TempDir()
-	d := New(gh.New("echo"), time.Minute, "", dir, nil, "")
+	d := New(gh.New("echo"), time.Minute, "", dir, nil, "testbot")
 	// tasksRepo is empty, should be a no-op
 	d.checkForNewSpecs(context.Background())
 	// No crash, no state file created
@@ -188,7 +188,7 @@ func TestCheckForNewSpecs_PicksUpNewSpec(t *testing.T) {
 		"add-dark-mode.md": specContent,
 	})
 
-	d := New(gh.New(script), time.Minute, "", dir, nil, "")
+	d := New(gh.New(script), time.Minute, "", dir, nil, "testbot")
 	d.SetTasksRepo("org/tasks")
 
 	var mu sync.Mutex
@@ -250,7 +250,7 @@ func TestCheckForNewSpecs_SkipsAlreadyProcessed(t *testing.T) {
 		"add-dark-mode.md": "content",
 	})
 
-	d := New(gh.New(script), time.Minute, "", dir, nil, "")
+	d := New(gh.New(script), time.Minute, "", dir, nil, "testbot")
 	d.SetTasksRepo("org/tasks")
 
 	called := false
@@ -275,7 +275,7 @@ func TestCheckForNewSpecs_SkipsRunningTask(t *testing.T) {
 		"add-dark-mode.md": "content",
 	})
 
-	d := New(gh.New(script), time.Minute, "", dir, nil, "")
+	d := New(gh.New(script), time.Minute, "", dir, nil, "testbot")
 	d.SetTasksRepo("org/tasks")
 	d.SetTaskRunning("add-dark-mode", true)
 
@@ -310,7 +310,7 @@ func TestCheckForNewSpecs_SkipsNonMdFiles(t *testing.T) {
 		"README.txt": "not a spec",
 	})
 
-	d := New(gh.New(script), time.Minute, "", dir, nil, "")
+	d := New(gh.New(script), time.Minute, "", dir, nil, "testbot")
 	d.SetTasksRepo("org/tasks")
 
 	called := false
@@ -336,7 +336,7 @@ func TestCheckForNewSpecs_MultipleSpecs(t *testing.T) {
 		"feature-b.md": "Feature B description",
 	})
 
-	d := New(gh.New(script), time.Minute, "", dir, nil, "")
+	d := New(gh.New(script), time.Minute, "", dir, nil, "testbot")
 	d.SetTasksRepo("org/tasks")
 
 	var mu sync.Mutex
@@ -385,7 +385,7 @@ func TestCheckForNewSpecs_SetsRunningState(t *testing.T) {
 		"my-task.md": "content",
 	})
 
-	d := New(gh.New(script), time.Minute, "", dir, nil, "")
+	d := New(gh.New(script), time.Minute, "", dir, nil, "testbot")
 	d.SetTasksRepo("org/tasks")
 
 	started := make(chan struct{})
@@ -434,7 +434,7 @@ func TestCheckForNewSpecs_CloneFails(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	d := New(gh.New(script), time.Minute, "", dir, nil, "")
+	d := New(gh.New(script), time.Minute, "", dir, nil, "testbot")
 	d.SetTasksRepo("org/tasks")
 
 	called := false
@@ -459,7 +459,7 @@ func TestCheckForNewSpecs_IdempotentAcrossCalls(t *testing.T) {
 		"my-feature.md": specContent,
 	})
 
-	d := New(gh.New(script), time.Minute, "", dir, nil, "")
+	d := New(gh.New(script), time.Minute, "", dir, nil, "testbot")
 	d.SetTasksRepo("org/tasks")
 
 	var mu sync.Mutex
@@ -655,7 +655,7 @@ func TestLoadProcessedIssues_NullIssues(t *testing.T) {
 
 func TestCheckForNewIssues_NoTasksRepo(t *testing.T) {
 	dir := t.TempDir()
-	d := New(gh.New("echo"), time.Minute, "", dir, nil, "")
+	d := New(gh.New("echo"), time.Minute, "", dir, nil, "testbot")
 	// tasksRepo is empty, should be a no-op
 	d.checkForNewIssues(context.Background())
 	// No crash, no state file created
@@ -676,7 +676,7 @@ func TestCheckForNewIssues_PicksUpNewIssue(t *testing.T) {
 	}
 	script := writeIssuesScript(t, makeIssuesJSON(t, issues))
 
-	d := New(gh.New(script), time.Minute, "", dir, []string{"alice"}, "")
+	d := New(gh.New(script), time.Minute, "", dir, []string{"alice"}, "testbot")
 	d.SetTasksRepo("org/tasks")
 
 	var mu sync.Mutex
@@ -748,7 +748,7 @@ func TestCheckForNewIssues_TitleOnlyWhenNoBody(t *testing.T) {
 	}
 	script := writeIssuesScript(t, makeIssuesJSON(t, issues))
 
-	d := New(gh.New(script), time.Minute, "", dir, []string{"alice"}, "")
+	d := New(gh.New(script), time.Minute, "", dir, []string{"alice"}, "testbot")
 	d.SetTasksRepo("org/tasks")
 
 	var capturedDesc string
@@ -784,7 +784,7 @@ func TestCheckForNewIssues_SkipsUnallowedAuthor(t *testing.T) {
 	}
 	script := writeIssuesScript(t, makeIssuesJSON(t, issues))
 
-	d := New(gh.New(script), time.Minute, "", dir, []string{"alice", "bob"}, "")
+	d := New(gh.New(script), time.Minute, "", dir, []string{"alice", "bob"}, "testbot")
 	d.SetTasksRepo("org/tasks")
 
 	called := false
@@ -829,7 +829,7 @@ func TestCheckForNewIssues_SkipsAlreadyProcessed(t *testing.T) {
 	}
 	script := writeIssuesScript(t, makeIssuesJSON(t, issues))
 
-	d := New(gh.New(script), time.Minute, "", dir, []string{"alice"}, "")
+	d := New(gh.New(script), time.Minute, "", dir, []string{"alice"}, "testbot")
 	d.SetTasksRepo("org/tasks")
 
 	called := false
@@ -858,7 +858,7 @@ func TestCheckForNewIssues_SkipsRunningTask(t *testing.T) {
 	}
 	script := writeIssuesScript(t, makeIssuesJSON(t, issues))
 
-	d := New(gh.New(script), time.Minute, "", dir, []string{"alice"}, "")
+	d := New(gh.New(script), time.Minute, "", dir, []string{"alice"}, "testbot")
 	d.SetTasksRepo("org/tasks")
 	d.SetTaskRunning("tasks-7-add_dark_mode", true)
 
@@ -896,7 +896,7 @@ func TestCheckForNewIssues_FiltersPullRequests(t *testing.T) {
 	rawJSON := `[{"number":1,"title":"Real issue","body":"Fix this","user":{"login":"alice"}},{"number":2,"title":"A PR","body":"","user":{"login":"alice"},"pull_request":{"url":"https://api.github.com/repos/org/tasks/pulls/2"}}]`
 	script := writeIssuesScript(t, rawJSON)
 
-	d := New(gh.New(script), time.Minute, "", dir, []string{"alice"}, "")
+	d := New(gh.New(script), time.Minute, "", dir, []string{"alice"}, "testbot")
 	d.SetTasksRepo("org/tasks")
 
 	var mu sync.Mutex
@@ -944,7 +944,7 @@ func TestCheckForNewIssues_MultipleIssues(t *testing.T) {
 	}
 	script := writeIssuesScript(t, makeIssuesJSON(t, issues))
 
-	d := New(gh.New(script), time.Minute, "", dir, []string{"alice"}, "")
+	d := New(gh.New(script), time.Minute, "", dir, []string{"alice"}, "testbot")
 	d.SetTasksRepo("org/tasks")
 
 	var mu sync.Mutex
@@ -997,7 +997,7 @@ func TestCheckForNewIssues_IdempotentAcrossCalls(t *testing.T) {
 	}
 	script := writeIssuesScript(t, makeIssuesJSON(t, issues))
 
-	d := New(gh.New(script), time.Minute, "", dir, []string{"alice"}, "")
+	d := New(gh.New(script), time.Minute, "", dir, []string{"alice"}, "testbot")
 	d.SetTasksRepo("org/tasks")
 
 	var mu sync.Mutex
@@ -1043,7 +1043,7 @@ func TestCheckForNewIssues_SetsRunningState(t *testing.T) {
 	}
 	script := writeIssuesScript(t, makeIssuesJSON(t, issues))
 
-	d := New(gh.New(script), time.Minute, "", dir, []string{"alice"}, "")
+	d := New(gh.New(script), time.Minute, "", dir, []string{"alice"}, "testbot")
 	d.SetTasksRepo("org/tasks")
 
 	started := make(chan struct{})
@@ -1086,7 +1086,7 @@ func TestCheckForNewIssues_ReactsRocketOnAccepted(t *testing.T) {
 	}
 	script, reactionsFile := writeIssuesScriptWithCapture(t, makeIssuesJSON(t, issues))
 
-	d := New(gh.New(script), time.Minute, "", dir, []string{"alice"}, "")
+	d := New(gh.New(script), time.Minute, "", dir, []string{"alice"}, "testbot")
 	d.SetTasksRepo("org/tasks")
 
 	done := make(chan struct{}, 1)
@@ -1129,7 +1129,7 @@ func TestCheckForNewIssues_ReactsConfusedOnRejected(t *testing.T) {
 	}
 	script, reactionsFile := writeIssuesScriptWithCapture(t, makeIssuesJSON(t, issues))
 
-	d := New(gh.New(script), time.Minute, "", dir, []string{"alice", "bob"}, "")
+	d := New(gh.New(script), time.Minute, "", dir, []string{"alice", "bob"}, "testbot")
 	d.SetTasksRepo("org/tasks")
 
 	called := false
