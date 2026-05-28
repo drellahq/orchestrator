@@ -789,6 +789,43 @@ func TestSetSandboxDestroyed(t *testing.T) {
 	}
 }
 
+func TestRemoveRepo(t *testing.T) {
+	outputDir := t.TempDir()
+	td, err := Create(outputDir, "repo-remove")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	repoPath := td.RepoPath()
+
+	// Write a file inside repo/ so we can verify it's non-empty.
+	if err := os.WriteFile(filepath.Join(repoPath, "file.txt"), []byte("data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := td.RemoveRepo(); err != nil {
+		t.Fatalf("RemoveRepo() error: %v", err)
+	}
+
+	if _, err := os.Stat(repoPath); !os.IsNotExist(err) {
+		t.Errorf("repo directory still exists after RemoveRepo()")
+	}
+}
+
+func TestRemoveRepo_AlreadyGone(t *testing.T) {
+	outputDir := t.TempDir()
+	td, err := Create(outputDir, "repo-gone")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	os.RemoveAll(td.RepoPath())
+
+	if err := td.RemoveRepo(); err != nil {
+		t.Fatalf("RemoveRepo() on missing dir should not error: %v", err)
+	}
+}
+
 func TestHasOpenPRs(t *testing.T) {
 	tests := []struct {
 		name string

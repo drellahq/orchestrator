@@ -314,6 +314,11 @@ func (d *Dir) SaveUsage(u *Usage) error {
 	return d.saveStateLocked(s)
 }
 
+// RemoveRepo removes the repo subdirectory to reclaim disk space.
+func (d *Dir) RemoveRepo() error {
+	return os.RemoveAll(d.RepoPath())
+}
+
 // SetSandboxDestroyed marks the sandbox as destroyed and sets status to done.
 func (d *Dir) SetSandboxDestroyed() error {
 	d.mu.Lock()
