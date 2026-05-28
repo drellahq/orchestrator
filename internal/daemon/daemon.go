@@ -801,6 +801,10 @@ func (d *Daemon) cleanupSandboxes(ctx context.Context) {
 		if err := td.SetSandboxDestroyed(); err != nil {
 			slog.Warn("Failed to mark sandbox as destroyed", "task", taskName, "error", err)
 		}
+
+		if err := td.RemoveRepo(); err != nil {
+			slog.Warn("Failed to remove repo directory", "task", taskName, "error", err)
+		}
 	}
 }
 

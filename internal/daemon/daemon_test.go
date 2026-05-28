@@ -1177,6 +1177,12 @@ func TestCleanupSandboxes_DestroysFinishedTasks(t *testing.T) {
 	td, _ := task.Open(dir, "done-task")
 	td.SetStatus(task.StatusDone)
 
+	// Write a file into repo/ so we can verify it gets removed.
+	repoFile := filepath.Join(td.RepoPath(), "file.txt")
+	if err := os.WriteFile(repoFile, []byte("data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
 	var destroyed []string
 	d := New(ghNew(writeOpenPRScript(t)), time.Minute, "", dir, nil, "testbot")
 	d.SetDownFunc(func(ctx context.Context, taskName string) error {
@@ -1197,6 +1203,11 @@ func TestCleanupSandboxes_DestroysFinishedTasks(t *testing.T) {
 	}
 	if !state.SandboxDestroyed {
 		t.Error("expected SandboxDestroyed = true")
+	}
+
+	// Verify repo directory was removed
+	if _, err := os.Stat(td.RepoPath()); !os.IsNotExist(err) {
+		t.Error("expected repo directory to be removed after cleanup")
 	}
 }
 
