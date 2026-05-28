@@ -212,6 +212,9 @@ func (d *Dir) SaveMetadata(name, description, author string, createdAt time.Time
 	s.Author = author
 	s.CreatedAt = createdAt
 	s.UpdatedAt = createdAt
+	if s.Status == "" {
+		s.Status = StatusInProgress
+	}
 	return d.saveStateLocked(s)
 }
 

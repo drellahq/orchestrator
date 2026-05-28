@@ -172,6 +172,52 @@ func TestSaveMetadata(t *testing.T) {
 	}
 }
 
+func TestSaveMetadataSetsInitialStatus(t *testing.T) {
+	outputDir := t.TempDir()
+	td, err := Create(outputDir, "initial-status")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now().Truncate(time.Second)
+	if err := td.SaveMetadata("initial-status", "desc", "", now); err != nil {
+		t.Fatalf("SaveMetadata() error: %v", err)
+	}
+
+	s, err := td.LoadState()
+	if err != nil {
+		t.Fatalf("LoadState() error: %v", err)
+	}
+	if s.Status != StatusInProgress {
+		t.Errorf("Status = %q, want %q", s.Status, StatusInProgress)
+	}
+}
+
+func TestSaveMetadataPreservesExistingStatus(t *testing.T) {
+	outputDir := t.TempDir()
+	td, err := Create(outputDir, "keep-status")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := td.SetStatus(StatusWaiting); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now().Truncate(time.Second)
+	if err := td.SaveMetadata("keep-status", "desc", "", now); err != nil {
+		t.Fatalf("SaveMetadata() error: %v", err)
+	}
+
+	s, err := td.LoadState()
+	if err != nil {
+		t.Fatalf("LoadState() error: %v", err)
+	}
+	if s.Status != StatusWaiting {
+		t.Errorf("Status = %q, want %q (should not overwrite)", s.Status, StatusWaiting)
+	}
+}
+
 func TestSaveMetadataSetsUpdatedAt(t *testing.T) {
 	outputDir := t.TempDir()
 	td, err := Create(outputDir, "updated-test")
