@@ -34,8 +34,14 @@ func TestGetWithBuildTimeCommit(t *testing.T) {
 	if info.Components["orchestrator"].Commit != "abc1234" {
 		t.Errorf("orchestrator commit = %q, want abc1234", info.Components["orchestrator"].Commit)
 	}
+	if info.Components["orchestrator"].Repo != "drellabot/orchestrator" {
+		t.Errorf("orchestrator repo = %q, want drellabot/orchestrator", info.Components["orchestrator"].Repo)
+	}
 	if info.Components["drellaos"].Commit != "def5678" {
 		t.Errorf("drellaos commit = %q, want def5678", info.Components["drellaos"].Commit)
+	}
+	if info.Components["drellaos"].Repo != "drellabot/drellaos" {
+		t.Errorf("drellaos repo = %q, want drellabot/drellaos", info.Components["drellaos"].Repo)
 	}
 }
 

@@ -741,9 +741,15 @@
       const components = info.components || {};
       const parts = Object.entries(components).map(function ([name, comp]) {
         var label = escapeHtml(name) + ':';
-        var value = escapeHtml(comp.commit || 'dev');
-        return '<span class="version-component">' + label +
-          ' <span class="version-value">' + value + '</span></span>';
+        var commitText = escapeHtml(comp.commit || 'dev');
+        var value;
+        if (comp.repo && comp.commit) {
+          var href = 'https://github.com/' + escapeHtml(comp.repo) + '/commit/' + commitText;
+          value = '<a href="' + href + '" target="_blank" rel="noopener" class="version-value">' + commitText + '</a>';
+        } else {
+          value = '<span class="version-value">' + commitText + '</span>';
+        }
+        return '<span class="version-component">' + label + ' ' + value + '</span>';
       });
       if (parts.length > 0) {
         $('#version-footer').innerHTML = parts.join('');
