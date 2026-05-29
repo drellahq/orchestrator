@@ -16,6 +16,7 @@ var (
 
 type Component struct {
 	Commit string `json:"commit,omitempty"`
+	Repo   string `json:"repo,omitempty"`
 }
 
 type Info struct {
@@ -35,6 +36,8 @@ func Get() Info {
 		}
 	}
 
+	orch.Repo = "drellabot/orchestrator"
+
 	info := Info{
 		Components: map[string]Component{
 			"orchestrator": orch,
@@ -46,7 +49,10 @@ func Get() Info {
 		commit = readCommitFile(DrellaOSCommitFile)
 	}
 	if commit != "" {
-		info.Components["drellaos"] = Component{Commit: commit}
+		info.Components["drellaos"] = Component{
+			Commit: commit,
+			Repo:   "drellabot/drellaos",
+		}
 	}
 
 	return info

@@ -624,6 +624,13 @@ main {
   color: var(--text);
   font-weight: 600;
 }
+a.version-value {
+  text-decoration: none;
+}
+a.version-value:hover {
+  text-decoration: underline;
+  color: var(--cyan);
+}
 
 /* --- Toast --- */
 
