@@ -2,6 +2,7 @@ package version
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"runtime/debug"
 	"strings"
@@ -9,14 +10,13 @@ import (
 
 var (
 	OrchestratorCommit = ""
-	DrellaOSCommit     = ""
-
-	DrellaOSCommitFile = "/usr/lib/drellaos-commit"
+	OSReleasePaths     = []string{"/usr/lib/os-release", "/etc/os-release"}
 )
 
 type Component struct {
-	Commit string `json:"commit,omitempty"`
-	Repo   string `json:"repo,omitempty"`
+	Commit  string `json:"commit,omitempty"`
+	Version string `json:"version,omitempty"`
+	Repo    string `json:"repo,omitempty"`
 }
 
 type Info struct {
@@ -35,7 +35,6 @@ func Get() Info {
 			}
 		}
 	}
-
 	orch.Repo = "drellabot/orchestrator"
 
 	info := Info{
@@ -44,28 +43,54 @@ func Get() Info {
 		},
 	}
 
-	commit := DrellaOSCommit
-	if commit == "" {
-		commit = readCommitFile(DrellaOSCommitFile)
-	}
-	if commit != "" {
-		info.Components["drellaos"] = Component{
-			Commit: commit,
+	rel := ParseOSRelease(OSReleasePaths)
+	if rel["IMAGE_ID"] == "drellaos" {
+		comp := Component{
+			Commit: rel["BUILD_ID"],
 			Repo:   "drellabot/drellaos",
 		}
+		if v := rel["IMAGE_VERSION"]; v != "" {
+			comp.Version = v
+		}
+		info.Components["drellaos"] = comp
 	}
 
 	return info
 }
 
-func readCommitFile(path string) string {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return ""
+func ParseOSRelease(paths []string) map[string]string {
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		result := make(map[string]string)
+		for _, line := range strings.Split(string(data), "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			key, val, ok := strings.Cut(line, "=")
+			if !ok {
+				continue
+			}
+			val = strings.Trim(val, `"'`)
+			result[key] = val
+		}
+		return result
 	}
-	return strings.TrimSpace(string(data))
+	return make(map[string]string)
 }
 
 func (i Info) JSON() ([]byte, error) {
 	return json.MarshalIndent(i, "", "  ")
+}
+
+func (i Info) WriteFile(path string) error {
+	data, err := i.JSON()
+	if err != nil {
+		return fmt.Errorf("marshaling version info: %w", err)
+	}
+	data = append(data, '\n')
+	return os.WriteFile(path, data, 0644)
 }

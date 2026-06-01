@@ -309,6 +309,7 @@ The dashboard has no backend of its own. Caddy's file server acts as the API:
 | `GET /tasks/` | `output_dir` directory listing | Discover tasks |
 | `GET /tasks/<name>/state.json` | Task state file | Task metadata |
 | `GET /tasks/<name>/transcript.jsonl` | Transcript file | Session transcript |
+| `GET /version.json` | Written by daemon at startup | Orchestrator & OS version info |
 
 Make sure the Caddyfile `root` for `/tasks/*` points at the same directory as `output_dir` in `orchestrator.yaml` (default `./tasks`).
 

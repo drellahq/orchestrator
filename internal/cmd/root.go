@@ -31,5 +31,4 @@ func init() {
 	rootCmd.AddCommand(taskCmd)
 	rootCmd.AddCommand(logCmd)
 	rootCmd.AddCommand(daemonCmd)
-	rootCmd.AddCommand(versionCmd)
 }

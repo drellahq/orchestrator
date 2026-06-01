@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 
 	"github.com/drellabot/orchestrator/internal/config"
 	"github.com/drellabot/orchestrator/internal/daemon"
+	"github.com/drellabot/orchestrator/internal/version"
 	"github.com/spf13/cobra"
 )
 
@@ -63,6 +65,15 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("GitHub CLI not authenticated: %w", err)
 	}
+
+	if err := os.MkdirAll(cfg.OutputDir, 0755); err != nil {
+		return fmt.Errorf("creating output directory: %w", err)
+	}
+	versionPath := filepath.Join(cfg.OutputDir, "version.json")
+	if err := version.Get().WriteFile(versionPath); err != nil {
+		return fmt.Errorf("writing version.json: %w", err)
+	}
+	slog.Info("Wrote version info", "path", versionPath)
 
 	if len(cfg.Daemon.AllowedCommenters) == 0 {
 		slog.Warn("daemon.allowed_commenters is empty; no comments will trigger task continue")

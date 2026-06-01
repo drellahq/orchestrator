@@ -9,26 +9,28 @@ import (
 
 func TestGetDefault(t *testing.T) {
 	OrchestratorCommit = ""
-	DrellaOSCommit = ""
-	DrellaOSCommitFile = "/nonexistent"
+	OSReleasePaths = []string{"/nonexistent"}
 
 	info := Get()
 	if _, ok := info.Components["orchestrator"]; !ok {
 		t.Fatal("expected orchestrator component")
 	}
 	if _, ok := info.Components["drellaos"]; ok {
-		t.Error("drellaos should not appear when commit is empty and file is missing")
+		t.Error("drellaos should not appear when os-release is missing")
 	}
 }
 
 func TestGetWithBuildTimeCommit(t *testing.T) {
 	OrchestratorCommit = "abc1234"
-	DrellaOSCommit = "def5678"
-	DrellaOSCommitFile = "/nonexistent"
-	t.Cleanup(func() {
-		OrchestratorCommit = ""
-		DrellaOSCommit = ""
-	})
+	t.Cleanup(func() { OrchestratorCommit = "" })
+
+	dir := t.TempDir()
+	osRelease := filepath.Join(dir, "os-release")
+	content := "IMAGE_ID=drellaos\nBUILD_ID=def5678\nIMAGE_VERSION=20260601T120000Z\n"
+	if err := os.WriteFile(osRelease, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	OSReleasePaths = []string{osRelease}
 
 	info := Get()
 	if info.Components["orchestrator"].Commit != "abc1234" {
@@ -40,58 +42,99 @@ func TestGetWithBuildTimeCommit(t *testing.T) {
 	if info.Components["drellaos"].Commit != "def5678" {
 		t.Errorf("drellaos commit = %q, want def5678", info.Components["drellaos"].Commit)
 	}
+	if info.Components["drellaos"].Version != "20260601T120000Z" {
+		t.Errorf("drellaos version = %q, want 20260601T120000Z", info.Components["drellaos"].Version)
+	}
 	if info.Components["drellaos"].Repo != "drellabot/drellaos" {
 		t.Errorf("drellaos repo = %q, want drellabot/drellaos", info.Components["drellaos"].Repo)
 	}
 }
 
-func TestGetDrellaOSFromFile(t *testing.T) {
+func TestGetNonDrellaOS(t *testing.T) {
 	OrchestratorCommit = "abc1234"
-	DrellaOSCommit = ""
-	t.Cleanup(func() {
-		OrchestratorCommit = ""
-	})
+	t.Cleanup(func() { OrchestratorCommit = "" })
 
 	dir := t.TempDir()
-	commitFile := filepath.Join(dir, "drellaos-commit")
-	if err := os.WriteFile(commitFile, []byte("file789\n"), 0644); err != nil {
+	osRelease := filepath.Join(dir, "os-release")
+	content := "ID=fedora\nBUILD_ID=44.20260501.0\n"
+	if err := os.WriteFile(osRelease, []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
-	DrellaOSCommitFile = commitFile
+	OSReleasePaths = []string{osRelease}
 
 	info := Get()
-	if info.Components["drellaos"].Commit != "file789" {
-		t.Errorf("drellaos commit = %q, want file789", info.Components["drellaos"].Commit)
+	if _, ok := info.Components["drellaos"]; ok {
+		t.Error("drellaos should not appear on non-drellaos system")
 	}
 }
 
-func TestGetDrellaOSBuildTimeOverridesFile(t *testing.T) {
-	DrellaOSCommit = "buildtime"
-	t.Cleanup(func() {
-		DrellaOSCommit = ""
-	})
-
+func TestParseOSRelease(t *testing.T) {
 	dir := t.TempDir()
-	commitFile := filepath.Join(dir, "drellaos-commit")
-	if err := os.WriteFile(commitFile, []byte("fromfile\n"), 0644); err != nil {
+	f := filepath.Join(dir, "os-release")
+	content := `NAME="Fedora Linux"
+VERSION="44 (Forty Four)"
+ID=fedora
+BUILD_ID=abc123
+IMAGE_ID=drellaos
+IMAGE_VERSION=20260601T120000Z
+# comment line
+`
+	if err := os.WriteFile(f, []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
-	DrellaOSCommitFile = commitFile
 
-	info := Get()
-	if info.Components["drellaos"].Commit != "buildtime" {
-		t.Errorf("drellaos commit = %q, want buildtime (build-time should override file)", info.Components["drellaos"].Commit)
+	rel := ParseOSRelease([]string{f})
+	if rel["NAME"] != "Fedora Linux" {
+		t.Errorf("NAME = %q, want Fedora Linux", rel["NAME"])
+	}
+	if rel["ID"] != "fedora" {
+		t.Errorf("ID = %q, want fedora", rel["ID"])
+	}
+	if rel["BUILD_ID"] != "abc123" {
+		t.Errorf("BUILD_ID = %q, want abc123", rel["BUILD_ID"])
+	}
+	if rel["IMAGE_ID"] != "drellaos" {
+		t.Errorf("IMAGE_ID = %q, want drellaos", rel["IMAGE_ID"])
+	}
+	if rel["IMAGE_VERSION"] != "20260601T120000Z" {
+		t.Errorf("IMAGE_VERSION = %q, want 20260601T120000Z", rel["IMAGE_VERSION"])
+	}
+}
+
+func TestParseOSReleaseFallback(t *testing.T) {
+	dir := t.TempDir()
+	second := filepath.Join(dir, "os-release-2")
+	if err := os.WriteFile(second, []byte("ID=test\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	rel := ParseOSRelease([]string{"/nonexistent", second})
+	if rel["ID"] != "test" {
+		t.Errorf("ID = %q, want test", rel["ID"])
+	}
+}
+
+func TestParseOSReleaseMissing(t *testing.T) {
+	rel := ParseOSRelease([]string{"/nonexistent"})
+	if rel == nil {
+		t.Error("expected non-nil map for missing os-release")
+	}
+	if len(rel) != 0 {
+		t.Errorf("expected empty map, got %v", rel)
 	}
 }
 
 func TestJSON(t *testing.T) {
 	OrchestratorCommit = "abc1234"
-	DrellaOSCommit = "def5678"
-	DrellaOSCommitFile = "/nonexistent"
-	t.Cleanup(func() {
-		OrchestratorCommit = ""
-		DrellaOSCommit = ""
-	})
+	t.Cleanup(func() { OrchestratorCommit = "" })
+
+	dir := t.TempDir()
+	osRelease := filepath.Join(dir, "os-release")
+	content := "IMAGE_ID=drellaos\nBUILD_ID=def5678\nIMAGE_VERSION=20260601T120000Z\n"
+	if err := os.WriteFile(osRelease, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	OSReleasePaths = []string{osRelease}
 
 	info := Get()
 	data, err := info.JSON()
@@ -109,29 +152,34 @@ func TestJSON(t *testing.T) {
 	if parsed.Components["drellaos"].Commit != "def5678" {
 		t.Errorf("parsed drellaos commit = %q, want def5678", parsed.Components["drellaos"].Commit)
 	}
+	if parsed.Components["drellaos"].Version != "20260601T120000Z" {
+		t.Errorf("parsed drellaos version = %q, want 20260601T120000Z", parsed.Components["drellaos"].Version)
+	}
 }
 
-func TestJSONExtensible(t *testing.T) {
+func TestWriteFile(t *testing.T) {
 	OrchestratorCommit = "abc1234"
-	DrellaOSCommit = ""
-	DrellaOSCommitFile = "/nonexistent"
-	t.Cleanup(func() {
-		OrchestratorCommit = ""
-	})
+	OSReleasePaths = []string{"/nonexistent"}
+	t.Cleanup(func() { OrchestratorCommit = "" })
+
+	dir := t.TempDir()
+	outFile := filepath.Join(dir, "version.json")
 
 	info := Get()
-	info.Components["custom-service"] = Component{Commit: "cust123"}
+	if err := info.WriteFile(outFile); err != nil {
+		t.Fatalf("WriteFile error: %v", err)
+	}
 
-	data, err := info.JSON()
+	data, err := os.ReadFile(outFile)
 	if err != nil {
-		t.Fatalf("JSON() error: %v", err)
+		t.Fatalf("read output file: %v", err)
 	}
 
 	var parsed Info
 	if err := json.Unmarshal(data, &parsed); err != nil {
 		t.Fatalf("unmarshal error: %v", err)
 	}
-	if parsed.Components["custom-service"].Commit != "cust123" {
-		t.Errorf("custom-service commit = %q, want cust123", parsed.Components["custom-service"].Commit)
+	if parsed.Components["orchestrator"].Commit != "abc1234" {
+		t.Errorf("orchestrator = %q, want abc1234", parsed.Components["orchestrator"].Commit)
 	}
 }
