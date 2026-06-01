@@ -1,4 +1,9 @@
 :2080 {
+	handle /version.json {
+		header Cache-Control "no-cache"
+		root * ./tasks
+		file_server
+	}
 	handle_path /tasks/* {
 		header Cache-Control "no-cache"
 		root * ./tasks
