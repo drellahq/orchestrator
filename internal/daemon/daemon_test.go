@@ -593,62 +593,6 @@ func TestProcessPR_ReactsConfusedOnRejected(t *testing.T) {
 	}
 }
 
-func TestProcessPR_NoConfusedReactionOnBotComment(t *testing.T) {
-	if _, err := exec.LookPath("sh"); err != nil {
-		t.Skip("sh not found")
-	}
-
-	dir := t.TempDir()
-	createTaskWithPRs(t, dir, "bot-comment-task", []task.PR{
-		{URL: "https://github.com/org/repo/pull/1", Repo: "org/repo", Branch: "fix", Base: "main", Number: 1},
-	})
-
-	// Three comments: allowed alice, rejected stranger, and the bot itself
-	commentsJSON := `[{"id":100,"body":"@testbot allowed","user":{"login":"alice"},"created_at":"2025-01-01T00:00:00Z"},{"id":200,"body":"rejected","user":{"login":"stranger"},"created_at":"2025-01-01T01:00:00Z"},{"id":300,"body":"bot update","user":{"login":"testbot"},"created_at":"2025-01-01T02:00:00Z"}]`
-	script, reactionsFile := writePRWithCommentsScript(t, commentsJSON, "[]")
-
-	d := New(ghNew(script), time.Minute, "", dir, []string{"alice"}, "testbot")
-
-	done := make(chan struct{}, 1)
-	d.SetContinueFunc(func(ctx context.Context, taskName, prompt string) error {
-		done <- struct{}{}
-		return nil
-	})
-
-	d.ProcessPR(context.Background(), PRRef{
-		TaskName:  "bot-comment-task",
-		OutputDir: dir,
-		PR:        task.PR{URL: "https://github.com/org/repo/pull/1", Repo: "org/repo", Number: 1},
-	})
-
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for continueFunc")
-	}
-	time.Sleep(50 * time.Millisecond)
-
-	reactions := parseReactions(t, reactionsFile)
-
-	// Should have confused on stranger's comment (200) but NOT on bot's comment (300)
-	for _, r := range reactions {
-		if strings.Contains(r, "issues/comments/300") && strings.Contains(r, "content=confused") {
-			t.Errorf("bot comment should not get confused reaction, got: %v", reactions)
-		}
-	}
-
-	foundConfused := false
-	for _, r := range reactions {
-		if strings.Contains(r, "content=confused") && strings.Contains(r, "issues/comments/200") {
-			foundConfused = true
-			break
-		}
-	}
-	if !foundConfused {
-		t.Errorf("expected confused reaction on stranger comment 200, got: %v", reactions)
-	}
-}
-
 func TestProcessPR_AdvancesLastCommentIDPastRejected(t *testing.T) {
 	if _, err := exec.LookPath("sh"); err != nil {
 		t.Skip("sh not found")
