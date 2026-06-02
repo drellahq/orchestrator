@@ -240,6 +240,7 @@ func (d *Daemon) processPR(ctx context.Context, ref PRRef) {
 			log.Warn("Failed to open task dir", "error", err)
 			return
 		}
+
 		if err := td.UpdatePR(ref.PR.URL, func(pr *task.PR) {
 			pr.Closed = true
 			pr.Merged = merged
@@ -256,6 +257,7 @@ func (d *Daemon) processPR(ctx context.Context, ref PRRef) {
 			if err := td.SetStatus(task.StatusDone); err != nil {
 				log.Warn("Failed to set status to done", "error", err)
 			}
+			d.closeSourceIssue(ctx, state, log)
 		}
 		return
 	}
@@ -806,6 +808,41 @@ func (d *Daemon) cleanupSandboxes(ctx context.Context) {
 			slog.Warn("Failed to remove repo directory", "task", taskName, "error", err)
 		}
 	}
+}
+
+// closeSourceIssue comments on and closes the originating tasks-repo issue
+// when at least one PR was merged. If no source issue is recorded or no PRs
+// were merged, it does nothing.
+func (d *Daemon) closeSourceIssue(ctx context.Context, state *task.State, log *slog.Logger) {
+	if state.Source == nil || state.Source.IssueNumber == 0 || state.Source.TasksRepo == "" {
+		return
+	}
+	if !state.HasMergedPR() {
+		return
+	}
+
+	repo := state.Source.TasksRepo
+	issue := state.Source.IssueNumber
+
+	var body string
+	urls := state.MergedPRURLs()
+	if len(urls) == 1 {
+		body = fmt.Sprintf("Implemented in %s", urls[0])
+	} else {
+		body = "Implemented in:\n"
+		for _, u := range urls {
+			body += fmt.Sprintf("- %s\n", u)
+		}
+	}
+
+	if err := d.gh.CommentOnIssue(ctx, repo, issue, body); err != nil {
+		log.Warn("Failed to comment on source issue", "repo", repo, "issue", issue, "error", err)
+		return
+	}
+	if err := d.gh.CloseIssue(ctx, repo, issue); err != nil {
+		log.Warn("Failed to close source issue", "repo", repo, "issue", issue, "error", err)
+	}
+	log.Info("Closed source issue", "repo", repo, "issue", issue)
 }
 
 func (d *Daemon) defaultDownFunc(ctx context.Context, taskName string) error {

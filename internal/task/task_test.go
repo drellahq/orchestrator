@@ -826,6 +826,94 @@ func TestRemoveRepo_AlreadyGone(t *testing.T) {
 	}
 }
 
+func TestHasMergedPR(t *testing.T) {
+	tests := []struct {
+		name string
+		prs  []PR
+		want bool
+	}{
+		{
+			name: "no PRs",
+			prs:  nil,
+			want: false,
+		},
+		{
+			name: "no merged PRs",
+			prs:  []PR{{URL: "u", Closed: true}, {URL: "v", Closed: true}},
+			want: false,
+		},
+		{
+			name: "one merged PR",
+			prs:  []PR{{URL: "u", Closed: true, Merged: true}, {URL: "v", Closed: true}},
+			want: true,
+		},
+		{
+			name: "all merged",
+			prs:  []PR{{URL: "u", Closed: true, Merged: true}, {URL: "v", Closed: true, Merged: true}},
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &State{Resources: Resources{GitHub: GitHubResources{PRs: tt.prs}}}
+			if got := s.HasMergedPR(); got != tt.want {
+				t.Errorf("HasMergedPR() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMergedPRURLs(t *testing.T) {
+	tests := []struct {
+		name string
+		prs  []PR
+		want []string
+	}{
+		{
+			name: "no PRs",
+			prs:  nil,
+			want: nil,
+		},
+		{
+			name: "no merged PRs",
+			prs:  []PR{{URL: "u", Closed: true}},
+			want: nil,
+		},
+		{
+			name: "one merged PR",
+			prs: []PR{
+				{URL: "https://github.com/org/repo/pull/1", Closed: true, Merged: true},
+				{URL: "https://github.com/org/repo/pull/2", Closed: true},
+			},
+			want: []string{"https://github.com/org/repo/pull/1"},
+		},
+		{
+			name: "multiple merged PRs",
+			prs: []PR{
+				{URL: "https://github.com/org/repo/pull/1", Closed: true, Merged: true},
+				{URL: "https://github.com/org/repo/pull/2", Closed: true, Merged: true},
+			},
+			want: []string{"https://github.com/org/repo/pull/1", "https://github.com/org/repo/pull/2"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &State{Resources: Resources{GitHub: GitHubResources{PRs: tt.prs}}}
+			got := s.MergedPRURLs()
+			if len(got) != len(tt.want) {
+				t.Fatalf("MergedPRURLs() returned %d URLs, want %d", len(got), len(tt.want))
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("MergedPRURLs()[%d] = %q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
 func TestHasOpenPRs(t *testing.T) {
 	tests := []struct {
 		name string
