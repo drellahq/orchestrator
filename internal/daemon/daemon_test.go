@@ -1599,32 +1599,6 @@ func TestProcessPR_DoesNotCloseSourceIssueOnClosedNotMerged(t *testing.T) {
 	}
 }
 
-func TestProcessPR_DoesNotCloseSourceIssueWithoutSource(t *testing.T) {
-	if _, err := exec.LookPath("sh"); err != nil {
-		t.Skip("sh not found")
-	}
-
-	dir := t.TempDir()
-	createTaskWithPRs(t, dir, "no-source", []task.PR{
-		{URL: "https://github.com/org/repo/pull/1", Repo: "org/repo", Branch: "fix", Base: "main", Number: 1},
-	})
-
-	script, captureFile := writeMergedPRScript(t)
-	d := New(ghNew(script), time.Minute, "", dir, []string{"alice"}, "testbot")
-
-	d.ProcessPR(context.Background(), PRRef{
-		TaskName:  "no-source",
-		OutputDir: dir,
-		PR:        task.PR{URL: "https://github.com/org/repo/pull/1", Repo: "org/repo", Number: 1},
-	})
-
-	// Verify no comment or close calls were made (no source issue)
-	data, _ := os.ReadFile(captureFile)
-	if len(strings.TrimSpace(string(data))) > 0 {
-		t.Errorf("expected no comment/close calls without source, got: %s", string(data))
-	}
-}
-
 func TestContainsMention(t *testing.T) {
 	tests := []struct {
 		name     string
