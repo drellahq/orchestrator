@@ -21,6 +21,7 @@ type PR struct {
 	Number        int    `json:"number,omitempty"`
 	LastCommentID int64  `json:"last_comment_id,omitempty"`
 	Closed        bool   `json:"closed,omitempty"`
+	Merged        bool   `json:"merged,omitempty"`
 }
 
 // PRNumberFromURL extracts the pull request number from a GitHub PR URL

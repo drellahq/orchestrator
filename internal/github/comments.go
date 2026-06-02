@@ -70,15 +70,18 @@ func (r *Runner) ListReviewComments(ctx context.Context, repo string, prNumber i
 	return comments, nil
 }
 
-// IsPROpen checks whether a PR is still open.
-func (r *Runner) IsPROpen(ctx context.Context, repo string, prNumber int) (bool, error) {
+// IsPROpen checks whether a PR is still open and whether it was merged.
+func (r *Runner) IsPROpen(ctx context.Context, repo string, prNumber int) (open bool, merged bool, err error) {
 	out, err := r.run(ctx, "", r.bin, "api",
 		fmt.Sprintf("/repos/%s/pulls/%d", repo, prNumber),
-		"--jq", ".state")
+		"--jq", "[.state, .merged] | @tsv")
 	if err != nil {
-		return false, fmt.Errorf("checking PR state: %w", err)
+		return false, false, fmt.Errorf("checking PR state: %w", err)
 	}
-	return strings.TrimSpace(out) == "open", nil
+	fields := strings.Fields(strings.TrimSpace(out))
+	return len(fields) > 0 && fields[0] == "open",
+		len(fields) > 1 && fields[1] == "true",
+		nil
 }
 
 // FetchAllComments retrieves both issue and review comments, merges them,
