@@ -48,7 +48,7 @@ else
 fi
 echo $((n + 1)) > ` + countFile + `
 case $n in
-  0) printf 'open' ;;
+  0) printf 'open\tfalse' ;;
   1) printf '[{"id":51,"body":"@testbot Please fix the typo","user":{"login":"alice"},"created_at":"2025-01-01T00:00:00Z"},{"id":52,"body":"@testbot Also update the docs","user":{"login":"alice"},"created_at":"2025-01-01T01:00:00Z"}]' ;;
   2) printf '[]' ;;
 esac
@@ -150,7 +150,7 @@ else
 fi
 echo $((n + 1)) > ` + countFile + `
 case $n in
-  0) printf 'open' ;;
+  0) printf 'open\tfalse' ;;
   1) printf '[{"id":1,"body":"spam","user":{"login":"stranger"},"created_at":"2025-01-01T00:00:00Z"}]' ;;
   2) printf '[]' ;;
 esac

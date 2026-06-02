@@ -174,13 +174,14 @@ func TestIsPROpen(t *testing.T) {
 	}
 
 	tests := []struct {
-		name     string
-		stdout   string
-		wantOpen bool
+		name       string
+		stdout     string
+		wantOpen   bool
+		wantMerged bool
 	}{
-		{name: "open PR", stdout: "open\n", wantOpen: true},
-		{name: "closed PR", stdout: "closed\n", wantOpen: false},
-		{name: "merged PR", stdout: "closed\n", wantOpen: false},
+		{name: "open PR", stdout: "open\tfalse\n", wantOpen: true, wantMerged: false},
+		{name: "closed PR", stdout: "closed\tfalse\n", wantOpen: false, wantMerged: false},
+		{name: "merged PR", stdout: "closed\ttrue\n", wantOpen: false, wantMerged: true},
 	}
 
 	for _, tt := range tests {
@@ -188,12 +189,15 @@ func TestIsPROpen(t *testing.T) {
 			script, _ := writeArgCapture(t, tt.stdout)
 			r := New(script)
 
-			open, err := r.IsPROpen(context.Background(), "org/repo", 1)
+			open, merged, err := r.IsPROpen(context.Background(), "org/repo", 1)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 			if open != tt.wantOpen {
-				t.Errorf("IsPROpen() = %v, want %v", open, tt.wantOpen)
+				t.Errorf("IsPROpen() open = %v, want %v", open, tt.wantOpen)
+			}
+			if merged != tt.wantMerged {
+				t.Errorf("IsPROpen() merged = %v, want %v", merged, tt.wantMerged)
 			}
 		})
 	}

@@ -119,7 +119,8 @@
         "branch": "deps-may-2026",
         "base": "main",
         "number": 34,
-        "closed": true
+        "closed": true,
+        "merged": true
       }
     ],
     "status": "done",
@@ -139,7 +140,8 @@
         "branch": "fix-cleanup-race",
         "base": "main",
         "number": 31,
-        "closed": true
+        "closed": true,
+        "merged": true
       }
     ],
     "status": "done",
@@ -158,7 +160,8 @@
         "branch": "task-desc-state",
         "base": "main",
         "number": 28,
-        "closed": true
+        "closed": true,
+        "merged": true
       }
     ],
     "status": "done",

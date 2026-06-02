@@ -164,7 +164,7 @@
 
   function statusBadge(task) {
     const s = computeStatus(task);
-    const labels = { in_progress: 'processing', waiting: 'waiting', done: 'done' };
+    const labels = { in_progress: 'in progress', waiting: 'waiting', done: 'done' };
     const label = labels[s] || s;
     return '<span class="status-badge status-' + s + '">' + escapeHtml(label) + '</span>';
   }
@@ -237,8 +237,8 @@
   // ── Render: task list ──
 
   const STATUS_LANES = [
-    { key: 'in_progress', label: 'processing' },
-    { key: 'waiting', label: 'waiting' },
+    { key: 'in_progress', label: 'in progress' },
+    { key: 'waiting', label: 'waiting for review' },
     { key: 'done', label: 'done' },
   ];
 
@@ -286,7 +286,7 @@
   function renderTaskCard(task) {
     const prs = (task.prs || [])
       .map((pr) => {
-        const cls = pr.closed ? 'pr-closed' : 'pr-open';
+        const cls = pr.merged ? 'pr-merged' : pr.closed ? 'pr-closed' : 'pr-open';
         return '<a href="' + escapeHtml(pr.url) + '" target="_blank" class="pr-badge ' + cls +
           '" onclick="event.stopPropagation()">PR #' + pr.number + ' ' + escapeHtml(pr.repo) + '</a>';
       })
@@ -325,7 +325,7 @@
 
     const prs = (task.prs || [])
       .map((pr) => {
-        const cls = pr.closed ? 'pr-closed' : 'pr-open';
+        const cls = pr.merged ? 'pr-merged' : pr.closed ? 'pr-closed' : 'pr-open';
         return '<a href="' + escapeHtml(pr.url) + '" target="_blank" class="pr-badge ' + cls +
           '">PR #' + pr.number + ' ' + escapeHtml(pr.repo) + '</a>';
       })

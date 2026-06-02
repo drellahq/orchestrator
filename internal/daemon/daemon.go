@@ -228,13 +228,13 @@ func (d *Daemon) processPR(ctx context.Context, ref PRRef) {
 	}
 
 	// Check if PR is still open
-	open, err := d.gh.IsPROpen(ctx, ref.PR.Repo, ref.PR.Number)
+	open, merged, err := d.gh.IsPROpen(ctx, ref.PR.Repo, ref.PR.Number)
 	if err != nil {
 		log.Warn("Failed to check PR state", "error", err)
 		return
 	}
 	if !open {
-		log.Info("PR is closed, marking as closed")
+		log.Info("PR is closed, marking as closed", "merged", merged)
 		td, err := task.Open(ref.OutputDir, ref.TaskName)
 		if err != nil {
 			log.Warn("Failed to open task dir", "error", err)
@@ -242,6 +242,7 @@ func (d *Daemon) processPR(ctx context.Context, ref PRRef) {
 		}
 		if err := td.UpdatePR(ref.PR.URL, func(pr *task.PR) {
 			pr.Closed = true
+			pr.Merged = merged
 		}); err != nil {
 			log.Warn("Failed to mark PR as closed", "error", err)
 			return

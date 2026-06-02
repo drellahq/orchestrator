@@ -409,6 +409,9 @@ func TestProcessPR_SkipsClosedPR(t *testing.T) {
 	if !state.Resources.GitHub.PRs[0].Closed {
 		t.Error("expected PR to be marked closed")
 	}
+	if !state.Resources.GitHub.PRs[0].Merged {
+		t.Error("expected PR to be marked merged")
+	}
 }
 
 // writePRWithCommentsScript creates a fake gh that returns "open" for PR state
@@ -437,7 +440,7 @@ done
 # PR state check
 for arg in "$@"; do
   if [ "$arg" = "--jq" ]; then
-    printf 'open'
+    printf 'open\tfalse'
     exit 0
   fi
 done
@@ -920,7 +923,7 @@ done
 # Check if this is a PR state check (has --jq)
 for arg in "$@"; do
   if [ "$arg" = "--jq" ]; then
-    printf 'open'
+    printf 'open\tfalse'
     exit 0
   fi
 done
@@ -938,7 +941,7 @@ func writeClosedPRScript(t *testing.T) string {
 	dir := t.TempDir()
 	script := filepath.Join(dir, "gh")
 	content := `#!/bin/sh
-printf 'closed'
+printf 'closed\ttrue'
 `
 	if err := os.WriteFile(script, []byte(content), 0755); err != nil {
 		t.Fatal(err)

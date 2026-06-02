@@ -244,6 +244,10 @@ main {
   color: var(--green-soft);
   border-color: var(--green-dim);
 }
+.pr-merged {
+  color: #a371f7;
+  border-color: #553d7a;
+}
 .pr-closed {
   color: var(--red);
   border-color: #6e2d28;
