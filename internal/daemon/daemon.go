@@ -280,7 +280,7 @@ func (d *Daemon) processPR(ctx context.Context, ref PRRef) {
 	// Partition new comments into allowed and rejected
 	allowedCommenters := d.getAllowedCommenters()
 	newComments := FilterNewComments(comments, ref.PR.LastCommentID, allowedCommenters)
-	rejectedComments := FilterRejectedComments(comments, ref.PR.LastCommentID, allowedCommenters)
+	rejectedComments := FilterRejectedComments(comments, ref.PR.LastCommentID, allowedCommenters, d.botUsername)
 
 	if len(newComments) == 0 && len(rejectedComments) == 0 {
 		log.Debug("No new comments")
@@ -380,9 +380,9 @@ func FilterNewComments(comments []gh.Comment, lastCommentID int64, allowedCommen
 }
 
 // FilterRejectedComments returns comments with ID > lastCommentID whose user
-// is NOT in the allowed list. This is the complement of FilterNewComments for
-// the same ID-filtered set.
-func FilterRejectedComments(comments []gh.Comment, lastCommentID int64, allowedCommenters []string) []gh.Comment {
+// is NOT in the allowed list and is not the bot itself. This is the complement
+// of FilterNewComments for the same ID-filtered set.
+func FilterRejectedComments(comments []gh.Comment, lastCommentID int64, allowedCommenters []string, botUsername string) []gh.Comment {
 	allowed := make(map[string]bool, len(allowedCommenters))
 	for _, u := range allowedCommenters {
 		allowed[u] = true
@@ -391,6 +391,9 @@ func FilterRejectedComments(comments []gh.Comment, lastCommentID int64, allowedC
 	var result []gh.Comment
 	for _, c := range comments {
 		if c.ID <= lastCommentID {
+			continue
+		}
+		if c.User.Login == botUsername {
 			continue
 		}
 		if !allowed[c.User.Login] {

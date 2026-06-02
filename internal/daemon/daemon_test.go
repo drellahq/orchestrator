@@ -232,43 +232,56 @@ func TestFilterRejectedComments(t *testing.T) {
 		{ID: 30, Body: "new from stranger", User: gh.CommentUser{Login: "stranger"}},
 		{ID: 40, Body: "new from bob", User: gh.CommentUser{Login: "bob"}},
 		{ID: 50, Body: "new from another stranger", User: gh.CommentUser{Login: "mallory"}},
+		{ID: 60, Body: "bot comment", User: gh.CommentUser{Login: "drellabot"}},
 	}
 
 	tests := []struct {
 		name              string
 		lastCommentID     int64
 		allowedCommenters []string
+		botUsername        string
 		wantIDs           []int64
 	}{
 		{
 			name:              "returns only non-allowed new comments",
 			lastCommentID:     15,
 			allowedCommenters: []string{"alice", "bob"},
+			botUsername:        "drellabot",
 			wantIDs:           []int64{30, 50},
 		},
 		{
 			name:              "all comments old",
 			lastCommentID:     100,
 			allowedCommenters: []string{"alice"},
+			botUsername:        "drellabot",
 			wantIDs:           nil,
 		},
 		{
 			name:              "all commenters allowed",
 			lastCommentID:     0,
 			allowedCommenters: []string{"alice", "bob", "stranger", "mallory"},
+			botUsername:        "drellabot",
 			wantIDs:           nil,
 		},
 		{
-			name:              "no allowed commenters means all rejected",
+			name:              "no allowed commenters means all rejected except bot",
 			lastCommentID:     0,
 			allowedCommenters: []string{},
+			botUsername:        "drellabot",
 			wantIDs:           []int64{10, 20, 30, 40, 50},
+		},
+		{
+			name:              "bot comments are never rejected",
+			lastCommentID:     0,
+			allowedCommenters: []string{"alice"},
+			botUsername:        "drellabot",
+			wantIDs:           []int64{30, 40, 50},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := FilterRejectedComments(comments, tt.lastCommentID, tt.allowedCommenters)
+			got := FilterRejectedComments(comments, tt.lastCommentID, tt.allowedCommenters, tt.botUsername)
 			var gotIDs []int64
 			for _, c := range got {
 				gotIDs = append(gotIDs, c.ID)
@@ -577,6 +590,62 @@ func TestProcessPR_ReactsConfusedOnRejected(t *testing.T) {
 	}
 	if !foundRocket {
 		t.Errorf("expected rocket reaction on comment 100, got: %v", reactions)
+	}
+}
+
+func TestProcessPR_NoConfusedReactionOnBotComment(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not found")
+	}
+
+	dir := t.TempDir()
+	createTaskWithPRs(t, dir, "bot-comment-task", []task.PR{
+		{URL: "https://github.com/org/repo/pull/1", Repo: "org/repo", Branch: "fix", Base: "main", Number: 1},
+	})
+
+	// Three comments: allowed alice, rejected stranger, and the bot itself
+	commentsJSON := `[{"id":100,"body":"@testbot allowed","user":{"login":"alice"},"created_at":"2025-01-01T00:00:00Z"},{"id":200,"body":"rejected","user":{"login":"stranger"},"created_at":"2025-01-01T01:00:00Z"},{"id":300,"body":"bot update","user":{"login":"testbot"},"created_at":"2025-01-01T02:00:00Z"}]`
+	script, reactionsFile := writePRWithCommentsScript(t, commentsJSON, "[]")
+
+	d := New(ghNew(script), time.Minute, "", dir, []string{"alice"}, "testbot")
+
+	done := make(chan struct{}, 1)
+	d.SetContinueFunc(func(ctx context.Context, taskName, prompt string) error {
+		done <- struct{}{}
+		return nil
+	})
+
+	d.ProcessPR(context.Background(), PRRef{
+		TaskName:  "bot-comment-task",
+		OutputDir: dir,
+		PR:        task.PR{URL: "https://github.com/org/repo/pull/1", Repo: "org/repo", Number: 1},
+	})
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for continueFunc")
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	reactions := parseReactions(t, reactionsFile)
+
+	// Should have confused on stranger's comment (200) but NOT on bot's comment (300)
+	for _, r := range reactions {
+		if strings.Contains(r, "issues/comments/300") && strings.Contains(r, "content=confused") {
+			t.Errorf("bot comment should not get confused reaction, got: %v", reactions)
+		}
+	}
+
+	foundConfused := false
+	for _, r := range reactions {
+		if strings.Contains(r, "content=confused") && strings.Contains(r, "issues/comments/200") {
+			foundConfused = true
+			break
+		}
+	}
+	if !foundConfused {
+		t.Errorf("expected confused reaction on stranger comment 200, got: %v", reactions)
 	}
 }
 
