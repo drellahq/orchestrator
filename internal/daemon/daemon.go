@@ -120,6 +120,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 		d.checkForNewIssues(ctx)
 
 		d.cleanupSandboxes(ctx)
+		d.recoverOrphanedTasks()
 
 		refs := DiscoverPRs(d.outputDir)
 		interval := d.getInterval()
@@ -699,6 +700,53 @@ func WriteTriggerEntry(transcriptPath string, comments []gh.Comment) error {
 	data = append(data, '\n')
 	_, err = f.Write(data)
 	return err
+}
+
+// recoverOrphanedTasks transitions tasks stuck in "in_progress" to their
+// correct final status when the process that was running them is no longer
+// active. This recovers from daemon restarts, killed child processes, and
+// silent state-write failures in executeTask.
+func (d *Daemon) recoverOrphanedTasks() {
+	entries, err := os.ReadDir(d.outputDir)
+	if err != nil {
+		slog.Debug("Cannot read output dir for recovery", "dir", d.outputDir, "error", err)
+		return
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		taskName := entry.Name()
+
+		if d.IsTaskRunning(taskName) {
+			continue
+		}
+
+		td, err := task.Open(d.outputDir, taskName)
+		if err != nil {
+			continue
+		}
+		state, err := td.LoadState()
+		if err != nil {
+			slog.Debug("Cannot load state for recovery", "task", taskName, "error", err)
+			continue
+		}
+
+		if state.Status != task.StatusInProgress {
+			continue
+		}
+
+		finalStatus := task.StatusDone
+		if state.HasOpenPRs() {
+			finalStatus = task.StatusWaiting
+		}
+
+		slog.Info("Recovering orphaned task", "task", taskName, "from", state.Status, "to", finalStatus)
+		if err := td.SetStatus(finalStatus); err != nil {
+			slog.Warn("Failed to recover task status", "task", taskName, "error", err)
+		}
+	}
 }
 
 // cleanupSandboxes destroys sandboxes for tasks that are not running and
