@@ -267,6 +267,16 @@ func (r *Runner) ReactToComment(ctx context.Context, repo string, commentID int6
 	return nil
 }
 
+// CloseIssue closes a GitHub issue.
+func (r *Runner) CloseIssue(ctx context.Context, repo string, issueNumber int) error {
+	_, err := r.run(ctx, "", r.bin, "issue", "close", fmt.Sprintf("%d", issueNumber),
+		"--repo", repo)
+	if err != nil {
+		return fmt.Errorf("closing issue %d: %w", issueNumber, err)
+	}
+	return nil
+}
+
 // ReactToIssue adds a reaction emoji to a GitHub issue.
 // reaction must be one of: +1, -1, laugh, confused, heart, hooray, rocket, eyes.
 func (r *Runner) ReactToIssue(ctx context.Context, repo string, issueNumber int, reaction string) error {

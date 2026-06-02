@@ -821,6 +821,26 @@ func TestPostReview(t *testing.T) {
 	}
 }
 
+func TestCloseIssue(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not found")
+	}
+
+	script, outFile := writeArgCapture(t, "")
+	r := New(script)
+
+	err := r.CloseIssue(context.Background(), "org/tasks", 42)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	gotArgs := readArgs(t, outFile)
+	wantArgs := []string{"issue", "close", "42", "--repo", "org/tasks"}
+	if !equalArgs(gotArgs, wantArgs) {
+		t.Errorf("got args %v, want %v", gotArgs, wantArgs)
+	}
+}
+
 func TestReactToComment_IssueComment(t *testing.T) {
 	if _, err := exec.LookPath("sh"); err != nil {
 		t.Skip("sh not found")

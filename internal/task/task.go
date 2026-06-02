@@ -100,6 +100,27 @@ func (s *State) HasOpenPRs() bool {
 	return false
 }
 
+// HasMergedPR reports whether the state has any PR that was merged.
+func (s *State) HasMergedPR() bool {
+	for _, pr := range s.Resources.GitHub.PRs {
+		if pr.Merged {
+			return true
+		}
+	}
+	return false
+}
+
+// MergedPRURLs returns the URLs of all merged PRs.
+func (s *State) MergedPRURLs() []string {
+	var urls []string
+	for _, pr := range s.Resources.GitHub.PRs {
+		if pr.Merged && pr.URL != "" {
+			urls = append(urls, pr.URL)
+		}
+	}
+	return urls
+}
+
 // Dir represents a per-task directory structure.
 type Dir struct {
 	root string

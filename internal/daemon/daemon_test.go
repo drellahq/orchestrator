@@ -1406,6 +1406,225 @@ func TestProcessPR_SetsStatusDoneWhenAllPRsClosed(t *testing.T) {
 	}
 }
 
+// writeMergedPRScript creates a fake gh that returns "closed\ttrue" for PR
+// state checks and captures issue comment/close calls.
+func writeMergedPRScript(t *testing.T) (string, string) {
+	t.Helper()
+	dir := t.TempDir()
+	script := filepath.Join(dir, "gh")
+	captureFile := filepath.Join(dir, "calls.txt")
+
+	content := `#!/bin/sh
+CAPTURE_FILE="` + captureFile + `"
+
+# Check for issue close
+for arg in "$@"; do
+  if [ "$arg" = "close" ]; then
+    printf '%s\n' "$*" >> "$CAPTURE_FILE"
+    exit 0
+  fi
+done
+
+# Check for issue comment
+for arg in "$@"; do
+  if [ "$arg" = "comment" ]; then
+    printf '%s\n' "$*" >> "$CAPTURE_FILE"
+    exit 0
+  fi
+done
+
+# PR state check (returns tsv: state\tmerged)
+for arg in "$@"; do
+  if [ "$arg" = "--jq" ]; then
+    printf 'closed\ttrue'
+    exit 0
+  fi
+done
+
+printf '[]'
+`
+	if err := os.WriteFile(script, []byte(content), 0755); err != nil {
+		t.Fatal(err)
+	}
+	return script, captureFile
+}
+
+// writeClosedNotMergedPRScript returns "closed\tfalse" for PR state checks.
+func writeClosedNotMergedPRScript(t *testing.T) (string, string) {
+	t.Helper()
+	dir := t.TempDir()
+	script := filepath.Join(dir, "gh")
+	captureFile := filepath.Join(dir, "calls.txt")
+
+	content := `#!/bin/sh
+CAPTURE_FILE="` + captureFile + `"
+
+# Check for issue close or comment
+for arg in "$@"; do
+  if [ "$arg" = "close" ] || [ "$arg" = "comment" ]; then
+    printf '%s\n' "$*" >> "$CAPTURE_FILE"
+    exit 0
+  fi
+done
+
+# PR state check (returns tsv: state\tmerged)
+for arg in "$@"; do
+  if [ "$arg" = "--jq" ]; then
+    printf 'closed\tfalse'
+    exit 0
+  fi
+done
+
+printf '[]'
+`
+	if err := os.WriteFile(script, []byte(content), 0755); err != nil {
+		t.Fatal(err)
+	}
+	return script, captureFile
+}
+
+func TestProcessPR_ClosesSourceIssueOnMerge(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not found")
+	}
+
+	dir := t.TempDir()
+	createTaskWithPRs(t, dir, "merge-close", []task.PR{
+		{URL: "https://github.com/org/repo/pull/1", Repo: "org/repo", Branch: "fix", Base: "main", Number: 1},
+	})
+	td, err := task.Open(dir, "merge-close")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := td.SaveSource("org/tasks", 7); err != nil {
+		t.Fatal(err)
+	}
+
+	script, captureFile := writeMergedPRScript(t)
+	d := New(ghNew(script), time.Minute, "", dir, []string{"alice"}, "testbot")
+
+	d.ProcessPR(context.Background(), PRRef{
+		TaskName:  "merge-close",
+		OutputDir: dir,
+		PR:        task.PR{URL: "https://github.com/org/repo/pull/1", Repo: "org/repo", Number: 1},
+	})
+
+	// Verify PR is marked as merged
+	state, err := td.LoadState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !state.Resources.GitHub.PRs[0].Merged {
+		t.Error("expected PR to be marked as merged")
+	}
+	if state.Status != task.StatusDone {
+		t.Errorf("Status = %q, want %q", state.Status, task.StatusDone)
+	}
+
+	// Verify comment and close calls were made
+	data, err := os.ReadFile(captureFile)
+	if err != nil {
+		t.Fatalf("reading capture file: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("expected at least 2 captured calls (comment + close), got %d: %v", len(lines), lines)
+	}
+
+	// Check for comment call
+	foundComment := false
+	for _, line := range lines {
+		if strings.Contains(line, "comment") && strings.Contains(line, "org/tasks") {
+			foundComment = true
+			if !strings.Contains(line, "Implemented in") {
+				t.Errorf("comment body should contain 'Implemented in', got: %s", line)
+			}
+		}
+	}
+	if !foundComment {
+		t.Errorf("expected comment on source issue, got: %s", string(data))
+	}
+
+	// Check for close call
+	foundClose := false
+	for _, line := range lines {
+		if strings.Contains(line, "close") && strings.Contains(line, "org/tasks") {
+			foundClose = true
+		}
+	}
+	if !foundClose {
+		t.Errorf("expected close of source issue, got: %s", string(data))
+	}
+}
+
+func TestProcessPR_DoesNotCloseSourceIssueOnClosedNotMerged(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not found")
+	}
+
+	dir := t.TempDir()
+	createTaskWithPRs(t, dir, "closed-not-merged", []task.PR{
+		{URL: "https://github.com/org/repo/pull/1", Repo: "org/repo", Branch: "fix", Base: "main", Number: 1},
+	})
+	td, err := task.Open(dir, "closed-not-merged")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := td.SaveSource("org/tasks", 7); err != nil {
+		t.Fatal(err)
+	}
+
+	script, captureFile := writeClosedNotMergedPRScript(t)
+	d := New(ghNew(script), time.Minute, "", dir, []string{"alice"}, "testbot")
+
+	d.ProcessPR(context.Background(), PRRef{
+		TaskName:  "closed-not-merged",
+		OutputDir: dir,
+		PR:        task.PR{URL: "https://github.com/org/repo/pull/1", Repo: "org/repo", Number: 1},
+	})
+
+	// Verify PR is NOT marked as merged
+	state, err := td.LoadState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Resources.GitHub.PRs[0].Merged {
+		t.Error("expected PR to NOT be marked as merged")
+	}
+
+	// Verify no comment or close calls were made
+	data, _ := os.ReadFile(captureFile)
+	if len(strings.TrimSpace(string(data))) > 0 {
+		t.Errorf("expected no comment/close calls, got: %s", string(data))
+	}
+}
+
+func TestProcessPR_DoesNotCloseSourceIssueWithoutSource(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not found")
+	}
+
+	dir := t.TempDir()
+	createTaskWithPRs(t, dir, "no-source", []task.PR{
+		{URL: "https://github.com/org/repo/pull/1", Repo: "org/repo", Branch: "fix", Base: "main", Number: 1},
+	})
+
+	script, captureFile := writeMergedPRScript(t)
+	d := New(ghNew(script), time.Minute, "", dir, []string{"alice"}, "testbot")
+
+	d.ProcessPR(context.Background(), PRRef{
+		TaskName:  "no-source",
+		OutputDir: dir,
+		PR:        task.PR{URL: "https://github.com/org/repo/pull/1", Repo: "org/repo", Number: 1},
+	})
+
+	// Verify no comment or close calls were made (no source issue)
+	data, _ := os.ReadFile(captureFile)
+	if len(strings.TrimSpace(string(data))) > 0 {
+		t.Errorf("expected no comment/close calls without source, got: %s", string(data))
+	}
+}
+
 func TestContainsMention(t *testing.T) {
 	tests := []struct {
 		name     string
