@@ -1278,6 +1278,90 @@ func TestCleanupSandboxes_SkipsInProgressStatus(t *testing.T) {
 	}
 }
 
+func TestRecoverOrphanedTasks_WithOpenPRs(t *testing.T) {
+	dir := t.TempDir()
+	createTaskWithPRs(t, dir, "orphaned-prs", []task.PR{
+		{URL: "https://github.com/org/repo/pull/1", Repo: "org/repo", Branch: "fix", Base: "main"},
+	})
+	td, _ := task.Open(dir, "orphaned-prs")
+	td.SetStatus(task.StatusInProgress)
+
+	d := New(ghNew(writeOpenPRScript(t)), time.Minute, "", dir, nil, "testbot")
+	d.recoverOrphanedTasks()
+
+	state, err := td.LoadState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Status != task.StatusWaiting {
+		t.Errorf("Status = %q, want %q", state.Status, task.StatusWaiting)
+	}
+}
+
+func TestRecoverOrphanedTasks_NoPRs(t *testing.T) {
+	dir := t.TempDir()
+	createTaskWithPRs(t, dir, "orphaned-no-prs", nil)
+	td, _ := task.Open(dir, "orphaned-no-prs")
+	td.SetStatus(task.StatusInProgress)
+
+	d := New(ghNew(writeOpenPRScript(t)), time.Minute, "", dir, nil, "testbot")
+	d.recoverOrphanedTasks()
+
+	state, err := td.LoadState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Status != task.StatusDone {
+		t.Errorf("Status = %q, want %q", state.Status, task.StatusDone)
+	}
+}
+
+func TestRecoverOrphanedTasks_SkipsRunning(t *testing.T) {
+	dir := t.TempDir()
+	createTaskWithPRs(t, dir, "running-ip", nil)
+	td, _ := task.Open(dir, "running-ip")
+	td.SetStatus(task.StatusInProgress)
+
+	d := New(ghNew(writeOpenPRScript(t)), time.Minute, "", dir, nil, "testbot")
+	d.SetTaskRunning("running-ip", true)
+	d.recoverOrphanedTasks()
+
+	state, err := td.LoadState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Status != task.StatusInProgress {
+		t.Errorf("Status = %q, want %q (should not change for running task)", state.Status, task.StatusInProgress)
+	}
+}
+
+func TestRecoverOrphanedTasks_SkipsOtherStatuses(t *testing.T) {
+	dir := t.TempDir()
+
+	createTaskWithPRs(t, dir, "waiting-task", []task.PR{
+		{URL: "https://github.com/org/repo/pull/1", Repo: "org/repo", Branch: "fix", Base: "main"},
+	})
+	tdW, _ := task.Open(dir, "waiting-task")
+	tdW.SetStatus(task.StatusWaiting)
+
+	createTaskWithPRs(t, dir, "done-task", nil)
+	tdD, _ := task.Open(dir, "done-task")
+	tdD.SetStatus(task.StatusDone)
+
+	d := New(ghNew(writeOpenPRScript(t)), time.Minute, "", dir, nil, "testbot")
+	d.recoverOrphanedTasks()
+
+	stateW, _ := tdW.LoadState()
+	if stateW.Status != task.StatusWaiting {
+		t.Errorf("waiting task Status = %q, want %q", stateW.Status, task.StatusWaiting)
+	}
+
+	stateD, _ := tdD.LoadState()
+	if stateD.Status != task.StatusDone {
+		t.Errorf("done task Status = %q, want %q", stateD.Status, task.StatusDone)
+	}
+}
+
 func TestProcessPR_SetsStatusDoneWhenAllPRsClosed(t *testing.T) {
 	if _, err := exec.LookPath("sh"); err != nil {
 		t.Skip("sh not found")
