@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/drellahq/orchestrator/internal/agent"
 )
 
 // PR records a pull request opened by the task.
@@ -378,7 +380,8 @@ func (d *Dir) BackfillUsage() error {
 		return nil
 	}
 
-	usage, err := ParseTranscriptUsage(transcriptPath)
+	ccBackend, _ := agent.New("claude-code")
+	usage, err := ParseTranscriptUsage(transcriptPath, ccBackend)
 	if err != nil {
 		return fmt.Errorf("parsing transcript: %w", err)
 	}

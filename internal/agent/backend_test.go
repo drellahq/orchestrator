@@ -30,7 +30,7 @@ func TestNew(t *testing.T) {
 
 func TestClaudeCodeBuildRunScript(t *testing.T) {
 	b := &claudeCode{}
-	script := b.BuildRunScript("fix the bug", false, "~/system-prompt.md")
+	script := b.BuildRunScript("fix the bug", false, "~/system-prompt.md", 0)
 
 	if got := script; got == "" {
 		t.Fatal("empty script")
@@ -43,25 +43,40 @@ func TestClaudeCodeBuildRunScript(t *testing.T) {
 		"fix the bug",
 		"tee",
 		"transcript.jsonl",
+		"set -o pipefail",
 	} {
 		if !contains(script, want) {
 			t.Errorf("script missing %q", want)
 		}
 	}
 
+	for _, notWant := range []string{
+		"--max-budget-usd",
+	} {
+		if contains(script, notWant) {
+			t.Errorf("script should not contain %q when budget is 0", notWant)
+		}
+	}
+
 	// Continue session
-	script = b.BuildRunScript("continue task", true, "")
+	script = b.BuildRunScript("continue task", true, "", 0)
 	if !contains(script, "--continue") {
 		t.Error("continue script missing --continue flag")
 	}
 	if !contains(script, "tee -a") {
 		t.Error("continue script missing tee -a flag")
 	}
+
+	// With budget
+	script = b.BuildRunScript("fix the bug", false, "~/system-prompt.md", 100)
+	if !contains(script, "--max-budget-usd 100.00") {
+		t.Error("script missing --max-budget-usd flag")
+	}
 }
 
 func TestOpenCodeBuildRunScript(t *testing.T) {
 	b := &openCode{}
-	script := b.BuildRunScript("fix the bug", false, "~/system-prompt.md")
+	script := b.BuildRunScript("fix the bug", false, "~/system-prompt.md", 0)
 
 	if got := script; got == "" {
 		t.Fatal("empty script")
@@ -94,7 +109,7 @@ func TestOpenCodeBuildRunScript(t *testing.T) {
 func TestClaudeCodeMCPAddCmd(t *testing.T) {
 	b := &claudeCode{}
 	cmd := b.MCPAddCmd("orchestrator", "http", "http://localhost:19090/mcp", "user")
-	want := "claude mcp add --transport http --scope user orchestrator http://localhost:19090/mcp"
+	want := "claude mcp add --transport http --scope 'user' 'orchestrator' 'http://localhost:19090/mcp'"
 	if cmd != want {
 		t.Errorf("MCPAddCmd = %q, want %q", cmd, want)
 	}
@@ -143,6 +158,18 @@ func TestClaudeCodeFormatTranscriptLine(t *testing.T) {
 			`{"type":"result","subtype":"done","duration_ms":5000,"num_turns":3,"total_cost_usd":0.05,"usage":{"input_tokens":1000,"output_tokens":200}}`,
 			false,
 			"[result] done (3 turns, 5.0s, $0.0500, 1.0k↑ 200↓)\n",
+		},
+		{
+			"result with cache tokens",
+			`{"type":"result","subtype":"success","duration_ms":12092,"num_turns":5,"total_cost_usd":15.9941,"usage":{"input_tokens":131,"output_tokens":39300,"cache_read_input_tokens":284000,"cache_creation_input_tokens":18000}}`,
+			false,
+			"[result] success (5 turns, 12.1s, $15.9941, 284.0k↺ 18.0k⊕ 131↑ 39.3k↓)\n",
+		},
+		{
+			"result with only cache read",
+			`{"type":"result","subtype":"success","duration_ms":5000,"num_turns":3,"total_cost_usd":0.05,"usage":{"input_tokens":100,"output_tokens":500,"cache_read_input_tokens":50000,"cache_creation_input_tokens":0}}`,
+			false,
+			"[result] success (3 turns, 5.0s, $0.0500, 50.0k↺ 100↑ 500↓)\n",
 		},
 		{
 			"thinking hidden",
@@ -216,7 +243,7 @@ func TestOpenCodeFormatTranscriptLine(t *testing.T) {
 func TestClaudeCodeParseResultEntry(t *testing.T) {
 	b := &claudeCode{}
 
-	result := b.ParseResultEntry([]byte(`{"type":"result","total_cost_usd":0.05,"usage":{"input_tokens":1000,"output_tokens":200}}`))
+	result := b.ParseResultEntry([]byte(`{"type":"result","total_cost_usd":0.05,"usage":{"input_tokens":1000,"output_tokens":200,"cache_read_input_tokens":50000,"cache_creation_input_tokens":5000}}`))
 	if result == nil {
 		t.Fatal("expected result, got nil")
 	}
@@ -225,6 +252,24 @@ func TestClaudeCodeParseResultEntry(t *testing.T) {
 	}
 	if result.InputTokens != 1000 {
 		t.Errorf("InputTokens = %d, want 1000", result.InputTokens)
+	}
+	if !result.HasUsage {
+		t.Error("HasUsage = false, want true")
+	}
+	if result.CacheReadInputTokens != 50000 {
+		t.Errorf("CacheReadInputTokens = %d, want 50000", result.CacheReadInputTokens)
+	}
+	if result.CacheCreationInputTokens != 5000 {
+		t.Errorf("CacheCreationInputTokens = %d, want 5000", result.CacheCreationInputTokens)
+	}
+
+	// Result without usage block
+	result = b.ParseResultEntry([]byte(`{"type":"result","total_cost_usd":0.02}`))
+	if result == nil {
+		t.Fatal("expected result, got nil")
+	}
+	if result.HasUsage {
+		t.Error("HasUsage = true for result without usage block, want false")
 	}
 
 	// Non-result lines return nil

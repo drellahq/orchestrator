@@ -14,20 +14,25 @@ import (
 
 // PodmanRunner implements Runner using podman containers as sandboxes.
 type PodmanRunner struct {
-	image         string
-	anthropicKey  string
-	mcpServerPort int
+	image           string
+	anthropicKey    string
+	mcpServerPort   int
+	agentInstallCmd string
 }
 
 // NewPodman creates a PodmanRunner.
-func NewPodman(image, anthropicKeyFile string, mcpPort int) *PodmanRunner {
+func NewPodman(image, anthropicKeyFile string, mcpPort int, agentInstallCmd string) *PodmanRunner {
 	if image == "" {
 		image = "fedora:43"
 	}
+	if agentInstallCmd == "" {
+		agentInstallCmd = "curl -fsSL https://claude.ai/install.sh | bash"
+	}
 	return &PodmanRunner{
-		image:         image,
-		anthropicKey:  anthropicKeyFile,
-		mcpServerPort: mcpPort,
+		image:           image,
+		anthropicKey:    anthropicKeyFile,
+		mcpServerPort:   mcpPort,
+		agentInstallCmd: agentInstallCmd,
 	}
 }
 
@@ -59,14 +64,14 @@ func (r *PodmanRunner) Up(ctx context.Context, name string, config string) error
 		return fmt.Errorf("user setup: %w", err)
 	}
 
-	// Install Claude Code as the claude user
+	// Install the coding agent as the claude user
 	installCmds := []string{
 		"bash", "-c",
-		"su - claude -c 'curl -fsSL https://claude.ai/install.sh | bash'",
+		"su - claude -c '" + strings.ReplaceAll(r.agentInstallCmd, "'", "'\\''") + "'",
 	}
 	if err := r.SSH(ctx, name, installCmds...); err != nil {
 		_ = r.Down(context.Background(), name)
-		return fmt.Errorf("claude install: %w", err)
+		return fmt.Errorf("agent install: %w", err)
 	}
 
 	// Copy and configure API key

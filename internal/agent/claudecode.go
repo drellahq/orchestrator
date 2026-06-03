@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/drellahq/orchestrator/internal/shellutil"
 )
 
 type claudeCode struct{}
@@ -18,7 +20,7 @@ func (b *claudeCode) BinaryPath() string {
 	return `export PATH="$HOME/.local/bin:$PATH"`
 }
 
-func (b *claudeCode) BuildRunScript(taskDescription string, continueSession bool, systemPromptFile string) string {
+func (b *claudeCode) BuildRunScript(taskDescription string, continueSession bool, systemPromptFile string, maxBudgetUSD float64) string {
 	escapedDesc := strings.ReplaceAll(taskDescription, "'", "'\\''")
 
 	var claudeFlags string
@@ -33,29 +35,35 @@ func (b *claudeCode) BuildRunScript(taskDescription string, continueSession bool
 		systemPromptFlag = "--append-system-prompt-file " + systemPromptFile + " "
 	}
 
+	var budgetFlag string
+	if maxBudgetUSD > 0 {
+		budgetFlag = fmt.Sprintf("--max-budget-usd %.2f ", maxBudgetUSD)
+	}
+
 	return fmt.Sprintf(`#!/bin/bash
 source ~/.bashrc
 export PATH="$HOME/.local/bin:$PATH"
 export ANTHROPIC_API_KEY="$(cat ~/.anthropic/api_key 2>/dev/null || true)"
+set -o pipefail
 stdbuf -oL claude --dangerously-skip-permissions -p --verbose \
   --effort max \
-  --output-format stream-json %s\
-  %s '%s' \
+  --output-format stream-json %s%s\
+  %s %s'%s' \
   </dev/null | stdbuf -oL tee %s ~/transcript.jsonl
-`, systemPromptFlag, claudeFlags, escapedDesc, teeFlag)
+`, budgetFlag, systemPromptFlag, claudeFlags, "", escapedDesc, teeFlag)
 }
 
 func (b *claudeCode) MCPAddCmd(name, transport, url, scope string) string {
 	cmd := fmt.Sprintf("claude mcp add --transport %s", transport)
 	if scope != "" {
-		cmd += " --scope " + scope
+		cmd += " --scope " + shellutil.Quote(scope)
 	}
-	cmd += " " + name + " " + url
+	cmd += " " + shellutil.Quote(name) + " " + shellutil.Quote(url)
 	return cmd
 }
 
-func (b *claudeCode) ConfigDir() string        { return ".claude" }
-func (b *claudeCode) ConversationDir() string   { return ".claude" }
+func (b *claudeCode) ConfigDir() string      { return ".claude" }
+func (b *claudeCode) ConversationDir() string { return ".claude" }
 
 func (b *claudeCode) FormatTranscriptLine(line []byte, verbose bool) string {
 	var msg struct {
@@ -75,8 +83,10 @@ func (b *claudeCode) FormatTranscriptLine(line []byte, verbose bool) string {
 		NumTurns     int     `json:"num_turns"`
 		TotalCostUSD float64 `json:"total_cost_usd"`
 		Usage        *struct {
-			InputTokens  int `json:"input_tokens"`
-			OutputTokens int `json:"output_tokens"`
+			InputTokens              int `json:"input_tokens"`
+			OutputTokens             int `json:"output_tokens"`
+			CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+			CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
 		} `json:"usage"`
 	}
 	if err := json.Unmarshal(line, &msg); err != nil {
@@ -120,8 +130,17 @@ func (b *claudeCode) FormatTranscriptLine(line []byte, verbose bool) string {
 		}
 		duration := float64(msg.DurationMS) / 1000
 		tokens := ""
-		if msg.Usage != nil && (msg.Usage.InputTokens > 0 || msg.Usage.OutputTokens > 0) {
-			tokens = fmt.Sprintf(", %s↑ %s↓", formatTokenCount(msg.Usage.InputTokens), formatTokenCount(msg.Usage.OutputTokens))
+		if msg.Usage != nil && (msg.Usage.InputTokens > 0 || msg.Usage.OutputTokens > 0 || msg.Usage.CacheReadInputTokens > 0 || msg.Usage.CacheCreationInputTokens > 0) {
+			var parts []string
+			if msg.Usage.CacheReadInputTokens > 0 {
+				parts = append(parts, formatTokenCount(msg.Usage.CacheReadInputTokens)+"↺")
+			}
+			if msg.Usage.CacheCreationInputTokens > 0 {
+				parts = append(parts, formatTokenCount(msg.Usage.CacheCreationInputTokens)+"⊕")
+			}
+			parts = append(parts, formatTokenCount(msg.Usage.InputTokens)+"↑")
+			parts = append(parts, formatTokenCount(msg.Usage.OutputTokens)+"↓")
+			tokens = ", " + strings.Join(parts, " ")
 		}
 		if msg.TotalCostUSD > 0 {
 			out = fmt.Sprintf("[result] %s (%d turns, %.1fs, $%.4f%s)\n", subtype, msg.NumTurns, duration, msg.TotalCostUSD, tokens)
@@ -139,8 +158,10 @@ func (b *claudeCode) ParseResultEntry(line []byte) *UsageEntry {
 		Type         string  `json:"type"`
 		TotalCostUSD float64 `json:"total_cost_usd"`
 		Usage        *struct {
-			InputTokens  int `json:"input_tokens"`
-			OutputTokens int `json:"output_tokens"`
+			InputTokens              int `json:"input_tokens"`
+			OutputTokens             int `json:"output_tokens"`
+			CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+			CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
 		} `json:"usage"`
 	}
 	if err := json.Unmarshal(line, &entry); err != nil {
@@ -151,8 +172,11 @@ func (b *claudeCode) ParseResultEntry(line []byte) *UsageEntry {
 	}
 	u := &UsageEntry{CostUSD: entry.TotalCostUSD}
 	if entry.Usage != nil {
+		u.HasUsage = true
 		u.InputTokens = entry.Usage.InputTokens
 		u.OutputTokens = entry.Usage.OutputTokens
+		u.CacheReadInputTokens = entry.Usage.CacheReadInputTokens
+		u.CacheCreationInputTokens = entry.Usage.CacheCreationInputTokens
 	}
 	return u
 }

@@ -18,7 +18,7 @@ func (b *openCode) BinaryPath() string {
 	return `export PATH="$HOME/.opencode/bin:$PATH"`
 }
 
-func (b *openCode) BuildRunScript(taskDescription string, continueSession bool, systemPromptFile string) string {
+func (b *openCode) BuildRunScript(taskDescription string, continueSession bool, systemPromptFile string, maxBudgetUSD float64) string {
 	escapedDesc := strings.ReplaceAll(taskDescription, "'", "'\\''")
 
 	var flags string
