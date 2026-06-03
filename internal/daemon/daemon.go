@@ -810,9 +810,9 @@ func (d *Daemon) cleanupSandboxes(ctx context.Context) {
 	}
 }
 
-// closeSourceIssue comments on and closes the originating tasks-repo issue
-// when at least one PR was merged. If no source issue is recorded or no PRs
-// were merged, it does nothing.
+// closeSourceIssue comments on and closes the originating tasks-repo issue.
+// It is called after all PRs for a task have been closed and only takes
+// action when at least one of them was merged.
 func (d *Daemon) closeSourceIssue(ctx context.Context, state *task.State, log *slog.Logger) {
 	if state.Source == nil || state.Source.IssueNumber == 0 || state.Source.TasksRepo == "" {
 		return
