@@ -53,10 +53,16 @@
     return '' + n;
   }
 
+  function formatCost(v) {
+    var s = v.toFixed(2);
+    if (s === '0.00') s = v.toFixed(4);
+    return '$' + s;
+  }
+
   function formatUsage(usage) {
     if (!usage) return '';
     if (usage.cost_usd) {
-      return '$' + usage.cost_usd.toFixed(4);
+      return formatCost(usage.cost_usd);
     }
     return '';
   }
@@ -420,7 +426,7 @@
       let allParts = [];
       if (tokenParts.length > 0) allParts.push(tokenParts.join(' '));
       if (task.usage.cost_usd) {
-        allParts.push('<span title="Total cost (USD)">$' + task.usage.cost_usd.toFixed(4) + '</span>');
+        allParts.push('<span title="Total cost (USD)">' + formatCost(task.usage.cost_usd) + '</span>');
       }
       if (allParts.length > 0) {
         html += '<div><span class="meta-label">usage:</span><span class="meta-usage">' +
@@ -527,7 +533,7 @@
 
     if (entry.num_turns) parts.push(entry.num_turns + ' turns');
     if (entry.duration_ms) parts.push((entry.duration_ms / 1000).toFixed(1) + 's');
-    if (entry.total_cost_usd) parts.push('$' + entry.total_cost_usd.toFixed(4));
+    if (entry.total_cost_usd) parts.push(formatCost(entry.total_cost_usd));
     if (entry.usage) {
       const input = entry.usage.input_tokens || 0;
       const output = entry.usage.output_tokens || 0;
