@@ -60,11 +60,13 @@ type Runner interface {
 }
 
 // NewFromConfig creates the appropriate Runner based on configuration.
+// agentInstallCmd is the shell command to install the coding agent (used by podman;
+// gjoll sandboxes install via the .tf file's init_script output).
 // Returns an error if the backend name is not recognized.
-func NewFromConfig(backend, gjollEnv, podmanImage, anthropicKeyFile string, mcpPort int) (Runner, error) {
+func NewFromConfig(backend, gjollEnv, podmanImage, anthropicKeyFile string, mcpPort int, agentInstallCmd string) (Runner, error) {
 	switch backend {
 	case "podman":
-		return NewPodman(podmanImage, anthropicKeyFile, mcpPort), nil
+		return NewPodman(podmanImage, anthropicKeyFile, mcpPort, agentInstallCmd), nil
 	case "gjoll", "":
 		return NewGjollAdapter(""), nil
 	default:

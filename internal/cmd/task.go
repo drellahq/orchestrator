@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/drellahq/orchestrator/internal/agent"
 	"github.com/drellahq/orchestrator/internal/config"
 	gh "github.com/drellahq/orchestrator/internal/github"
 	"github.com/drellahq/orchestrator/internal/issueattachments"
@@ -157,13 +158,18 @@ func logPreflightWarnings(ctx context.Context, cfg *config.Config) *gh.Runner {
 	return ghRunner
 }
 
-func createSandboxRunner(cfg *config.Config) (sandbox.Runner, error) {
-	slog.Info("Creating sandbox runner", "backend", cfg.SandboxBackend)
-	return sandbox.NewFromConfig(cfg.SandboxBackend, cfg.GjollEnv, cfg.PodmanImage, cfg.AnthropicKeyFile, mcpserver.MCPRemotePort)
+func createSandboxRunner(cfg *config.Config, backend agent.Backend) (sandbox.Runner, error) {
+	slog.Info("Creating sandbox runner", "backend", cfg.SandboxBackend, "agent", backend.Name())
+	return sandbox.NewFromConfig(cfg.SandboxBackend, cfg.GjollEnv, cfg.PodmanImage, cfg.AnthropicKeyFile, mcpserver.MCPRemotePort, backend.InstallCmd())
 }
 
 func executeTask(ctx context.Context, taskName, taskDescription string, taskDir *task.Dir, cfg *config.Config, ghRunner *gh.Runner, continueSession bool, author string, profileName string, profileVars []string, labels []string) error {
-	runner, err := createSandboxRunner(cfg)
+	backend, err := agent.New(cfg.AgentBackend)
+	if err != nil {
+		return fmt.Errorf("creating agent backend: %w", err)
+	}
+
+	runner, err := createSandboxRunner(cfg, backend)
 	if err != nil {
 		return fmt.Errorf("creating sandbox runner: %w", err)
 	}
@@ -228,7 +234,7 @@ func executeTask(ctx context.Context, taskName, taskDescription string, taskDir 
 		}
 
 		slog.Debug("Copying conversations", "task", taskName)
-		if copyErr := runner.Cp(context.Background(), taskName, taskName+":"+home+"/.claude/", taskDir.ConversationsPath()); copyErr != nil {
+		if copyErr := runner.Cp(context.Background(), taskName, taskName+":"+home+"/"+backend.ConversationDir()+"/", taskDir.ConversationsPath()); copyErr != nil {
 			slog.Warn("Failed to copy conversations", "task", taskName, "error", copyErr)
 		}
 
@@ -251,7 +257,7 @@ func executeTask(ctx context.Context, taskName, taskDescription string, taskDir 
 	}
 
 	if !continueSession {
-		if err := setupSandbox(ctx, runner, taskName, taskDir, cfg, profileName, profileVars); err != nil {
+		if err := setupSandbox(ctx, runner, backend, taskName, taskDir, cfg, profileName, profileVars); err != nil {
 			return fmt.Errorf("setting up sandbox: %w", err)
 		}
 		slog.Debug("Sandbox setup complete", "task", taskName)
@@ -263,9 +269,12 @@ func executeTask(ctx context.Context, taskName, taskDescription string, taskDir 
 
 	taskDescription += issueattachments.Manifest(attachmentFiles)
 
-	// Build the Claude run script
-	slog.Info("Running Claude", "task", taskName)
-	runScript := buildRunScript(taskDescription, continueSession, cfg.Agent.MaxBudgetUSD)
+	slog.Info("Running agent", "task", taskName, "agent", backend.Name())
+	systemPromptFile := home + "/system-prompt.md"
+	if backend.Name() == "opencode" {
+		systemPromptFile = ""
+	}
+	runScript := backend.BuildRunScript(taskDescription, continueSession, systemPromptFile, cfg.Agent.MaxBudgetUSD)
 
 	tmpRun, err := os.CreateTemp("", "run-claude-*.sh")
 	if err != nil {
@@ -305,20 +314,20 @@ func executeTask(ctx context.Context, taskName, taskDescription string, taskDir 
 	}
 	defer transcriptFile.Close()
 
-	tw := newTranscriptWriter(os.Stdout, verbose)
+	tw := newTranscriptWriter(os.Stdout, verbose, backend)
 	w := io.MultiWriter(tw, transcriptFile)
-	var claudeErr error
-	if claudeErr = runner.SSHProxyOutput(ctx, taskName, w, sshOpts, "bash", "-c", runner.AsUser(runScriptPath)); claudeErr != nil {
-		slog.Error("Claude exited with error", "task", taskName, "error", claudeErr)
+	var agentErr error
+	if agentErr = runner.SSHProxyOutput(ctx, taskName, w, sshOpts, "bash", "-c", runner.AsUser(runScriptPath)); agentErr != nil {
+		slog.Error("Agent exited with error", "task", taskName, "agent", backend.Name(), "error", agentErr)
 	}
 
-	slog.Info("Claude finished", "task", taskName)
+	slog.Info("Agent finished", "task", taskName, "agent", backend.Name())
 
 	if err := taskDir.TouchUpdatedAt(time.Now()); err != nil {
 		slog.Warn("Failed to update updated_at", "task", taskName, "error", err)
 	}
 
-	if usage, err := task.ParseTranscriptUsage(taskDir.TranscriptPath()); err != nil {
+	if usage, err := task.ParseTranscriptUsage(taskDir.TranscriptPath(), backend); err != nil {
 		slog.Warn("Failed to parse transcript usage", "task", taskName, "error", err)
 	} else if err := taskDir.SaveUsage(usage); err != nil {
 		slog.Warn("Failed to save usage", "task", taskName, "error", err)
@@ -331,7 +340,7 @@ func executeTask(ctx context.Context, taskName, taskDescription string, taskDir 
 		finalStatus := task.StatusDone
 		if state.HasOpenPRs() {
 			finalStatus = task.StatusWaiting
-		} else if claudeErr != nil {
+		} else if agentErr != nil {
 			finalStatus = task.StatusError
 		}
 		if err := taskDir.SetStatus(finalStatus); err != nil {
@@ -343,35 +352,7 @@ func executeTask(ctx context.Context, taskName, taskDescription string, taskDir 
 	return nil
 }
 
-func buildRunScript(taskDescription string, continueSession bool, maxBudgetUSD float64) string {
-	escapedDesc := strings.ReplaceAll(taskDescription, "'", "'\\''")
-
-	var claudeFlags string
-	var teeFlag string
-	if continueSession {
-		claudeFlags = "--continue"
-		teeFlag = "-a"
-	}
-
-	var budgetFlag string
-	if maxBudgetUSD > 0 {
-		budgetFlag = fmt.Sprintf("--max-budget-usd %.2f", maxBudgetUSD)
-	}
-
-	return fmt.Sprintf(`#!/bin/bash
-source ~/.bashrc
-export PATH="$HOME/.local/bin:$PATH"
-export ANTHROPIC_API_KEY="$(cat ~/.anthropic/api_key 2>/dev/null || true)"
-set -o pipefail
-stdbuf -oL claude --dangerously-skip-permissions -p --verbose \
-  --effort max \
-  --output-format stream-json --append-system-prompt-file ~/system-prompt.md \
-  %s %s '%s' \
-  </dev/null | stdbuf -oL tee %s ~/transcript.jsonl
-`, budgetFlag, claudeFlags, escapedDesc, teeFlag)
-}
-
-func setupSandbox(ctx context.Context, runner sandbox.Runner, taskName string, taskDir *task.Dir, cfg *config.Config, profileName string, profileVars []string) error {
+func setupSandbox(ctx context.Context, runner sandbox.Runner, backend agent.Backend, taskName string, taskDir *task.Dir, cfg *config.Config, profileName string, profileVars []string) error {
 	// Always: configure git (run as sandbox user)
 	if err := runner.SSH(ctx, taskName, "bash", "-c", runner.AsUser("git config --global user.name Drellabot")); err != nil {
 		return fmt.Errorf("git config user.name: %w", err)
@@ -382,19 +363,19 @@ func setupSandbox(ctx context.Context, runner sandbox.Runner, taskName string, t
 
 	// Always: register orchestrator MCP server
 	mcpURL := fmt.Sprintf("http://localhost:%d/mcp", mcpserver.MCPRemotePort)
-	mcpCmd := fmt.Sprintf("claude mcp add --transport http orchestrator %s --scope user", mcpURL)
+	mcpCmd := backend.MCPAddCmd("orchestrator", "http", mcpURL, "user")
 	if err := runner.SSH(ctx, taskName, "bash", "-c", runner.AsUser(mcpCmd)); err != nil {
 		return fmt.Errorf("registering MCP server: %w", err)
 	}
 
 	if profileName != "" {
-		return setupSandboxWithProfile(ctx, runner, taskName, taskDir, cfg, profileName, profileVars)
+		return setupSandboxWithProfile(ctx, runner, backend, taskName, taskDir, cfg, profileName, profileVars)
 	}
-	return setupSandboxDefault(ctx, runner, taskName)
+	return setupSandboxDefault(ctx, runner, backend, taskName)
 }
 
 // setupSandboxWithProfile applies a profile's configuration to the sandbox.
-func setupSandboxWithProfile(ctx context.Context, runner sandbox.Runner, taskName string, taskDir *task.Dir, cfg *config.Config, profileName string, profileVars []string) error {
+func setupSandboxWithProfile(ctx context.Context, runner sandbox.Runner, backend agent.Backend, taskName string, taskDir *task.Dir, cfg *config.Config, profileName string, profileVars []string) error {
 	profileSource, cleanup, err := resolveProfileSource(ctx, cfg)
 	if err != nil {
 		return err
@@ -411,39 +392,23 @@ func setupSandboxWithProfile(ctx context.Context, runner sandbox.Runner, taskNam
 	slog.Info("Applying profile", "profile", profileName, "task", taskName)
 
 	vars := parseVarFlags(profileVars)
-	if err := profile.Apply(ctx, p, runner, taskName, taskDir.Path(), prompts.Base, vars); err != nil {
+	if err := profile.Apply(ctx, p, runner, backend, taskName, taskDir.Path(), prompts.Base, vars); err != nil {
 		return fmt.Errorf("applying profile: %w", err)
 	}
 
-	// Write the base prompt as system-prompt.md for --append-system-prompt-file
-	// (profile CLAUDE.md is in ~/.claude/CLAUDE.md, picked up automatically)
-	tmpFile, err := os.CreateTemp("", "prompt-*.md")
-	if err != nil {
-		return fmt.Errorf("creating temp file: %w", err)
-	}
-	defer os.Remove(tmpFile.Name())
-
-	if _, err := tmpFile.WriteString(prompts.OnInit); err != nil {
-		tmpFile.Close()
-		return fmt.Errorf("writing prompt: %w", err)
-	}
-	tmpFile.Close()
-
-	home := runner.UserHome()
-	promptDest := home + "/system-prompt.md"
-	if err := runner.Cp(ctx, taskName, tmpFile.Name(), taskName+":"+promptDest); err != nil {
-		return fmt.Errorf("copying system prompt: %w", err)
-	}
-	if err := runner.SSH(ctx, taskName, "bash", "-c", "chmod a+r "+promptDest); err != nil {
-		return fmt.Errorf("fixing system prompt permissions: %w", err)
-	}
-
-	return nil
+	return writeSystemPrompt(ctx, runner, backend, taskName)
 }
 
 // setupSandboxDefault preserves the existing behavior when no profile is specified.
-func setupSandboxDefault(ctx context.Context, runner sandbox.Runner, taskName string) error {
-	// Write system prompt to a temp file and copy it to the sandbox
+func setupSandboxDefault(ctx context.Context, runner sandbox.Runner, backend agent.Backend, taskName string) error {
+	return writeSystemPrompt(ctx, runner, backend, taskName)
+}
+
+// writeSystemPrompt writes the on_init system prompt into the sandbox.
+// For claude-code: writes ~/system-prompt.md (used via --append-system-prompt-file).
+// For opencode: appends to ~/.claude/CLAUDE.md (OpenCode reads this natively
+// and has no --append-system-prompt-file equivalent).
+func writeSystemPrompt(ctx context.Context, runner sandbox.Runner, backend agent.Backend, taskName string) error {
 	tmpFile, err := os.CreateTemp("", "prompt-*.md")
 	if err != nil {
 		return fmt.Errorf("creating temp file: %w", err)
@@ -457,6 +422,22 @@ func setupSandboxDefault(ctx context.Context, runner sandbox.Runner, taskName st
 	tmpFile.Close()
 
 	home := runner.UserHome()
+
+	if backend.Name() == "opencode" {
+		// OpenCode lacks --append-system-prompt-file; append on_init to
+		// the CLAUDE.md that OpenCode reads natively.
+		configDir := backend.ConfigDir()
+		runner.SSH(ctx, taskName, "bash", "-c", runner.AsUser("mkdir -p ~/"+configDir))
+		claudemdDest := home + "/" + configDir + "/CLAUDE.md"
+		if err := runner.Cp(ctx, taskName, tmpFile.Name(), taskName+":"+home+"/system-prompt-tmp.md"); err != nil {
+			return fmt.Errorf("copying system prompt: %w", err)
+		}
+		if err := runner.SSH(ctx, taskName, "bash", "-c", runner.AsUser(fmt.Sprintf("cat %s/system-prompt-tmp.md >> %s && rm %s/system-prompt-tmp.md", home, claudemdDest, home))); err != nil {
+			return fmt.Errorf("appending system prompt to CLAUDE.md: %w", err)
+		}
+		return nil
+	}
+
 	promptDest := home + "/system-prompt.md"
 	if err := runner.Cp(ctx, taskName, tmpFile.Name(), taskName+":"+promptDest); err != nil {
 		return fmt.Errorf("copying system prompt: %w", err)

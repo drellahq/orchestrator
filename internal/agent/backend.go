@@ -17,7 +17,7 @@ type Backend interface {
 	BinaryPath() string
 
 	// BuildRunScript builds the shell script that invokes the agent headlessly.
-	BuildRunScript(taskDescription string, continueSession bool, systemPromptFile string) string
+	BuildRunScript(taskDescription string, continueSession bool, systemPromptFile string, maxBudgetUSD float64) string
 
 	// MCPAddCmd returns a shell command to register an MCP server.
 	// For agents that use config files instead of CLI commands, this writes
@@ -40,9 +40,12 @@ type Backend interface {
 
 // UsageEntry holds extracted usage data from a single result event.
 type UsageEntry struct {
-	CostUSD      float64
-	InputTokens  int
-	OutputTokens int
+	CostUSD                  float64
+	InputTokens              int
+	OutputTokens             int
+	CacheReadInputTokens     int
+	CacheCreationInputTokens int
+	HasUsage                 bool
 }
 
 // New returns a Backend for the given name.
