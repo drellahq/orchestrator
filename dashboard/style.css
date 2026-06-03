@@ -227,6 +227,9 @@ main {
 .meta-usage {
   color: var(--cyan);
 }
+.meta-usage span[title] {
+  cursor: help;
+}
 
 .pr-badge {
   display: inline-flex;

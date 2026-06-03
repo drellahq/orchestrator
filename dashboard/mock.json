@@ -8,7 +8,7 @@
     "prs": [],
     "status": "in_progress",
     "sandbox_destroyed": false,
-    "usage": { "input_tokens": 284300, "output_tokens": 18720, "cost_usd": 1.2847 }
+    "usage": { "input_tokens": 2300, "output_tokens": 18720, "cache_read_input_tokens": 264000, "cache_creation_input_tokens": 18000, "cost_usd": 1.2847 }
   },
   {
     "name": "fix-transcript-encoding-for-unicode",
@@ -58,7 +58,7 @@
     ],
     "status": "waiting",
     "sandbox_destroyed": true,
-    "usage": { "input_tokens": 1523400, "output_tokens": 87200, "cost_usd": 7.4521 }
+    "usage": { "input_tokens": 3400, "output_tokens": 87200, "cache_read_input_tokens": 1480000, "cache_creation_input_tokens": 40000, "cost_usd": 7.4521 }
   },
   {
     "name": "add-caddy-health-endpoint",
@@ -125,7 +125,7 @@
     ],
     "status": "done",
     "sandbox_destroyed": true,
-    "usage": { "input_tokens": 95400, "output_tokens": 6800, "cost_usd": 0.4312 }
+    "usage": { "input_tokens": 400, "output_tokens": 6800, "cache_read_input_tokens": 90000, "cache_creation_input_tokens": 5000, "cost_usd": 0.4312 }
   },
   {
     "name": "fix-sandbox-cleanup-race",

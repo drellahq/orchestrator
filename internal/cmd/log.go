@@ -136,9 +136,11 @@ func formatTranscriptLine(line []byte, verbose bool) string {
 		DurationMS   int     `json:"duration_ms"`
 		NumTurns     int     `json:"num_turns"`
 		TotalCostUSD float64 `json:"total_cost_usd"`
-		Usage        *struct {
-			InputTokens  int `json:"input_tokens"`
-			OutputTokens int `json:"output_tokens"`
+		Usage *struct {
+			InputTokens              int `json:"input_tokens"`
+			OutputTokens             int `json:"output_tokens"`
+			CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+			CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
 		} `json:"usage"`
 	}
 	if err := json.Unmarshal(line, &msg); err != nil {
@@ -182,8 +184,17 @@ func formatTranscriptLine(line []byte, verbose bool) string {
 		}
 		duration := float64(msg.DurationMS) / 1000
 		tokens := ""
-		if msg.Usage != nil && (msg.Usage.InputTokens > 0 || msg.Usage.OutputTokens > 0) {
-			tokens = fmt.Sprintf(", %s↑ %s↓", formatTokenCount(msg.Usage.InputTokens), formatTokenCount(msg.Usage.OutputTokens))
+		if msg.Usage != nil && (msg.Usage.InputTokens > 0 || msg.Usage.OutputTokens > 0 || msg.Usage.CacheReadInputTokens > 0 || msg.Usage.CacheCreationInputTokens > 0) {
+			var parts []string
+			if msg.Usage.CacheReadInputTokens > 0 {
+				parts = append(parts, formatTokenCount(msg.Usage.CacheReadInputTokens)+"↺")
+			}
+			if msg.Usage.CacheCreationInputTokens > 0 {
+				parts = append(parts, formatTokenCount(msg.Usage.CacheCreationInputTokens)+"⊕")
+			}
+			parts = append(parts, formatTokenCount(msg.Usage.InputTokens)+"↑")
+			parts = append(parts, formatTokenCount(msg.Usage.OutputTokens)+"↓")
+			tokens = ", " + strings.Join(parts, " ")
 		}
 		if msg.TotalCostUSD > 0 {
 			out = fmt.Sprintf("[result] %s (%d turns, %.1fs, $%.4f%s)\n", subtype, msg.NumTurns, duration, msg.TotalCostUSD, tokens)
