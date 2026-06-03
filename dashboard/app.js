@@ -16,6 +16,7 @@
     renderedCount: 0,
     runCount: 0,
     pollTimers: { taskList: null, transcript: null },
+    knownVersion: null,
   };
 
   // ── DOM helpers ──
@@ -750,6 +751,7 @@
 
   async function refreshTaskList() {
     try {
+      await checkVersionChanged();
       let metas;
       if (isMockMode()) {
         metas = await loadMockTasks();
@@ -816,6 +818,31 @@
     }
   }
 
+  // ── Version check ──
+
+  function versionFingerprint(components) {
+    return Object.keys(components).sort().map(function (k) {
+      return k + ':' + (components[k].commit || '');
+    }).join(',');
+  }
+
+  async function checkVersionChanged() {
+    try {
+      var resp = await fetch('/version.json');
+      if (!resp.ok) return;
+      var info = await resp.json();
+      var fp = versionFingerprint(info.components || {});
+      if (!fp) return;
+      if (state.knownVersion === null) {
+        state.knownVersion = fp;
+        return;
+      }
+      if (fp !== state.knownVersion) {
+        window.location.reload();
+      }
+    } catch (_) {}
+  }
+
   // ── Version footer ──
 
   async function loadVersionFooter() {
@@ -824,6 +851,9 @@
       if (!resp.ok) return;
       const info = await resp.json();
       const components = info.components || {};
+
+      state.knownVersion = versionFingerprint(components);
+
       const parts = Object.entries(components).map(function ([name, comp]) {
         var label = escapeHtml(name) + ':';
         var commitText = escapeHtml(comp.commit || 'dev');
