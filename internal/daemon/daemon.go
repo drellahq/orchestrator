@@ -121,6 +121,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 		d.cleanupSandboxes(ctx)
 		d.recoverOrphanedTasks()
+		d.backfillUsage()
 
 		refs := DiscoverPRs(d.outputDir)
 		interval := d.getInterval()
@@ -806,6 +807,33 @@ func (d *Daemon) cleanupSandboxes(ctx context.Context) {
 
 		if err := td.RemoveRepo(); err != nil {
 			slog.Warn("Failed to remove repo directory", "task", taskName, "error", err)
+		}
+	}
+}
+
+// backfillUsage scans all tasks and recalculates usage from the transcript
+// for any task whose stored usage is missing or incomplete. This ensures
+// the dashboard can display costs immediately from state.json without
+// client-side transcript parsing.
+func (d *Daemon) backfillUsage() {
+	entries, err := os.ReadDir(d.outputDir)
+	if err != nil {
+		slog.Debug("Cannot read output dir for usage backfill", "dir", d.outputDir, "error", err)
+		return
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		taskName := entry.Name()
+
+		td, err := task.Open(d.outputDir, taskName)
+		if err != nil {
+			continue
+		}
+		if err := td.BackfillUsage(); err != nil {
+			slog.Debug("Failed to backfill usage", "task", taskName, "error", err)
 		}
 	}
 }

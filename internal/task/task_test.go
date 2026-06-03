@@ -826,6 +826,160 @@ func TestRemoveRepo_AlreadyGone(t *testing.T) {
 	}
 }
 
+func TestBackfillUsage_MissingUsage(t *testing.T) {
+	outputDir := t.TempDir()
+	td, err := Create(outputDir, "backfill-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := td.SaveMetadata("backfill-test", "desc", "", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+
+	// Write a transcript with usage data
+	transcript := `{"type":"result","subtype":"success","total_cost_usd":0.05,"usage":{"input_tokens":500,"output_tokens":100,"cache_read_input_tokens":1000,"cache_creation_input_tokens":200}}
+`
+	if err := os.WriteFile(td.TranscriptPath(), []byte(transcript), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify usage is nil before backfill
+	s, err := td.LoadState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Usage != nil {
+		t.Fatal("expected nil usage before backfill")
+	}
+
+	// Backfill should parse transcript and save
+	if err := td.BackfillUsage(); err != nil {
+		t.Fatalf("BackfillUsage() error: %v", err)
+	}
+
+	s, err = td.LoadState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Usage == nil {
+		t.Fatal("expected non-nil usage after backfill")
+	}
+	if s.Usage.InputTokens != 500 {
+		t.Errorf("InputTokens = %d, want 500", s.Usage.InputTokens)
+	}
+	if s.Usage.OutputTokens != 100 {
+		t.Errorf("OutputTokens = %d, want 100", s.Usage.OutputTokens)
+	}
+	if s.Usage.CacheReadInputTokens == nil || *s.Usage.CacheReadInputTokens != 1000 {
+		t.Errorf("CacheReadInputTokens = %v, want 1000", s.Usage.CacheReadInputTokens)
+	}
+	if s.Usage.CostUSD < 0.049 || s.Usage.CostUSD > 0.051 {
+		t.Errorf("CostUSD = %f, want ~0.05", s.Usage.CostUSD)
+	}
+}
+
+func TestBackfillUsage_IncompleteUsage(t *testing.T) {
+	outputDir := t.TempDir()
+	td, err := Create(outputDir, "backfill-incomplete")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := td.SaveMetadata("backfill-incomplete", "desc", "", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+
+	// Save usage without cache fields (simulating old format)
+	if err := td.SaveUsage(&Usage{InputTokens: 500, OutputTokens: 100, CostUSD: 0.05}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Write transcript with cache data
+	transcript := `{"type":"result","subtype":"success","total_cost_usd":0.05,"usage":{"input_tokens":500,"output_tokens":100,"cache_read_input_tokens":1000,"cache_creation_input_tokens":200}}
+`
+	if err := os.WriteFile(td.TranscriptPath(), []byte(transcript), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := td.BackfillUsage(); err != nil {
+		t.Fatalf("BackfillUsage() error: %v", err)
+	}
+
+	s, err := td.LoadState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Usage.CacheReadInputTokens == nil {
+		t.Fatal("CacheReadInputTokens should be populated after backfill")
+	}
+	if *s.Usage.CacheReadInputTokens != 1000 {
+		t.Errorf("CacheReadInputTokens = %d, want 1000", *s.Usage.CacheReadInputTokens)
+	}
+}
+
+func TestBackfillUsage_AlreadyComplete(t *testing.T) {
+	outputDir := t.TempDir()
+	td, err := Create(outputDir, "backfill-complete")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := td.SaveMetadata("backfill-complete", "desc", "", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+
+	cacheRead := 1000
+	cacheCreate := 200
+	if err := td.SaveUsage(&Usage{
+		InputTokens:              500,
+		OutputTokens:             100,
+		CacheReadInputTokens:     &cacheRead,
+		CacheCreationInputTokens: &cacheCreate,
+		CostUSD:                  0.05,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// BackfillUsage should be a no-op
+	if err := td.BackfillUsage(); err != nil {
+		t.Fatalf("BackfillUsage() error: %v", err)
+	}
+
+	s, err := td.LoadState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Usage.InputTokens != 500 {
+		t.Errorf("InputTokens changed: got %d, want 500", s.Usage.InputTokens)
+	}
+}
+
+func TestBackfillUsage_NoTranscript(t *testing.T) {
+	outputDir := t.TempDir()
+	td, err := Create(outputDir, "backfill-no-transcript")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := td.SaveMetadata("backfill-no-transcript", "desc", "", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+
+	// No transcript file exists — backfill should silently skip
+	if err := td.BackfillUsage(); err != nil {
+		t.Fatalf("BackfillUsage() error: %v", err)
+	}
+
+	s, err := td.LoadState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Usage != nil {
+		t.Errorf("Usage should remain nil when no transcript exists")
+	}
+}
+
 func TestHasOpenPRs(t *testing.T) {
 	tests := []struct {
 		name string

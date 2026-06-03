@@ -188,3 +188,25 @@ func TestParseTranscriptUsage_MissingFile(t *testing.T) {
 		t.Fatal("expected error for missing file")
 	}
 }
+
+func TestUsageNeedsRefresh(t *testing.T) {
+	tests := []struct {
+		name string
+		u    *Usage
+		want bool
+	}{
+		{"nil usage", nil, true},
+		{"missing both cache fields", &Usage{InputTokens: 100}, true},
+		{"missing cache read", &Usage{CacheCreationInputTokens: intPtr(0)}, true},
+		{"missing cache creation", &Usage{CacheReadInputTokens: intPtr(0)}, true},
+		{"complete with zeros", &Usage{CacheReadInputTokens: intPtr(0), CacheCreationInputTokens: intPtr(0)}, false},
+		{"complete with values", &Usage{CacheReadInputTokens: intPtr(1000), CacheCreationInputTokens: intPtr(500)}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.u.NeedsRefresh(); got != tt.want {
+				t.Errorf("NeedsRefresh() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
