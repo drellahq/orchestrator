@@ -321,6 +321,17 @@ main {
 .run-nav:empty {
   display: none;
 }
+.run-nav .back-link {
+  display: block;
+  padding: 0.3rem 0.75rem;
+  margin-bottom: 0.5rem;
+  color: var(--text-dim);
+  text-decoration: none;
+}
+.run-nav .back-link:hover {
+  color: var(--green);
+  text-decoration: none;
+}
 .run-nav a {
   display: block;
   padding: 0.3rem 0.75rem;
@@ -426,6 +437,9 @@ main {
   font-size: 0.8rem;
   border-left: 2px solid transparent;
   word-break: break-word;
+}
+.entry-system[id] {
+  scroll-margin-top: 60px;
 }
 
 /* System init */
