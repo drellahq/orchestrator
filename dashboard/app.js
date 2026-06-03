@@ -68,7 +68,7 @@
   }
 
   function usageNeedsRefresh(usage) {
-    if (!usage) return false;
+    if (!usage) return true;
     return usage.cache_read_input_tokens === undefined ||
       usage.cache_creation_input_tokens === undefined;
   }
@@ -107,7 +107,7 @@
         output_tokens: totalOutput,
         cache_read_input_tokens: cacheRead,
         cache_creation_input_tokens: cacheCreation,
-        cost_usd: costUsd || usage.cost_usd,
+        cost_usd: costUsd || (usage && usage.cost_usd) || 0,
       };
     } catch (_) {
       return usage;
@@ -761,6 +761,18 @@
       for (const m of metas) state.tasks.set(m.name, m);
       if (!state.currentTask) renderTaskList();
       setStatus(metas.length + ' tasks | ' + new Date().toLocaleTimeString());
+
+      if (!state.currentTask) {
+        const needRefresh = metas.filter(m => usageNeedsRefresh(m.usage));
+        if (needRefresh.length > 0) {
+          Promise.all(needRefresh.map(async m => {
+            m.usage = await refreshUsageFromTranscript(m.name, m.usage);
+            state.tasks.set(m.name, m);
+          })).then(() => {
+            if (!state.currentTask) renderTaskList();
+          });
+        }
+      }
     } catch (e) {
       showToast('Error refreshing: ' + e.message);
     }
