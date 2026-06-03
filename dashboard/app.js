@@ -403,7 +403,17 @@
     window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
   }
 
+  // ── Format detection ──
+
+  function isOpenCodeEntry(entry) {
+    return entry.sessionID !== undefined || entry.part !== undefined;
+  }
+
   function renderEntry(entry) {
+    if (isOpenCodeEntry(entry)) {
+      return renderOpenCodeEntry(entry);
+    }
+    // Claude Code format
     if (entry.type === 'trigger') {
       return renderTrigger(entry);
     }
@@ -423,6 +433,107 @@
       return renderSubagent(entry);
     }
     return null;
+  }
+
+  // ── OpenCode entry renderers ──
+
+  function renderOpenCodeEntry(entry) {
+    var part = entry.part || {};
+    switch (entry.type) {
+      case 'step_start':
+        return renderOpenCodeStepStart(entry);
+      case 'text':
+        if (part.text) {
+          var div = document.createElement('div');
+          div.className = 'entry entry-text';
+          div.innerHTML = formatText(part.text);
+          return div;
+        }
+        return null;
+      case 'thinking':
+        if (part.thinking) {
+          var div = document.createElement('div');
+          div.className = 'entry entry-thinking';
+          var preview = truncate(part.thinking, 100);
+          div.innerHTML =
+            '<details><summary>thinking: ' + escapeHtml(preview) + '</summary>' +
+            '<div class="thinking-body">' + escapeHtml(part.thinking) + '</div></details>';
+          return div;
+        }
+        return null;
+      case 'tool_use':
+        return renderOpenCodeToolUse(entry);
+      case 'step_finish':
+        if (part.reason === 'stop' || part.reason === 'end_turn') {
+          return renderOpenCodeStepFinish(entry);
+        }
+        return null;
+      default:
+        return null;
+    }
+  }
+
+  function renderOpenCodeStepStart(entry) {
+    state.runCount++;
+    var runId = 'run-' + state.runCount;
+    var div = document.createElement('div');
+    div.className = 'entry entry-system';
+    div.id = runId;
+    div.innerHTML =
+      '<span><span class="sys-label">agent:</span> opencode</span>' +
+      '<span><span class="sys-label">session:</span> ' + escapeHtml(truncate(entry.sessionID || '', 12)) + '</span>';
+    addRunNavLink(runId, state.runCount);
+    return div;
+  }
+
+  function renderOpenCodeToolUse(entry) {
+    var part = entry.part || {};
+    var tool = part.tool || part.type || 'unknown';
+    var st = part.state || {};
+    var input = st.input || {};
+    var summary = '';
+    switch (tool) {
+      case 'bash':
+        summary = input.description || truncate(input.command, 100);
+        break;
+      case 'read': case 'write': case 'edit':
+        summary = input.filePath || '';
+        break;
+      case 'grep': case 'glob':
+        summary = input.pattern || '';
+        break;
+      default:
+        summary = truncate(JSON.stringify(input), 80);
+    }
+    var div = document.createElement('div');
+    div.className = 'entry entry-tool';
+    div.innerHTML =
+      '<div class="tool-header">' +
+        '<span class="tool-name">' + escapeHtml(tool) + '</span>' +
+        '<span class="tool-summary">' + escapeHtml(summary) + '</span>' +
+      '</div>';
+    if (st.output) {
+      div.innerHTML += '<pre class="tool-input">' + escapeHtml(truncate(st.output, 500)) + '</pre>';
+    }
+    div.addEventListener('click', function() { div.classList.toggle('expanded'); });
+    return div;
+  }
+
+  function renderOpenCodeStepFinish(entry) {
+    var part = entry.part || {};
+    var div = document.createElement('div');
+    div.className = 'entry entry-run-result';
+    var parts = ['done'];
+    if (part.cost) parts.push('$' + part.cost.toFixed(4));
+    if (part.tokens) {
+      var input = part.tokens.input || 0;
+      var output = part.tokens.output || 0;
+      if (input || output) {
+        parts.push(formatTokens(input) + '↑ ' + formatTokens(output) + '↓');
+      }
+    }
+    div.innerHTML = '<span class="result-label">result:</span> ' + escapeHtml(parts.join(' · '));
+    return div;
   }
 
   function renderSystemInit(entry) {

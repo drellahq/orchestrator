@@ -94,7 +94,7 @@ func TestOpenCodeBuildRunScript(t *testing.T) {
 func TestClaudeCodeMCPAddCmd(t *testing.T) {
 	b := &claudeCode{}
 	cmd := b.MCPAddCmd("orchestrator", "http", "http://localhost:19090/mcp", "user")
-	want := "claude mcp add --transport http --scope user orchestrator http://localhost:19090/mcp"
+	want := "claude mcp add --transport http --scope 'user' 'orchestrator' 'http://localhost:19090/mcp'"
 	if cmd != want {
 		t.Errorf("MCPAddCmd = %q, want %q", cmd, want)
 	}
