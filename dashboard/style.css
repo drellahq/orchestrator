@@ -15,6 +15,7 @@
   --border: #1c2b3a;
   --border-green: #1a3a1a;
   --font: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'SF Mono', 'Menlo', 'Consolas', monospace;
+  --header-h: 50px;
 }
 
 *, *::before, *::after {
@@ -308,14 +309,14 @@ main {
 
 .run-nav {
   position: sticky;
-  top: 50px;
+  top: var(--header-h);
   align-self: flex-start;
   width: 110px;
   flex-shrink: 0;
   padding: 0.5rem 0;
   font-size: 0.7rem;
   border-right: 1px solid var(--border);
-  max-height: calc(100vh - 50px);
+  max-height: calc(100vh - var(--header-h));
   overflow-y: auto;
 }
 .run-nav:empty {
@@ -439,7 +440,7 @@ main {
   word-break: break-word;
 }
 .entry-system[id] {
-  scroll-margin-top: 60px;
+  scroll-margin-top: var(--header-h);
 }
 
 /* System init */
