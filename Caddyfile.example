@@ -10,6 +10,7 @@
 		file_server browse
 	}
 	handle {
+		header Cache-Control "no-cache"
 		root * ./dashboard
 		file_server
 	}
