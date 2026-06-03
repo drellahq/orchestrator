@@ -195,39 +195,56 @@ stdbuf -oL opencode run --dangerously-skip-permissions \
 }
 ```
 
-## Approach 2: Configurable Agent Backend
+## Approach 2: Configurable Agent Backend (Detailed Spec)
 
 Add a configuration option to choose between Claude Code and OpenCode. The
-orchestrator abstracts the differences behind an `AgentBackend` interface.
+orchestrator abstracts the differences behind an `agent.Backend` interface,
+allowing per-task or global switching between agents with a safe rollback path.
 
-### Design
+### Interface
+
+The `agent.Backend` interface is defined in `internal/agent/backend.go`:
 
 ```go
-// AgentBackend defines how to install, configure, and invoke a coding agent.
-type AgentBackend interface {
-    // Name returns the backend identifier ("claude-code" or "opencode").
+type Backend interface {
     Name() string
-
-    // InstallCmd returns the shell command to install the agent in a sandbox.
     InstallCmd() string
-
-    // BuildRunScript builds the shell script that invokes the agent.
-    BuildRunScript(taskDescription string, continueSession bool) string
-
-    // SetupMCP returns shell commands to register an MCP server.
-    SetupMCP(name, transport, url string) []string
-
-    // ConfigDir returns the agent's config directory (e.g. ".claude" or ".opencode").
+    BinaryPath() string
+    BuildRunScript(taskDescription string, continueSession bool, systemPromptFile string) string
+    MCPAddCmd(name, transport, url, scope string) string
     ConfigDir() string
-
-    // WriteConfig writes agent-specific configuration files to the sandbox.
-    WriteConfig(ctx context.Context, runner sandbox.Runner, sbx string, opts ConfigOpts) error
-
-    // ParseTranscriptUsage extracts usage data from the agent's transcript format.
-    ParseTranscriptUsage(path string) (*task.Usage, error)
-
-    // FormatTranscriptLine formats a JSONL line for human-readable display.
+    ConversationDir() string
     FormatTranscriptLine(line []byte, verbose bool) string
+    ParseResultEntry(line []byte) *UsageEntry
+}
+```
+
+Method summary:
+
+| Method | Purpose |
+|--------|---------|
+| `Name()` | Returns `"claude-code"` or `"opencode"` |
+| `InstallCmd()` | Shell command to install the agent binary |
+| `BinaryPath()` | PATH export needed to find the binary |
+| `BuildRunScript()` | Generates the headless execution shell script |
+| `MCPAddCmd()` | Shell command to register an MCP server |
+| `ConfigDir()` | Agent's config directory name (`.claude` or `.opencode`) |
+| `ConversationDir()` | Directory to archive after a run |
+| `FormatTranscriptLine()` | Formats a JSONL line for human-readable display |
+| `ParseResultEntry()` | Extracts usage data from a JSONL result line |
+
+The factory function `agent.New(name)` returns the appropriate backend:
+
+```go
+func New(name string) (Backend, error) {
+    switch name {
+    case "", "claude-code":
+        return &claudeCode{}, nil
+    case "opencode":
+        return &openCode{}, nil
+    default:
+        return nil, fmt.Errorf("unknown agent backend %q (valid: claude-code, opencode)", name)
+    }
 }
 ```
 
@@ -238,71 +255,339 @@ type AgentBackend interface {
 agent_backend: opencode  # or "claude-code" (default)
 ```
 
-### Changes Required
-
-| File | Change |
-|------|--------|
-| `internal/agent/backend.go` | New: `AgentBackend` interface |
-| `internal/agent/claudecode.go` | New: Claude Code implementation (extract from current code) |
-| `internal/agent/opencode.go` | New: OpenCode implementation |
-| `internal/config/config.go` | Add `AgentBackend` config field |
-| `internal/cmd/task.go` | Use `AgentBackend` instead of hardcoded Claude commands |
-| `internal/cmd/log.go` | Delegate to backend's transcript formatter |
-| `internal/task/usage.go` | Delegate to backend's usage parser |
-| `internal/profile/apply.go` | Use backend for MCP registration and config paths |
-| `internal/sandbox/podman.go` | Use backend's install command |
-
-### Pros
-- Gradual migration: test OpenCode on select tasks while keeping Claude Code as default
-- Easy rollback per-task or globally
-- Clean separation of concerns
-- Enables future backends (Cursor Agent, Codex, etc.)
-
-### Cons
-- More code to maintain
-- Abstraction adds complexity
-- Both backends must be kept working
-
-### Example: Backend Implementations
+The `Config` struct gains one field:
 
 ```go
-// claudecode.go
-type ClaudeCodeBackend struct{}
+type Config struct {
+    // ...existing fields...
+    AgentBackend string `yaml:"agent_backend"` // "claude-code" (default) or "opencode"
+}
+```
 
-func (b *ClaudeCodeBackend) InstallCmd() string {
-    return "curl -fsSL https://claude.ai/install.sh | bash"
+Default: `"claude-code"` (empty string also resolves to claude-code), preserving
+backward compatibility with existing deployments.
+
+### Integration Points
+
+Each integration point describes what changes and why, with before/after code
+where the diff is non-obvious.
+
+#### 1. Task execution (`internal/cmd/task.go`)
+
+**What changes:** `executeTask()` creates an `agent.Backend` from config and
+threads it through all sandbox setup and execution steps. The local
+`buildRunScript()` function is removed — its logic lives in the backend.
+
+The backend is created once at the top of `executeTask()`:
+
+```go
+backend, err := agent.New(cfg.AgentBackend)
+if err != nil {
+    return fmt.Errorf("creating agent backend: %w", err)
+}
+```
+
+**Run script generation.** The hardcoded `buildRunScript()` is replaced by
+`backend.BuildRunScript(desc, continueSession, systemPromptFile)`:
+
+| Aspect | Claude Code | OpenCode |
+|--------|-------------|----------|
+| Binary | `claude -p` | `opencode run` |
+| JSON output | `--output-format stream-json` | `--format json` |
+| Effort | `--effort max` | `--variant max` |
+| System prompt | `--append-system-prompt-file ~/system-prompt.md` | *(ignored — merged into CLAUDE.md)* |
+| API key | Reads `~/.anthropic/api_key` via env export | Not needed (uses `ANTHROPIC_API_KEY` from env or config) |
+
+**MCP registration.** The hardcoded `claude mcp add` command in `setupSandbox()`
+is replaced by `backend.MCPAddCmd(name, transport, url, scope)`:
+
+```go
+// Before:
+mcpCmd := fmt.Sprintf("claude mcp add --transport http orchestrator %s --scope user", mcpURL)
+
+// After:
+mcpCmd := backend.MCPAddCmd("orchestrator", "http", mcpURL, "user")
+```
+
+For Claude Code, this produces the same `claude mcp add` command. For OpenCode,
+it writes an `opencode.json` config file with the MCP server definition.
+
+**Conversation archival.** The hardcoded `~/.claude/` archival path is replaced
+by `backend.ConversationDir()`:
+
+```go
+// Before:
+runner.Cp(ctx, taskName, taskName+":"+home+"/.claude/", taskDir.ConversationsPath())
+
+// After:
+runner.Cp(ctx, taskName, taskName+":"+home+"/"+backend.ConversationDir()+"/", taskDir.ConversationsPath())
+```
+
+**System prompt handling.** This is the most significant behavioral difference
+between the two backends:
+
+- **Claude Code:** The `on_init` prompt is written to `~/system-prompt.md` and
+  injected via `--append-system-prompt-file`. The profile's CLAUDE.md is written
+  to `~/.claude/CLAUDE.md` separately.
+
+- **OpenCode:** There is no `--append-system-prompt-file` flag. Instead, the
+  `on_init` prompt is merged into the CLAUDE.md file that OpenCode reads natively.
+  When a profile is active, the combined content is:
+  `base prompt + profile CLAUDE.md + on_init prompt`. Without a profile:
+  `on_init prompt` is written directly to `~/.claude/CLAUDE.md` (which OpenCode
+  reads as its equivalent of CLAUDE.md).
+
+The `setupSandboxDefault()` and `setupSandboxWithProfile()` functions check
+`backend.Name()` to decide the strategy:
+
+```go
+// For claude-code: write system-prompt.md (used by --append-system-prompt-file)
+// For opencode: append on_init to CLAUDE.md (no CLI flag equivalent)
+if backend.Name() == "opencode" {
+    // Merge on_init into CLAUDE.md
+    writeToSandbox(ctx, runner, sbx, prompts.OnInit, sbx+":"+home+"/.claude/CLAUDE.md")
+} else {
+    // Write separate system-prompt.md
+    copyToSandbox(ctx, runner, sbx, prompts.OnInit, home+"/system-prompt.md")
+}
+```
+
+#### 2. Transcript formatting (`internal/cmd/log.go`)
+
+**What changes:** The local `formatTranscriptLine()`, `toolInputSummary()`,
+`formatTokenCount()`, and `firstLine()` functions are removed. Their logic now
+lives in the backend implementations and shared helpers in `internal/agent/`.
+
+The `transcriptWriter` and `runLog` both delegate to `backend.FormatTranscriptLine()`:
+
+```go
+// transcriptWriter gains a backend field
+type transcriptWriter struct {
+    w       io.Writer
+    buf     []byte
+    verbose bool
+    backend agent.Backend
 }
 
-func (b *ClaudeCodeBackend) BuildRunScript(desc string, cont bool) string {
-    // Current implementation, extracted
-}
-
-func (b *ClaudeCodeBackend) SetupMCP(name, transport, url string) []string {
-    return []string{
-        fmt.Sprintf("claude mcp add --transport %s %s %s --scope user", transport, name, url),
-    }
-}
-
-// opencode.go
-type OpenCodeBackend struct{}
-
-func (b *OpenCodeBackend) InstallCmd() string {
-    return "curl -fsSL https://opencode.ai/install | bash"
-}
-
-func (b *OpenCodeBackend) BuildRunScript(desc string, cont bool) string {
-    // OpenCode equivalent
-}
-
-func (b *OpenCodeBackend) SetupMCP(name, transport, url string) []string {
-    // Write opencode.json with MCP config
-    return []string{
-        fmt.Sprintf(`mkdir -p .opencode && cat > opencode.json << 'MCPEOF'
-{"mcp":{"%s":{"type":"remote","url":"%s"}}}
-MCPEOF`, name, url),
+// runLog creates the backend from config and uses it for both local and live logs
+func runLog(cmd *cobra.Command, args []string) error {
+    cfg, err := config.Load(configPath)
+    backend, err := agent.New(cfg.AgentBackend)
+    // ...
+    scanner := bufio.NewScanner(f)
+    for scanner.Scan() {
+        formatted := backend.FormatTranscriptLine(scanner.Bytes(), verbose)
+        if formatted != "" {
+            fmt.Print(formatted)
+        }
     }
 }
 ```
+
+Both backends produce the same human-readable output format (`[tool]`, `[result]`,
+`[thinking]` prefixes) so the user experience is consistent regardless of which
+agent produced the transcript.
+
+#### 3. Usage parsing (`internal/task/usage.go`)
+
+**What changes:** `ParseTranscriptUsage()` gains a `backend agent.Backend`
+parameter and delegates per-line parsing to `backend.ParseResultEntry()`:
+
+```go
+func ParseTranscriptUsage(path string, backend agent.Backend) (*Usage, error) {
+    // ...
+    for scanner.Scan() {
+        entry := backend.ParseResultEntry(scanner.Bytes())
+        if entry == nil {
+            continue
+        }
+        total.CostUSD += entry.CostUSD
+        total.InputTokens += entry.InputTokens
+        total.OutputTokens += entry.OutputTokens
+    }
+    // ...
+}
+```
+
+The key difference: Claude Code emits `{"type":"result"}` with aggregated usage,
+while OpenCode emits `{"type":"step_finish","part":{"reason":"stop"}}` with
+per-step usage. The backend's `ParseResultEntry()` handles this mapping.
+
+#### 4. Profile system (`internal/profile/apply.go`)
+
+**What changes:** The `Apply()` function gains a `backend agent.Backend`
+parameter. Two callsites change:
+
+**Config directory.** The hardcoded `.claude` path in `writeToSandbox()` and
+`mkdir` calls is replaced by `backend.ConfigDir()`:
+
+```go
+// Before:
+runner.SSH(ctx, sbx, "bash", "-c", runner.AsUser("mkdir -p ~/.claude"))
+writeToSandbox(ctx, runner, sbx, claudemd, sbx+":"+home+"/.claude/CLAUDE.md")
+
+// After:
+configDir := backend.ConfigDir()
+runner.SSH(ctx, sbx, "bash", "-c", runner.AsUser("mkdir -p ~/"+configDir))
+writeToSandbox(ctx, runner, sbx, claudemd, sbx+":"+home+"/"+configDir+"/CLAUDE.md")
+```
+
+**MCP registration.** The `registerMCPServer()` function replaces the hardcoded
+`claude mcp add` construction with `backend.MCPAddCmd()`:
+
+```go
+// Before:
+args = []string{"claude", "mcp", "add", "--transport", "http", ...}
+innerCmd := strings.Join(args, " ")
+
+// After:
+innerCmd := backend.MCPAddCmd(server.Name, server.Transport, server.URL, server.Scope)
+```
+
+For stdio-transport MCP servers under OpenCode, the config-file approach supports
+local process execution via `{"type":"local","command":"...","args":[...]}`.
+
+#### 5. Sandbox provisioning (`internal/sandbox/podman.go`)
+
+**What changes:** The hardcoded `curl -fsSL https://claude.ai/install.sh | bash`
+in `PodmanRunner.Up()` is replaced by an injected install command.
+
+`NewFromConfig()` in `sandbox.go` accepts the agent install command and passes
+it to `NewPodman()`:
+
+```go
+func NewFromConfig(backend, gjollEnv, podmanImage, anthropicKeyFile string,
+    mcpPort int, agentInstallCmd string) (Runner, error) {
+    switch backend {
+    case "podman":
+        return NewPodman(podmanImage, anthropicKeyFile, mcpPort, agentInstallCmd), nil
+    // ...
+    }
+}
+```
+
+For gjoll-based sandboxes, the agent installation happens in the `.tf` file's
+`init_script` output, which is outside the orchestrator's control. Gjoll `.tf`
+files must be updated separately (see **gjoll changes** below).
+
+#### 6. Dashboard (`dashboard/app.js`)
+
+**What changes:** The dashboard auto-detects the transcript format. Both Claude
+Code and OpenCode transcripts are JSONL, but the event types differ. The
+detection heuristic checks the first parseable event:
+
+- If it has `type: "system"` and `subtype: "init"` → Claude Code format
+- If it has `type: "step_start"` or `sessionID` field → OpenCode format
+
+The `renderEntry()` function dispatches to format-specific renderers:
+
+```javascript
+function renderEntry(entry) {
+    // OpenCode events
+    if (entry.sessionID !== undefined || entry.part !== undefined) {
+        return renderOpenCodeEntry(entry);
+    }
+    // Claude Code events (existing logic)
+    return renderClaudeCodeEntry(entry);
+}
+```
+
+OpenCode event mapping to the existing UI components:
+
+| OpenCode event | Renders as |
+|----------------|------------|
+| `step_start` | System init banner |
+| `text` | Assistant text block |
+| `tool_use` | Tool call with input/output |
+| `thinking` | Collapsible thinking block |
+| `step_finish` (reason: stop) | Result summary with cost/tokens |
+
+### gjoll changes
+
+The gjoll repository's example `.tf` files hardcode Claude Code installation in
+their `init_script` outputs. These need companion OpenCode variants:
+
+| File | Change |
+|------|--------|
+| `examples/ubuntu-claude.tf` | Rename to `ubuntu-claude-code.tf` |
+| `examples/ubuntu-opencode.tf` | New: OpenCode variant of the Ubuntu example |
+| `examples/ubuntu-claude-vertex.tf` | Rename to `ubuntu-claude-code-vertex.tf` |
+| `examples/ubuntu-opencode-vertex.tf` | New: OpenCode + Vertex proxy variant |
+| `examples/fedora-libvirt-vertex.tf` | Add commented OpenCode alternative |
+| `examples/fedora-libvirt-opencode-vertex.tf` | New: OpenCode variant for libvirt |
+| `internal/cmd/root.go` | Update description to mention multiple coding agents |
+| `README.md` | Document OpenCode as an alternative agent |
+
+The OpenCode `.tf` variants differ in:
+1. **Install command:** `curl -fsSL https://opencode.ai/install | bash` instead
+   of the Claude Code npm install
+2. **Binary path:** `~/.opencode/bin/opencode` instead of npm global
+3. **No Node.js dependency:** OpenCode is a standalone binary (Go), eliminating
+   the Node.js 22 install step
+4. **Environment variables:** `ANTHROPIC_BASE_URL` instead of Claude Code's
+   `ANTHROPIC_VERTEX_BASE_URL` / `CLAUDE_CODE_USE_VERTEX` for Vertex AI proxy
+
+### Full change manifest
+
+#### orchestrator
+
+| File | Change | Lines (est.) |
+|------|--------|-------------|
+| `internal/agent/backend.go` | Already exists on branch | 0 |
+| `internal/agent/claudecode.go` | Already exists on branch | 0 |
+| `internal/agent/opencode.go` | Already exists on branch | 0 |
+| `internal/agent/backend_test.go` | Already exists on branch | 0 |
+| `internal/config/config.go` | Add `AgentBackend` field | +3 |
+| `internal/cmd/task.go` | Use `agent.Backend` for run script, MCP, archival, system prompt | ~+30/−25 |
+| `internal/cmd/log.go` | Delegate formatting to backend, remove local copies | ~+15/−120 |
+| `internal/task/usage.go` | Accept backend param, delegate to `ParseResultEntry()` | ~+5/−15 |
+| `internal/sandbox/sandbox.go` | Accept agent install cmd in `NewFromConfig()` | ~+3/−2 |
+| `internal/sandbox/podman.go` | Use injected install command | ~+5/−3 |
+| `internal/profile/apply.go` | Accept backend, use for MCP and config dir | ~+15/−10 |
+| `dashboard/app.js` | Auto-detect format, add OpenCode event renderers | ~+80/−0 |
+
+#### gjoll
+
+| File | Change |
+|------|--------|
+| `examples/fedora-libvirt-opencode-vertex.tf` | New: OpenCode libvirt+Vertex example |
+| `internal/cmd/root.go` | Update Long description |
+| `README.md` | Note OpenCode as alternative |
+
+### Testing strategy
+
+1. **Unit tests** (`internal/agent/backend_test.go`): Already cover both backends
+   for `BuildRunScript`, `MCPAddCmd`, `FormatTranscriptLine`, `ParseResultEntry`,
+   `ConfigDir`, and `InstallCmd`.
+
+2. **Integration test transcript fixtures**: Add OpenCode-format transcript
+   fixtures alongside existing Claude Code fixtures. The `log` and `usage`
+   tests should pass for both formats.
+
+3. **Podman sandbox test**: Verify that `PodmanRunner.Up()` installs the correct
+   agent when `agent_backend` is set to `"opencode"`.
+
+4. **Profile test**: Verify that `profile.Apply()` uses the correct config
+   directory and MCP registration method for each backend.
+
+5. **Dashboard manual test**: Load the dashboard with both Claude Code and
+   OpenCode transcript fixtures, verify rendering.
+
+### Migration plan
+
+1. **Phase 1 (this PR):** Ship the `agent.Backend` abstraction and wire it into
+   all integration points. Default remains `claude-code`. OpenCode backend is
+   available but opt-in via `agent_backend: opencode` in config.
+
+2. **Phase 2 (follow-up):** Run OpenCode on select tasks via config override.
+   Validate transcript parsing, MCP tool availability, usage tracking, and
+   dashboard rendering with real OpenCode runs.
+
+3. **Phase 3:** Once confidence is established, flip the default to `opencode`
+   and add a deprecation notice for the Claude Code backend.
+
+4. **Phase 4:** Remove the Claude Code backend, converging to Approach 1. At
+   this point, rename the config field or remove it entirely.
 
 ## Recommendation
 

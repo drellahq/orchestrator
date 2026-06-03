@@ -2,13 +2,16 @@ package task
 
 import (
 	"bufio"
-	"encoding/json"
 	"os"
+
+	"github.com/drellabot/orchestrator/internal/agent"
 )
 
-// ParseTranscriptUsage reads a stream-json transcript and returns the
+// ParseTranscriptUsage reads a streaming JSON transcript and returns the
 // aggregated token usage across all result entries (one per run).
-func ParseTranscriptUsage(path string) (*Usage, error) {
+// The backend determines how to identify and parse result entries from the
+// agent-specific transcript format.
+func ParseTranscriptUsage(path string, backend agent.Backend) (*Usage, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -20,25 +23,13 @@ func ParseTranscriptUsage(path string) (*Usage, error) {
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
 	for scanner.Scan() {
-		var entry struct {
-			Type         string  `json:"type"`
-			TotalCostUSD float64 `json:"total_cost_usd"`
-			Usage        *struct {
-				InputTokens  int `json:"input_tokens"`
-				OutputTokens int `json:"output_tokens"`
-			} `json:"usage"`
-		}
-		if err := json.Unmarshal(scanner.Bytes(), &entry); err != nil {
+		entry := backend.ParseResultEntry(scanner.Bytes())
+		if entry == nil {
 			continue
 		}
-		if entry.Type != "result" {
-			continue
-		}
-		total.CostUSD += entry.TotalCostUSD
-		if entry.Usage != nil {
-			total.InputTokens += entry.Usage.InputTokens
-			total.OutputTokens += entry.Usage.OutputTokens
-		}
+		total.CostUSD += entry.CostUSD
+		total.InputTokens += entry.InputTokens
+		total.OutputTokens += entry.OutputTokens
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, err

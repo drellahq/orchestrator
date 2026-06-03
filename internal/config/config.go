@@ -29,6 +29,9 @@ type Config struct {
 	PodmanImage      string `yaml:"podman_image"`       // container image (e.g. "fedora:43")
 	AnthropicKeyFile string `yaml:"anthropic_key_file"` // path to API key for mounting
 	
+	// Agent backend: "claude-code" (default) or "opencode"
+	AgentBackend string `yaml:"agent_backend"`
+
 	AllowedRepos []string     `yaml:"allowed_repos"`
 	ProfilesRepo string       `yaml:"profiles_repo"`
 	ProfilesDir  string       `yaml:"profiles_dir"`

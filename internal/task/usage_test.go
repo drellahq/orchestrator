@@ -4,16 +4,20 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/drellabot/orchestrator/internal/agent"
 )
 
 func TestParseTranscriptUsage(t *testing.T) {
+	ccBackend, _ := agent.New("claude-code")
+
 	tests := []struct {
-		name      string
-		content   string
-		wantIn    int
-		wantOut   int
-		wantCost  float64
-		wantErr   bool
+		name     string
+		content  string
+		wantIn   int
+		wantOut  int
+		wantCost float64
+		wantErr  bool
 	}{
 		{
 			name: "single result with usage",
@@ -88,7 +92,7 @@ also invalid
 				t.Fatal(err)
 			}
 
-			usage, err := ParseTranscriptUsage(path)
+			usage, err := ParseTranscriptUsage(path, ccBackend)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("ParseTranscriptUsage() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -109,8 +113,38 @@ also invalid
 	}
 }
 
+func TestParseTranscriptUsage_OpenCode(t *testing.T) {
+	ocBackend, _ := agent.New("opencode")
+
+	content := `{"type":"step_start","timestamp":123,"sessionID":"s1","part":{"type":"step-start"}}
+{"type":"text","timestamp":124,"sessionID":"s1","part":{"type":"text","text":"hello"}}
+{"type":"step_finish","timestamp":125,"sessionID":"s1","part":{"reason":"tool-calls","tokens":{"total":100,"input":80,"output":20}}}
+{"type":"step_finish","timestamp":126,"sessionID":"s1","part":{"reason":"stop","tokens":{"total":1200,"input":1000,"output":200},"cost":0.05}}
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "transcript.jsonl")
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	usage, err := ParseTranscriptUsage(path, ocBackend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usage.InputTokens != 1000 {
+		t.Errorf("InputTokens = %d, want 1000", usage.InputTokens)
+	}
+	if usage.OutputTokens != 200 {
+		t.Errorf("OutputTokens = %d, want 200", usage.OutputTokens)
+	}
+	if diff := usage.CostUSD - 0.05; diff > 0.001 || diff < -0.001 {
+		t.Errorf("CostUSD = %f, want 0.05", usage.CostUSD)
+	}
+}
+
 func TestParseTranscriptUsage_MissingFile(t *testing.T) {
-	_, err := ParseTranscriptUsage("/nonexistent/transcript.jsonl")
+	ccBackend, _ := agent.New("claude-code")
+	_, err := ParseTranscriptUsage("/nonexistent/transcript.jsonl", ccBackend)
 	if err == nil {
 		t.Fatal("expected error for missing file")
 	}

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/drellabot/orchestrator/internal/shellutil"
 )
 
 type claudeCode struct{}
@@ -48,9 +50,9 @@ stdbuf -oL claude --dangerously-skip-permissions -p --verbose \
 func (b *claudeCode) MCPAddCmd(name, transport, url, scope string) string {
 	cmd := fmt.Sprintf("claude mcp add --transport %s", transport)
 	if scope != "" {
-		cmd += " --scope " + scope
+		cmd += " --scope " + shellutil.Quote(scope)
 	}
-	cmd += " " + name + " " + url
+	cmd += " " + shellutil.Quote(name) + " " + shellutil.Quote(url)
 	return cmd
 }
 
