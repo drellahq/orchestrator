@@ -68,53 +68,6 @@
     return '';
   }
 
-  function usageNeedsRefresh(usage) {
-    if (!usage) return true;
-    return usage.cache_read_input_tokens === undefined ||
-      usage.cache_creation_input_tokens === undefined;
-  }
-
-  async function refreshUsageFromTranscript(taskName, usage) {
-    try {
-      const resp = await fetch('/tasks/' + taskName + '/transcript.jsonl');
-      if (!resp.ok) return usage;
-      const text = await resp.text();
-      const lines = text.split('\n');
-
-      let totalInput = 0, totalOutput = 0;
-      let cacheRead = 0, cacheCreation = 0;
-      let costUsd = 0;
-      let hasUsage = false;
-
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        let entry;
-        try { entry = JSON.parse(line); } catch (_) { continue; }
-        if (entry.type !== 'result') continue;
-        if (entry.total_cost_usd) costUsd += entry.total_cost_usd;
-        if (entry.usage) {
-          hasUsage = true;
-          totalInput += entry.usage.input_tokens || 0;
-          totalOutput += entry.usage.output_tokens || 0;
-          cacheRead += entry.usage.cache_read_input_tokens || 0;
-          cacheCreation += entry.usage.cache_creation_input_tokens || 0;
-        }
-      }
-
-      if (!hasUsage) return usage;
-
-      return {
-        input_tokens: totalInput,
-        output_tokens: totalOutput,
-        cache_read_input_tokens: cacheRead,
-        cache_creation_input_tokens: cacheCreation,
-        cost_usd: costUsd || (usage && usage.cost_usd) || 0,
-      };
-    } catch (_) {
-      return usage;
-    }
-  }
-
   function showToast(msg) {
     const el = $('#toast');
     el.textContent = msg;
@@ -722,9 +675,6 @@
     $('#transcript-loading').classList.remove('hidden');
 
     const meta = state.tasks.get(taskName) || (await fetchTaskMeta(taskName));
-    if (usageNeedsRefresh(meta.usage)) {
-      meta.usage = await refreshUsageFromTranscript(taskName, meta.usage);
-    }
     renderTaskMeta(meta);
 
     state.transcriptLoader = new TranscriptLoader(taskName);
@@ -770,17 +720,6 @@
       if (!state.currentTask) renderTaskList();
       setStatus(metas.length + ' tasks | ' + new Date().toLocaleTimeString());
 
-      if (!state.currentTask) {
-        const needRefresh = metas.filter(m => usageNeedsRefresh(m.usage));
-        if (needRefresh.length > 0) {
-          Promise.all(needRefresh.map(async m => {
-            m.usage = await refreshUsageFromTranscript(m.name, m.usage);
-            state.tasks.set(m.name, m);
-          })).then(() => {
-            if (!state.currentTask) renderTaskList();
-          });
-        }
-      }
     } catch (e) {
       showToast('Error refreshing: ' + e.message);
     }

@@ -71,6 +71,14 @@ type Usage struct {
 	CostUSD                  float64 `json:"cost_usd,omitempty"`
 }
 
+// NeedsRefresh reports whether the usage data is missing or incomplete.
+func (u *Usage) NeedsRefresh() bool {
+	if u == nil {
+		return true
+	}
+	return u.CacheReadInputTokens == nil || u.CacheCreationInputTokens == nil
+}
+
 // Task status constants.
 const (
 	StatusInProgress = "in_progress"
@@ -335,6 +343,29 @@ func (d *Dir) SaveUsage(u *Usage) error {
 	}
 	s.Usage = u
 	return d.saveStateLocked(s)
+}
+
+// BackfillUsage recalculates usage from the transcript and persists it
+// if the current usage data is missing or incomplete.
+func (d *Dir) BackfillUsage() error {
+	state, err := d.LoadState()
+	if err != nil {
+		return err
+	}
+	if !state.Usage.NeedsRefresh() {
+		return nil
+	}
+
+	transcriptPath := d.TranscriptPath()
+	if _, err := os.Stat(transcriptPath); err != nil {
+		return nil
+	}
+
+	usage, err := ParseTranscriptUsage(transcriptPath)
+	if err != nil {
+		return fmt.Errorf("parsing transcript: %w", err)
+	}
+	return d.SaveUsage(usage)
 }
 
 // RemoveRepo removes the repo subdirectory to reclaim disk space.
