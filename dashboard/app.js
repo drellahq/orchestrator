@@ -712,7 +712,13 @@
     $('#task-list').classList.add('hidden');
     $('#task-detail').classList.remove('hidden');
     $('#transcript').innerHTML = '';
-    $('#run-nav').innerHTML = '';
+    const nav = $('#run-nav');
+    nav.innerHTML = '';
+    const backLink = document.createElement('a');
+    backLink.href = '#';
+    backLink.className = 'back-link';
+    backLink.textContent = '‹ tasks';
+    nav.appendChild(backLink);
     $('#transcript-loading').classList.remove('hidden');
 
     const meta = state.tasks.get(taskName) || (await fetchTaskMeta(taskName));
