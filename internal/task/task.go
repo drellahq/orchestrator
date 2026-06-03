@@ -64,9 +64,11 @@ type Source struct {
 
 // Usage holds aggregated token usage across all runs of a task.
 type Usage struct {
-	InputTokens  int     `json:"input_tokens"`
-	OutputTokens int     `json:"output_tokens"`
-	CostUSD      float64 `json:"cost_usd,omitempty"`
+	InputTokens              int     `json:"input_tokens"`
+	OutputTokens             int     `json:"output_tokens"`
+	CacheReadInputTokens     *int    `json:"cache_read_input_tokens,omitempty"`
+	CacheCreationInputTokens *int    `json:"cache_creation_input_tokens,omitempty"`
+	CostUSD                  float64 `json:"cost_usd,omitempty"`
 }
 
 // Task status constants.

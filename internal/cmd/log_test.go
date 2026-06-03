@@ -73,6 +73,16 @@ func TestFormatTranscriptLine(t *testing.T) {
 			want: "[result] success (5 turns, 12.1s, $0.0800, 1.5k↑ 340↓)\n",
 		},
 		{
+			name: "result with cache tokens",
+			line: `{"type":"result","subtype":"success","duration_ms":12092,"num_turns":5,"total_cost_usd":15.9941,"usage":{"input_tokens":131,"output_tokens":39300,"cache_read_input_tokens":284000,"cache_creation_input_tokens":18000}}`,
+			want: "[result] success (5 turns, 12.1s, $15.9941, 284.0k↺ 18.0k⊕ 131↑ 39.3k↓)\n",
+		},
+		{
+			name: "result with only cache read",
+			line: `{"type":"result","subtype":"success","duration_ms":5000,"num_turns":3,"total_cost_usd":0.05,"usage":{"input_tokens":100,"output_tokens":500,"cache_read_input_tokens":50000,"cache_creation_input_tokens":0}}`,
+			want: "[result] success (3 turns, 5.0s, $0.0500, 50.0k↺ 100↑ 500↓)\n",
+		},
+		{
 			name: "result with cost but no usage",
 			line: `{"type":"result","subtype":"success","duration_ms":12092,"num_turns":5,"total_cost_usd":0.08}`,
 			want: "[result] success (5 turns, 12.1s, $0.0800)\n",

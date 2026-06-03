@@ -55,14 +55,57 @@
 
   function formatUsage(usage) {
     if (!usage) return '';
-    let parts = [];
-    if (usage.input_tokens || usage.output_tokens) {
-      parts.push(formatTokens(usage.input_tokens || 0) + '↑ ' + formatTokens(usage.output_tokens || 0) + '↓');
-    }
     if (usage.cost_usd) {
-      parts.push('$' + usage.cost_usd.toFixed(4));
+      return '$' + usage.cost_usd.toFixed(4);
     }
-    return parts.join(' · ');
+    return '';
+  }
+
+  function usageNeedsRefresh(usage) {
+    if (!usage) return false;
+    return usage.cache_read_input_tokens === undefined ||
+      usage.cache_creation_input_tokens === undefined;
+  }
+
+  async function refreshUsageFromTranscript(taskName, usage) {
+    try {
+      const resp = await fetch('/tasks/' + taskName + '/transcript.jsonl');
+      if (!resp.ok) return usage;
+      const text = await resp.text();
+      const lines = text.split('\n');
+
+      let totalInput = 0, totalOutput = 0;
+      let cacheRead = 0, cacheCreation = 0;
+      let costUsd = 0;
+      let hasUsage = false;
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        let entry;
+        try { entry = JSON.parse(line); } catch (_) { continue; }
+        if (entry.type !== 'result') continue;
+        if (entry.total_cost_usd) costUsd += entry.total_cost_usd;
+        if (entry.usage) {
+          hasUsage = true;
+          totalInput += entry.usage.input_tokens || 0;
+          totalOutput += entry.usage.output_tokens || 0;
+          cacheRead += entry.usage.cache_read_input_tokens || 0;
+          cacheCreation += entry.usage.cache_creation_input_tokens || 0;
+        }
+      }
+
+      if (!hasUsage) return usage;
+
+      return {
+        input_tokens: totalInput,
+        output_tokens: totalOutput,
+        cache_read_input_tokens: cacheRead,
+        cache_creation_input_tokens: cacheCreation,
+        cost_usd: costUsd || usage.cost_usd,
+      };
+    } catch (_) {
+      return usage;
+    }
   }
 
   function showToast(msg) {
@@ -357,17 +400,31 @@
     }
 
     if (task.usage) {
-      let usageParts = [];
-      if (task.usage.input_tokens || task.usage.output_tokens) {
-        usageParts.push(formatTokens(task.usage.input_tokens || 0) + '↑ ' +
-          formatTokens(task.usage.output_tokens || 0) + '↓');
+      let tokenParts = [];
+      if (task.usage.cache_read_input_tokens) {
+        tokenParts.push('<span title="Cache read input tokens">' +
+          escapeHtml(formatTokens(task.usage.cache_read_input_tokens)) + '↺</span>');
       }
+      if (task.usage.cache_creation_input_tokens) {
+        tokenParts.push('<span title="Cache creation input tokens (cache write)">' +
+          escapeHtml(formatTokens(task.usage.cache_creation_input_tokens)) + '⊕</span>');
+      }
+      if (task.usage.input_tokens) {
+        tokenParts.push('<span title="Input tokens (non-cache)">' +
+          escapeHtml(formatTokens(task.usage.input_tokens)) + '↑</span>');
+      }
+      if (task.usage.output_tokens) {
+        tokenParts.push('<span title="Output tokens">' +
+          escapeHtml(formatTokens(task.usage.output_tokens)) + '↓</span>');
+      }
+      let allParts = [];
+      if (tokenParts.length > 0) allParts.push(tokenParts.join(' '));
       if (task.usage.cost_usd) {
-        usageParts.push('$' + task.usage.cost_usd.toFixed(4));
+        allParts.push('<span title="Total cost (USD)">$' + task.usage.cost_usd.toFixed(4) + '</span>');
       }
-      if (usageParts.length > 0) {
+      if (allParts.length > 0) {
         html += '<div><span class="meta-label">usage:</span><span class="meta-usage">' +
-          escapeHtml(usageParts.join(' · ')) + '</span></div>';
+          allParts.join(' · ') + '</span></div>';
       }
     }
 
@@ -474,8 +531,15 @@
     if (entry.usage) {
       const input = entry.usage.input_tokens || 0;
       const output = entry.usage.output_tokens || 0;
-      if (input || output) {
-        parts.push(formatTokens(input) + '↑ ' + formatTokens(output) + '↓');
+      const cacheRead = entry.usage.cache_read_input_tokens || 0;
+      const cacheCreate = entry.usage.cache_creation_input_tokens || 0;
+      if (input || output || cacheRead || cacheCreate) {
+        let tokenParts = [];
+        if (cacheRead) tokenParts.push(formatTokens(cacheRead) + '↺');
+        if (cacheCreate) tokenParts.push(formatTokens(cacheCreate) + '⊕');
+        tokenParts.push(formatTokens(input) + '↑');
+        tokenParts.push(formatTokens(output) + '↓');
+        parts.push(tokenParts.join(' '));
       }
     }
 
@@ -645,6 +709,9 @@
     $('#transcript-loading').classList.remove('hidden');
 
     const meta = state.tasks.get(taskName) || (await fetchTaskMeta(taskName));
+    if (usageNeedsRefresh(meta.usage)) {
+      meta.usage = await refreshUsageFromTranscript(taskName, meta.usage);
+    }
     renderTaskMeta(meta);
 
     state.transcriptLoader = new TranscriptLoader(taskName);
