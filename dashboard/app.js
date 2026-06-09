@@ -756,10 +756,16 @@
 
   function handleRoute() {
     const hash = window.location.hash.slice(1);
-    if (hash.startsWith('task/')) {
-      showTaskDetail(decodeURIComponent(hash.slice(5)));
+    if (hash === 'config') {
+      showConfigDialog();
+      if (!state.currentTask) showTaskList();
     } else {
-      showTaskList();
+      closeConfigDialog();
+      if (hash.startsWith('task/')) {
+        showTaskDetail(decodeURIComponent(hash.slice(5)));
+      } else {
+        showTaskList();
+      }
     }
   }
 
@@ -805,16 +811,25 @@
         showConfigDialog();
       });
       $('#version-footer').appendChild(span);
+      if (window.location.hash === '#config') {
+        showConfigDialog();
+      }
     } catch (_) {}
   }
 
   function showConfigDialog() {
     $('#config-content').textContent = configYaml;
     $('#config-dialog').classList.remove('hidden');
+    if (window.location.hash !== '#config') {
+      history.pushState(null, '', '#config');
+    }
   }
 
   function closeConfigDialog() {
     $('#config-dialog').classList.add('hidden');
+    if (window.location.hash === '#config') {
+      history.pushState(null, '', window.location.pathname + window.location.search);
+    }
   }
 
   // ── Version footer ──
