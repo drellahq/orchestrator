@@ -788,6 +788,35 @@
     } catch (_) {}
   }
 
+  // ── Config dialog ──
+
+  var configYaml = '';
+
+  async function loadConfigFooter() {
+    try {
+      const resp = await fetch('/config.yaml');
+      if (!resp.ok) return;
+      configYaml = await resp.text();
+      var span = document.createElement('span');
+      span.className = 'version-component config-trigger';
+      span.innerHTML = 'config: <span class="version-value">[view]</span>';
+      span.addEventListener('click', function (e) {
+        e.preventDefault();
+        showConfigDialog();
+      });
+      $('#version-footer').appendChild(span);
+    } catch (_) {}
+  }
+
+  function showConfigDialog() {
+    $('#config-content').textContent = configYaml;
+    $('#config-dialog').classList.remove('hidden');
+  }
+
+  function closeConfigDialog() {
+    $('#config-dialog').classList.add('hidden');
+  }
+
   // ── Version footer ──
 
   async function loadVersionFooter() {
@@ -830,6 +859,10 @@
     });
 
     document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !$('#config-dialog').classList.contains('hidden')) {
+        closeConfigDialog();
+        return;
+      }
       if (e.key === 'Escape' && state.currentTask) {
         window.location.hash = '';
       }
@@ -839,7 +872,13 @@
       }
     });
 
+    $('#config-close').addEventListener('click', closeConfigDialog);
+    $('#config-dialog').addEventListener('click', function (e) {
+      if (e.target === this) closeConfigDialog();
+    });
+
     loadVersionFooter();
+    loadConfigFooter();
     handleRoute();
   }
 

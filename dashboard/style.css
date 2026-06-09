@@ -654,6 +654,80 @@ a.version-value:hover {
   color: var(--cyan);
 }
 
+/* --- Config footer trigger --- */
+
+.config-trigger {
+  cursor: pointer;
+  white-space: nowrap;
+}
+.config-trigger:hover {
+  color: var(--cyan);
+}
+
+/* --- Dialog --- */
+
+.dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 300;
+}
+
+.dialog {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  min-width: 320px;
+  max-width: 600px;
+  width: 90vw;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--green);
+  letter-spacing: 0.05em;
+}
+
+.dialog-close {
+  font-family: var(--font);
+  font-size: 0.8rem;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 0;
+}
+.dialog-close:hover {
+  color: var(--red);
+}
+
+.dialog-body {
+  padding: 1rem;
+  overflow-y: auto;
+  font-size: 0.8rem;
+  line-height: 1.6;
+}
+
+.config-pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-bright);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
 /* --- Toast --- */
 
 .toast {

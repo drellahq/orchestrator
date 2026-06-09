@@ -75,6 +75,12 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	}
 	slog.Info("Wrote version info", "path", versionPath)
 
+	configCopyPath := filepath.Join(cfg.OutputDir, "config.yaml")
+	if err := copyFile(configPath, configCopyPath); err != nil {
+		return fmt.Errorf("copying config to output dir: %w", err)
+	}
+	slog.Info("Copied config", "path", configCopyPath)
+
 	if len(cfg.Daemon.AllowedCommenters) == 0 {
 		slog.Warn("daemon.allowed_commenters is empty; no comments will trigger task continue")
 	}
@@ -117,10 +123,22 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 				newInterval = parsed
 			}
 
+			if err := copyFile(configPath, configCopyPath); err != nil {
+				slog.Error("Failed to copy config on reload", "error", err)
+			}
+
 			d.Reload(newInterval, newCfg.Daemon.AllowedCommenters, newCfg.Daemon.TasksRepo)
 		}
 	}()
 
 	slog.Info("Daemon starting", "interval", interval, "output_dir", cfg.OutputDir, "allowed_commenters", cfg.Daemon.AllowedCommenters, "bot_username", botUsername)
 	return d.Run(ctx)
+}
+
+func copyFile(src, dst string) error {
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(dst, data, 0644)
 }
