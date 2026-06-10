@@ -296,7 +296,8 @@
       .join('');
 
     const isRunning = computeStatus(task) === 'in_progress';
-    const card = document.createElement('div');
+    const card = document.createElement('a');
+    card.href = '#task/' + encodeURIComponent(task.name);
     card.className = 'task-card' + (isRunning ? ' task-card-running' : '');
     card.setAttribute('data-task', task.name);
     const usageStr = formatUsage(task.usage);
@@ -315,9 +316,6 @@
         usageHtml +
         prs +
       '</div>';
-    card.addEventListener('click', () => {
-      window.location.hash = 'task/' + task.name;
-    });
     return card;
   }
 
