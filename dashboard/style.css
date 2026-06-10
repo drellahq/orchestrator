@@ -155,6 +155,10 @@ main {
   gap: 1rem;
 }
 
+a.task-card {
+  text-decoration: none;
+  color: inherit;
+}
 .task-card {
   background: var(--bg-card);
   border: 1px solid var(--border);
