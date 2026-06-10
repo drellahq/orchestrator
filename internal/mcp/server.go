@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"log/slog"
 	"net"
@@ -37,14 +38,35 @@ type PROpener interface {
 	PostReview(ctx context.Context, repo string, pr int, event, body string) error
 }
 
+// ImageUploader uploads images to GitHub for inline use in markdown.
+type ImageUploader interface {
+	UploadImage(ctx context.Context, repo, filename string, data []byte) (url string, err error)
+}
+
+// ImageAttachment is a base64-encoded image to upload and inline in a comment body.
+type ImageAttachment struct {
+	Filename string `json:"filename" jsonschema_description:"Image filename (e.g. screenshot.png). The extension determines the content type."`
+	Data     string `json:"data" jsonschema_description:"Base64-encoded image data"`
+	Alt      string `json:"alt,omitempty" jsonschema_description:"Alt text for the image (used in the markdown reference)"`
+}
+
+// UploadImageInput is the input schema for the upload_image tool.
+type UploadImageInput struct {
+	Repo     string `json:"repo" jsonschema_description:"Target repository as owner/repo for hosting the image (e.g. osbuild/osbuild)"`
+	Filename string `json:"filename" jsonschema_description:"Image filename (e.g. screenshot.png). The extension determines the content type."`
+	Data     string `json:"data" jsonschema_description:"Base64-encoded image data"`
+	Alt      string `json:"alt,omitempty" jsonschema_description:"Alt text for the image"`
+}
+
 // OpenPRInput is the input schema for the open_pr tool.
 type OpenPRInput struct {
-	Path   string `json:"path" jsonschema_description:"Absolute path to the git repo in the sandbox"`
-	Repo   string `json:"repo" jsonschema_description:"Target repository as owner/repo (e.g. osbuild/osbuild)"`
-	Branch string `json:"branch" jsonschema_description:"Name of the remote branch to push to"`
-	Base   string `json:"base,omitempty" jsonschema_description:"Base branch for the PR (default: main)"`
-	Title  string `json:"title" jsonschema_description:"PR title"`
-	Body   string `json:"body" jsonschema_description:"PR body/description"`
+	Path   string            `json:"path" jsonschema_description:"Absolute path to the git repo in the sandbox"`
+	Repo   string            `json:"repo" jsonschema_description:"Target repository as owner/repo (e.g. osbuild/osbuild)"`
+	Branch string            `json:"branch" jsonschema_description:"Name of the remote branch to push to"`
+	Base   string            `json:"base,omitempty" jsonschema_description:"Base branch for the PR (default: main)"`
+	Title  string            `json:"title" jsonschema_description:"PR title"`
+	Body   string            `json:"body" jsonschema_description:"PR body/description"`
+	Images []ImageAttachment `json:"images,omitempty" jsonschema_description:"Images to upload and inline at the end of the PR body"`
 }
 
 // UpdatePRInput is the input schema for the update_pr tool.
@@ -56,9 +78,10 @@ type UpdatePRInput struct {
 
 // CommentOnPRInput is the input schema for the comment_on_pr tool.
 type CommentOnPRInput struct {
-	PRURL string `json:"pr_url" jsonschema_description:"URL of the pull request to comment on (must be a PR opened by this task)"`
-	Body  string `json:"body" jsonschema_description:"Comment body (markdown supported)"`
-	Title string `json:"title,omitempty" jsonschema_description:"Optional new title for the pull request. If empty, the title is not changed."`
+	PRURL  string            `json:"pr_url" jsonschema_description:"URL of the pull request to comment on (must be a PR opened by this task)"`
+	Body   string            `json:"body" jsonschema_description:"Comment body (markdown supported)"`
+	Title  string            `json:"title,omitempty" jsonschema_description:"Optional new title for the pull request. If empty, the title is not changed."`
+	Images []ImageAttachment `json:"images,omitempty" jsonschema_description:"Images to upload and inline at the end of the comment body"`
 }
 
 // PostReviewInput is the input schema for the post_review tool.
@@ -140,11 +163,56 @@ func resolveOriginatingIssue(tasksRepo, taskName string, state *task.State) (rep
 	return tasksRepo, n, true
 }
 
+// uploadAndInlineImages uploads each image attachment and appends markdown
+// references to the body. If any upload fails, the error is logged and that
+// image is skipped.
+func uploadAndInlineImages(ctx context.Context, logger *slog.Logger, uploader ImageUploader, repo string, body string, images []ImageAttachment) string {
+	if uploader == nil || len(images) == 0 {
+		return body
+	}
+	var sb strings.Builder
+	sb.WriteString(body)
+	for _, img := range images {
+		data, err := base64.StdEncoding.DecodeString(img.Data)
+		if err != nil {
+			logger.Warn("Skipping image with invalid base64", "filename", img.Filename, "error", err)
+			continue
+		}
+		imgURL, err := uploader.UploadImage(ctx, repo, img.Filename, data)
+		if err != nil {
+			logger.Warn("Failed to upload image, skipping", "filename", img.Filename, "error", err)
+			continue
+		}
+		alt := img.Alt
+		if alt == "" {
+			alt = img.Filename
+		}
+		sb.WriteString("\n\n")
+		sb.WriteString(fmt.Sprintf("![%s](%s)", alt, imgURL))
+	}
+	return sb.String()
+}
+
+// repoFromPRState looks up the repo for a PR URL in the task state.
+func repoFromPRState(state *task.State, prURL string) string {
+	if state == nil {
+		return ""
+	}
+	for _, pr := range state.Resources.GitHub.PRs {
+		if pr.URL == prURL {
+			return pr.Repo
+		}
+	}
+	return ""
+}
+
 // New creates a new MCP server. If prOpener is non-nil and allowedRepos is
 // non-empty, the open_pr tool is registered. When author is non-empty, a
 // Co-authored-by trailer is appended to each new commit before pushing.
 // tasksRepo is the daemon tasks_repo used to link PRs back to originating issues.
-func New(logger *slog.Logger, taskName string, taskDir *task.Dir, puller CodePuller, prOpener PROpener, allowedRepos []string, author, tasksRepo string) *Server {
+// imageUploader, when non-nil, enables the upload_image tool and image
+// attachments on comment_on_pr and open_pr.
+func New(logger *slog.Logger, taskName string, taskDir *task.Dir, puller CodePuller, prOpener PROpener, imageUploader ImageUploader, allowedRepos []string, author, tasksRepo string) *Server {
 	mcpServer := mcp.NewServer(&mcp.Implementation{
 		Name:    "orchestrator",
 		Version: "0.1.0",
@@ -217,7 +285,9 @@ func New(logger *slog.Logger, taskName string, taskDir *task.Dir, puller CodePul
 				}, nil, nil
 			}
 
-			prURL, err := prOpener.CreatePR(ctx, input.Repo, forkOwner, input.Branch, input.Base, input.Title, input.Body)
+			body := uploadAndInlineImages(ctx, logger, imageUploader, input.Repo, input.Body, input.Images)
+
+			prURL, err := prOpener.CreatePR(ctx, input.Repo, forkOwner, input.Branch, input.Base, input.Title, body)
 			if err != nil {
 				logger.Error("Failed to create PR", "task", taskName, "error", err)
 				return &mcp.CallToolResult{
@@ -362,7 +432,10 @@ func New(logger *slog.Logger, taskName string, taskDir *task.Dir, puller CodePul
 				}, nil, nil
 			}
 
-			if err := prOpener.CommentOnPR(ctx, input.PRURL, input.Body); err != nil {
+			repo := repoFromPRState(state, input.PRURL)
+			body := uploadAndInlineImages(ctx, logger, imageUploader, repo, input.Body, input.Images)
+
+			if err := prOpener.CommentOnPR(ctx, input.PRURL, body); err != nil {
 				logger.Error("Failed to comment on PR", "task", taskName, "error", err)
 				return &mcp.CallToolResult{
 					Content: []mcp.Content{
@@ -422,6 +495,58 @@ func New(logger *slog.Logger, taskName string, taskDir *task.Dir, puller CodePul
 			return &mcp.CallToolResult{
 				Content: []mcp.Content{
 					&mcp.TextContent{Text: fmt.Sprintf("Review posted on %s#%d (%s)", input.Repo, input.PR, input.Event)},
+				},
+			}, nil, nil
+		})
+	}
+
+	if imageUploader != nil {
+		mcp.AddTool(mcpServer, &mcp.Tool{
+			Name:        "upload_image",
+			Description: "Upload an image to GitHub and return its markdown reference. The image is stored as a release asset and the returned URL can be used inline in any markdown body.",
+		}, func(ctx context.Context, req *mcp.CallToolRequest, input *UploadImageInput) (*mcp.CallToolResult, any, error) {
+			logger.Info("Image upload requested", "task", taskName, "repo", input.Repo, "filename", input.Filename)
+
+			if !isRepoAllowed(input.Repo, allowedRepos) {
+				return &mcp.CallToolResult{
+					Content: []mcp.Content{
+						&mcp.TextContent{Text: fmt.Sprintf("repo %q is not in the allowed repos list", input.Repo)},
+					},
+					IsError: true,
+				}, nil, nil
+			}
+
+			data, err := base64.StdEncoding.DecodeString(input.Data)
+			if err != nil {
+				return &mcp.CallToolResult{
+					Content: []mcp.Content{
+						&mcp.TextContent{Text: fmt.Sprintf("invalid base64 data: %v", err)},
+					},
+					IsError: true,
+				}, nil, nil
+			}
+
+			imgURL, err := imageUploader.UploadImage(ctx, input.Repo, input.Filename, data)
+			if err != nil {
+				logger.Error("Image upload failed", "task", taskName, "error", err)
+				return &mcp.CallToolResult{
+					Content: []mcp.Content{
+						&mcp.TextContent{Text: fmt.Sprintf("upload_image failed: %v", err)},
+					},
+					IsError: true,
+				}, nil, nil
+			}
+
+			alt := input.Alt
+			if alt == "" {
+				alt = input.Filename
+			}
+			markdown := fmt.Sprintf("![%s](%s)", alt, imgURL)
+
+			logger.Info("Image uploaded", "task", taskName, "url", imgURL)
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{
+					&mcp.TextContent{Text: markdown},
 				},
 			}, nil, nil
 		})

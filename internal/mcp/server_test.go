@@ -141,7 +141,34 @@ func (s *stubPROpener) PostReview(_ context.Context, repo string, pr int, event,
 	return s.reviewErr
 }
 
+// stubImageUploader implements ImageUploader for testing.
+type stubImageUploader struct {
+	url    string
+	err    error
+	called bool
+
+	gotRepo     string
+	gotFilename string
+	gotData     []byte
+}
+
+func (s *stubImageUploader) UploadImage(_ context.Context, repo, filename string, data []byte) (string, error) {
+	s.called = true
+	s.gotRepo = repo
+	s.gotFilename = filename
+	s.gotData = data
+	return s.url, s.err
+}
+
+type testServerOpts struct {
+	imageUploader ImageUploader
+}
+
 func startTestServer(t *testing.T, puller CodePuller, prOpener PROpener, allowedRepos []string, authors ...string) (*task.Dir, *Server, string) {
+	return startTestServerWithOpts(t, puller, prOpener, allowedRepos, testServerOpts{}, authors...)
+}
+
+func startTestServerWithOpts(t *testing.T, puller CodePuller, prOpener PROpener, allowedRepos []string, opts testServerOpts, authors ...string) (*task.Dir, *Server, string) {
 	t.Helper()
 	dir := t.TempDir()
 	td, err := task.Create(dir, "test-task")
@@ -154,7 +181,7 @@ func startTestServer(t *testing.T, puller CodePuller, prOpener PROpener, allowed
 		author = authors[0]
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	s := New(logger, "test-task", td, puller, prOpener, allowedRepos, author, "")
+	s := New(logger, "test-task", td, puller, prOpener, opts.imageUploader, allowedRepos, author, "")
 	if err := s.StartOn("127.0.0.1:0"); err != nil {
 		t.Fatalf("StartOn() error: %v", err)
 	}
@@ -192,7 +219,7 @@ func TestStartAllocatesDynamicPort(t *testing.T) {
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 
-	s1 := New(logger, "task-1", td, nil, nil, nil, "", "")
+	s1 := New(logger, "task-1", td, nil, nil, nil, nil, "", "")
 	if err := s1.Start(); err != nil {
 		t.Fatalf("Start() error: %v", err)
 	}
@@ -204,7 +231,7 @@ func TestStartAllocatesDynamicPort(t *testing.T) {
 
 	dir2 := t.TempDir()
 	td2, _ := task.Create(dir2, "dyn-port-test-2")
-	s2 := New(logger, "task-2", td2, nil, nil, nil, "", "")
+	s2 := New(logger, "task-2", td2, nil, nil, nil, nil, "", "")
 	if err := s2.Start(); err != nil {
 		t.Fatalf("Start() second server: %v", err)
 	}
@@ -660,7 +687,7 @@ func TestOpenPRLinksOriginatingIssue(t *testing.T) {
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	s := New(logger, "tasks-42-add_dark_mode", td, puller, opener, []string{"org/*"}, "", "org/tasks")
+	s := New(logger, "tasks-42-add_dark_mode", td, puller, opener, nil, []string{"org/*"}, "", "org/tasks")
 	if err := s.StartOn("127.0.0.1:0"); err != nil {
 		t.Fatalf("StartOn() error: %v", err)
 	}
@@ -1265,5 +1292,357 @@ func TestPostReviewTool(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestUploadImageTool(t *testing.T) {
+	tests := []struct {
+		name         string
+		uploader     *stubImageUploader
+		allowedRepos []string
+		input        map[string]any
+		wantError    bool
+		wantText     string
+	}{
+		{
+			name:         "successful upload",
+			uploader:     &stubImageUploader{url: "https://github.com/org/repo/releases/download/_image-attachments/abc_screenshot.png"},
+			allowedRepos: []string{"org/*"},
+			input: map[string]any{
+				"repo":     "org/repo",
+				"filename": "screenshot.png",
+				"data":     "aGVsbG8=", // base64 of "hello"
+				"alt":      "A screenshot",
+			},
+			wantText: "![A screenshot](https://github.com/org/repo/releases/download/_image-attachments/abc_screenshot.png)",
+		},
+		{
+			name:         "default alt text from filename",
+			uploader:     &stubImageUploader{url: "https://github.com/org/repo/releases/download/_image-attachments/abc_img.png"},
+			allowedRepos: []string{"org/*"},
+			input: map[string]any{
+				"repo":     "org/repo",
+				"filename": "img.png",
+				"data":     "aGVsbG8=",
+			},
+			wantText: "![img.png](https://github.com/org/repo/releases/download/_image-attachments/abc_img.png)",
+		},
+		{
+			name:         "repo not allowed",
+			uploader:     &stubImageUploader{},
+			allowedRepos: []string{"org/*"},
+			input: map[string]any{
+				"repo":     "evil/repo",
+				"filename": "img.png",
+				"data":     "aGVsbG8=",
+			},
+			wantError: true,
+			wantText:  "not in the allowed repos list",
+		},
+		{
+			name:         "invalid base64",
+			uploader:     &stubImageUploader{},
+			allowedRepos: []string{"org/*"},
+			input: map[string]any{
+				"repo":     "org/repo",
+				"filename": "img.png",
+				"data":     "not-valid-base64!!!",
+			},
+			wantError: true,
+			wantText:  "invalid base64",
+		},
+		{
+			name:         "upload failure",
+			uploader:     &stubImageUploader{err: fmt.Errorf("release creation denied")},
+			allowedRepos: []string{"org/*"},
+			input: map[string]any{
+				"repo":     "org/repo",
+				"filename": "img.png",
+				"data":     "aGVsbG8=",
+			},
+			wantError: true,
+			wantText:  "release creation denied",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opener := &stubPROpener{user: "testuser", forkName: "testuser/repo", prURL: "https://github.com/org/repo/pull/1"}
+			_, _, endpoint := startTestServerWithOpts(t, &stubPuller{}, opener, tt.allowedRepos, testServerOpts{imageUploader: tt.uploader})
+			session := connectClient(t, endpoint)
+
+			result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+				Name:      "upload_image",
+				Arguments: tt.input,
+			})
+			if err != nil {
+				t.Fatalf("CallTool() protocol error: %v", err)
+			}
+
+			if result.IsError != tt.wantError {
+				t.Errorf("IsError = %v, want %v", result.IsError, tt.wantError)
+			}
+
+			var text string
+			for _, c := range result.Content {
+				if tc, ok := c.(*mcp.TextContent); ok {
+					text = tc.Text
+				}
+			}
+			if !strings.Contains(text, tt.wantText) {
+				t.Errorf("result text %q does not contain %q", text, tt.wantText)
+			}
+		})
+	}
+}
+
+func TestUploadImageToolNotRegisteredWithoutUploader(t *testing.T) {
+	opener := &stubPROpener{user: "testuser", forkName: "testuser/repo", prURL: "https://github.com/org/repo/pull/1"}
+	_, _, endpoint := startTestServer(t, &stubPuller{}, opener, []string{"org/*"})
+	session := connectClient(t, endpoint)
+
+	result, err := session.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("ListTools() error: %v", err)
+	}
+
+	for _, tool := range result.Tools {
+		if tool.Name == "upload_image" {
+			t.Error("upload_image tool should not be registered without an image uploader")
+		}
+	}
+}
+
+func TestCommentOnPRToolWithImages(t *testing.T) {
+	const ownedPRURL = "https://github.com/osbuild/osbuild/pull/42"
+
+	uploader := &stubImageUploader{url: "https://github.com/osbuild/osbuild/releases/download/_image-attachments/abc_img.png"}
+	opener := &stubPROpener{user: "testuser"}
+	td, _, endpoint := startTestServerWithOpts(t, &stubPuller{}, opener, []string{"osbuild/*"}, testServerOpts{imageUploader: uploader})
+
+	if err := td.AddPR(task.PR{
+		URL:    ownedPRURL,
+		Repo:   "osbuild/osbuild",
+		Branch: "fix-bug",
+		Base:   "main",
+	}); err != nil {
+		t.Fatalf("AddPR() error: %v", err)
+	}
+
+	session := connectClient(t, endpoint)
+
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "comment_on_pr",
+		Arguments: map[string]any{
+			"pr_url": ownedPRURL,
+			"body":   "Here is a screenshot:",
+			"images": []any{
+				map[string]any{
+					"filename": "screenshot.png",
+					"data":     "aGVsbG8=",
+					"alt":      "A screenshot",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool() error: %v", err)
+	}
+	if result.IsError {
+		var text string
+		for _, c := range result.Content {
+			if tc, ok := c.(*mcp.TextContent); ok {
+				text = tc.Text
+			}
+		}
+		t.Fatalf("unexpected error: %s", text)
+	}
+
+	if !opener.commentCalled {
+		t.Fatal("CommentOnPR was not called")
+	}
+	if !strings.Contains(opener.gotCommentBody, "Here is a screenshot:") {
+		t.Errorf("comment body should contain original text, got %q", opener.gotCommentBody)
+	}
+	if !strings.Contains(opener.gotCommentBody, "![A screenshot](https://github.com/osbuild/osbuild/releases/download/_image-attachments/abc_img.png)") {
+		t.Errorf("comment body should contain image markdown, got %q", opener.gotCommentBody)
+	}
+
+	if !uploader.called {
+		t.Error("UploadImage was not called")
+	}
+	if uploader.gotRepo != "osbuild/osbuild" {
+		t.Errorf("upload repo = %q, want osbuild/osbuild", uploader.gotRepo)
+	}
+}
+
+func TestOpenPRToolWithImages(t *testing.T) {
+	uploader := &stubImageUploader{url: "https://github.com/osbuild/osbuild/releases/download/_image-attachments/abc_img.png"}
+	opener := &stubPROpener{
+		user:     "testuser",
+		forkName: "testuser/osbuild",
+		prURL:    "https://github.com/osbuild/osbuild/pull/42",
+	}
+	_, _, endpoint := startTestServerWithOpts(t, &stubPuller{}, opener, []string{"osbuild/*"}, testServerOpts{imageUploader: uploader})
+	session := connectClient(t, endpoint)
+
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "open_pr",
+		Arguments: map[string]any{
+			"path":   "/test/project",
+			"repo":   "osbuild/osbuild",
+			"branch": "fix-bug",
+			"base":   "main",
+			"title":  "Fix bug",
+			"body":   "Description of changes",
+			"images": []any{
+				map[string]any{
+					"filename": "before.png",
+					"data":     "aGVsbG8=",
+					"alt":      "Before",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool() error: %v", err)
+	}
+	if result.IsError {
+		var text string
+		for _, c := range result.Content {
+			if tc, ok := c.(*mcp.TextContent); ok {
+				text = tc.Text
+			}
+		}
+		t.Fatalf("unexpected error: %s", text)
+	}
+
+	if !uploader.called {
+		t.Error("UploadImage was not called")
+	}
+	if uploader.gotRepo != "osbuild/osbuild" {
+		t.Errorf("upload repo = %q, want osbuild/osbuild", uploader.gotRepo)
+	}
+}
+
+func TestCommentOnPRToolWithoutUploaderIgnoresImages(t *testing.T) {
+	const ownedPRURL = "https://github.com/osbuild/osbuild/pull/42"
+
+	opener := &stubPROpener{user: "testuser"}
+	td, _, endpoint := startTestServer(t, &stubPuller{}, opener, []string{"osbuild/*"})
+
+	if err := td.AddPR(task.PR{
+		URL:    ownedPRURL,
+		Repo:   "osbuild/osbuild",
+		Branch: "fix-bug",
+		Base:   "main",
+	}); err != nil {
+		t.Fatalf("AddPR() error: %v", err)
+	}
+
+	session := connectClient(t, endpoint)
+
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "comment_on_pr",
+		Arguments: map[string]any{
+			"pr_url": ownedPRURL,
+			"body":   "Hello",
+			"images": []any{
+				map[string]any{
+					"filename": "screenshot.png",
+					"data":     "aGVsbG8=",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool() error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected error result")
+	}
+
+	// Body should be the original text without image markdown
+	if opener.gotCommentBody != "Hello" {
+		t.Errorf("body = %q, want %q (images should be ignored without uploader)", opener.gotCommentBody, "Hello")
+	}
+}
+
+func TestUploadAndInlineImages(t *testing.T) {
+	t.Run("no images returns body unchanged", func(t *testing.T) {
+		body := "original body"
+		result := uploadAndInlineImages(context.Background(), nil, nil, "org/repo", body, nil)
+		if result != body {
+			t.Errorf("got %q, want %q", result, body)
+		}
+	})
+
+	t.Run("nil uploader returns body unchanged", func(t *testing.T) {
+		body := "original body"
+		images := []ImageAttachment{{Filename: "test.png", Data: "aGVsbG8="}}
+		result := uploadAndInlineImages(context.Background(), nil, nil, "org/repo", body, images)
+		if result != body {
+			t.Errorf("got %q, want %q", result, body)
+		}
+	})
+
+	t.Run("skips invalid base64", func(t *testing.T) {
+		body := "original body"
+		logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+		uploader := &stubImageUploader{url: "https://example.com/img.png"}
+		images := []ImageAttachment{{Filename: "bad.png", Data: "not-valid!!!"}}
+		result := uploadAndInlineImages(context.Background(), logger, uploader, "org/repo", body, images)
+		if result != body {
+			t.Errorf("got %q, want %q (invalid base64 should be skipped)", result, body)
+		}
+		if uploader.called {
+			t.Error("uploader should not be called for invalid base64")
+		}
+	})
+
+	t.Run("appends image markdown", func(t *testing.T) {
+		body := "my comment"
+		logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+		uploader := &stubImageUploader{url: "https://example.com/img.png"}
+		images := []ImageAttachment{{Filename: "shot.png", Data: "aGVsbG8=", Alt: "My shot"}}
+		result := uploadAndInlineImages(context.Background(), logger, uploader, "org/repo", body, images)
+		if !strings.HasPrefix(result, "my comment") {
+			t.Errorf("result should start with original body: %q", result)
+		}
+		if !strings.Contains(result, "![My shot](https://example.com/img.png)") {
+			t.Errorf("result should contain image markdown: %q", result)
+		}
+	})
+
+	t.Run("uses filename as alt when alt is empty", func(t *testing.T) {
+		body := "text"
+		logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+		uploader := &stubImageUploader{url: "https://example.com/img.png"}
+		images := []ImageAttachment{{Filename: "screenshot.png", Data: "aGVsbG8="}}
+		result := uploadAndInlineImages(context.Background(), logger, uploader, "org/repo", body, images)
+		if !strings.Contains(result, "![screenshot.png]") {
+			t.Errorf("result should use filename as alt: %q", result)
+		}
+	})
+}
+
+func TestRepoFromPRState(t *testing.T) {
+	state := &task.State{}
+	state.Resources.GitHub.PRs = []task.PR{
+		{URL: "https://github.com/org/repo/pull/1", Repo: "org/repo"},
+		{URL: "https://github.com/org/other/pull/2", Repo: "org/other"},
+	}
+
+	if got := repoFromPRState(state, "https://github.com/org/repo/pull/1"); got != "org/repo" {
+		t.Errorf("got %q, want org/repo", got)
+	}
+	if got := repoFromPRState(state, "https://github.com/org/other/pull/2"); got != "org/other" {
+		t.Errorf("got %q, want org/other", got)
+	}
+	if got := repoFromPRState(state, "https://github.com/unknown/pull/3"); got != "" {
+		t.Errorf("got %q, want empty for unknown PR", got)
+	}
+	if got := repoFromPRState(nil, "anything"); got != "" {
+		t.Errorf("got %q, want empty for nil state", got)
 	}
 }
