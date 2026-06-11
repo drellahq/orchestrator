@@ -23,5 +23,3 @@
 
 # Config (may contain secrets)
 orchestrator.yaml
-node_modules/
-test-results/
