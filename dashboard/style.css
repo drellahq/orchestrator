@@ -155,11 +155,8 @@ main {
   gap: 1rem;
 }
 
-a.task-card {
-  text-decoration: none;
-  color: inherit;
-}
 .task-card {
+  position: relative;
   background: var(--bg-card);
   border: 1px solid var(--border);
   padding: 1rem 1.25rem;
@@ -168,6 +165,15 @@ a.task-card {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+}
+.task-card-link {
+  color: inherit;
+  text-decoration: none;
+}
+.task-card-link::after {
+  content: '';
+  position: absolute;
+  inset: 0;
 }
 .task-card:hover {
   background: var(--bg-card-hover);
@@ -237,6 +243,8 @@ a.task-card {
 }
 
 .pr-badge {
+  position: relative;
+  z-index: 1;
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;

@@ -291,13 +291,12 @@
       .map((pr) => {
         const cls = pr.merged ? 'pr-merged' : pr.closed ? 'pr-closed' : 'pr-open';
         return '<a href="' + escapeHtml(pr.url) + '" target="_blank" class="pr-badge ' + cls +
-          '" onclick="event.stopPropagation()">PR #' + pr.number + ' ' + escapeHtml(pr.repo) + '</a>';
+          '">PR #' + pr.number + ' ' + escapeHtml(pr.repo) + '</a>';
       })
       .join('');
 
     const isRunning = computeStatus(task) === 'in_progress';
-    const card = document.createElement('a');
-    card.href = '#task/' + encodeURIComponent(task.name);
+    const card = document.createElement('div');
     card.className = 'task-card' + (isRunning ? ' task-card-running' : '');
     card.setAttribute('data-task', task.name);
     const usageStr = formatUsage(task.usage);
@@ -305,9 +304,10 @@
       ? '<span class="task-usage">' + escapeHtml(usageStr) + '</span>'
       : '';
 
+    const taskHref = '#task/' + encodeURIComponent(task.name);
     card.innerHTML =
       '<div class="task-header">' +
-        '<div class="task-name">' + escapeHtml(task.name) + '</div>' +
+        '<a href="' + taskHref + '" class="task-card-link task-name">' + escapeHtml(task.name) + '</a>' +
         statusBadge(task) +
       '</div>' +
       '<div class="task-desc">' + escapeHtml(task.description) + '</div>' +
