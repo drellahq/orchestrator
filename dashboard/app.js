@@ -396,11 +396,7 @@
 
     html += '<div class="meta-desc">' + escapeHtml(task.description) + '</div>';
 
-    html += '<div class="meta-notify"><button id="notify-btn" type="button"></button></div>';
-
     $('#task-meta').innerHTML = html;
-    updateNotifyButton();
-    $('#notify-btn').addEventListener('click', handleNotifyClick);
   }
 
   // ── Render: transcript entries ──
@@ -993,6 +989,8 @@
       if (e.target === this) closeConfigDialog();
     });
 
+    updateNotifyButton();
+    $('#notify-btn').addEventListener('click', handleNotifyClick);
     registerServiceWorker();
     loadVersionFooter();
     loadConfigFooter();
