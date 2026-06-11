@@ -1,8 +1,8 @@
 # Orchestrator
 
-A CLI tool that spawns sandboxed Claude instances using [gjoll](https://github.com/ondrejbudai/gjoll) (libvirt backend), exposes an MCP server for privileged actions (pulling code), and manages task lifecycle including conversation archival and code retrieval.
+A CLI tool that spawns sandboxed coding agent instances using [gjoll](https://github.com/ondrejbudai/gjoll) (libvirt backend), exposes an MCP server for privileged actions (pulling code), and manages task lifecycle including conversation archival and code retrieval. Supports [Claude Code](https://claude.ai) and [OpenCode](https://opencode.ai/) as agent backends.
 
-The orchestrator bridges untrusted sandbox execution with trusted host operations: Claude runs inside a credential-free VM, but can request the host to pull committed code via MCP.
+The orchestrator bridges untrusted sandbox execution with trusted host operations: the agent runs inside a credential-free VM, but can request the host to pull committed code via MCP.
 
 ## Prerequisites
 
@@ -76,6 +76,7 @@ The `orchestrator.yaml` file supports:
 | `gjoll_env`                 | `./configs/sandbox.tf`    | Path to gjoll .tf environment file (gjoll backend) |
 | `podman_image`              | `fedora:43`               | Container image for sandboxes (podman backend) |
 | `anthropic_key_file`        | `~/.anthropic/api_key`    | Path to Anthropic API key (podman backend) |
+| `agent_backend`             | `claude-code`             | Coding agent backend: `claude-code` or `opencode` |
 | `allowed_repos`             | `[]` (deny all)           | Repos allowed for `open_pr`/`update_pr`/`comment_on_pr` (glob patterns)|
 | `profiles_repo`             | (empty)                   | GitHub repo containing profile directories (e.g. `myorg/profiles`) |
 | `profiles_dir`              | (empty)                   | Local directory override for profiles (takes precedence over `profiles_repo`) |
@@ -167,6 +168,33 @@ Use gjoll VMs (same as cloud deployment) but with direct Anthropic API instead o
 | Isolation | Container | Full VM |
 | Nested virtualization | Not needed | May be needed |
 | Best for | Local development, iteration | Testing VM workflows, cloud-like setup |
+
+### Agent Backend
+
+The orchestrator supports multiple coding agent backends. The default is Claude
+Code, but you can switch to [OpenCode](https://opencode.ai/) by setting
+`agent_backend` in `orchestrator.yaml`:
+
+```yaml
+agent_backend: "opencode"   # default: "claude-code"
+```
+
+The backend controls how the agent is installed, invoked, and how transcripts
+are parsed. Both backends produce the same human-readable output for
+`orchestrator log` and the dashboard.
+
+| Feature | `claude-code` | `opencode` |
+|---------|---------------|------------|
+| Install | `curl -fsSL https://claude.ai/install.sh \| bash` | `curl -fsSL https://opencode.ai/install \| bash` |
+| Runtime | Node.js | Standalone binary (Go) |
+| MCP registration | `claude mcp add` CLI | `opencode.json` config file |
+| System prompt | `--append-system-prompt-file` | Merged into CLAUDE.md |
+| Transcript format | `stream-json` | `--format json` |
+
+When using the podman sandbox backend, the agent is installed automatically in
+the container. When using gjoll, the agent must be installed by the `.tf` file's
+`init_script` output — see the [gjoll examples](https://github.com/drellabot/gjoll/tree/main/examples)
+for both Claude Code and OpenCode variants.
 
 ### Issue attachments
 
