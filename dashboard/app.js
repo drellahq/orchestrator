@@ -20,6 +20,7 @@
     notify: {
       swRegistration: null,
       supported: ('serviceWorker' in navigator) && ('Notification' in window),
+      enabled: localStorage.getItem('notify-enabled') !== 'false',
     },
   };
 
@@ -664,7 +665,7 @@
   }
 
   async function showTaskNotification(task, newStatus) {
-    if (getNotifyPermission() !== 'granted') return;
+    if (getNotifyPermission() !== 'granted' || !state.notify.enabled) return;
     var reg = state.notify.swRegistration;
     if (!reg) return;
     var title = newStatus === 'waiting'
@@ -685,7 +686,7 @@
   function notifyButtonLabel() {
     var perm = getNotifyPermission();
     if (perm === 'unsupported') return '[notify: unsupported]';
-    if (perm === 'granted') return '[notify: on]';
+    if (perm === 'granted' && state.notify.enabled) return '[notify: on]';
     if (perm === 'denied') return '[notify: blocked]';
     return '[notify: off]';
   }
@@ -694,11 +695,12 @@
     var btn = $('#notify-btn');
     if (!btn) return;
     var perm = getNotifyPermission();
+    var isOn = perm === 'granted' && state.notify.enabled;
     btn.textContent = notifyButtonLabel();
-    btn.className = 'notify-btn notify-' + perm;
+    btn.className = 'notify-btn notify-' + (isOn ? 'granted' : perm === 'denied' ? 'denied' : 'default');
     btn.disabled = (perm === 'unsupported');
-    btn.title = perm === 'granted'
-      ? 'Notifications enabled — click to re-register service worker'
+    btn.title = isOn
+      ? 'Notifications enabled — click to disable'
       : perm === 'denied'
         ? 'Notifications blocked by browser — reset in site settings'
         : perm === 'unsupported'
@@ -712,14 +714,25 @@
       showToast('Notifications blocked — reset permission in your browser\'s site settings');
       return;
     }
-    await requestNotifyPermission();
-    if (!state.notify.swRegistration) {
-      await registerServiceWorker();
+    if (perm === 'granted' && state.notify.enabled) {
+      state.notify.enabled = false;
+      localStorage.setItem('notify-enabled', 'false');
+      updateNotifyButton();
+      showToast('Notifications disabled');
+      return;
     }
-    updateNotifyButton();
+    if (perm !== 'granted') {
+      await requestNotifyPermission();
+    }
     if (getNotifyPermission() === 'granted') {
+      state.notify.enabled = true;
+      localStorage.setItem('notify-enabled', 'true');
+      if (!state.notify.swRegistration) {
+        await registerServiceWorker();
+      }
       showToast('Notifications enabled');
     }
+    updateNotifyButton();
   }
 
   // ── Views ──
