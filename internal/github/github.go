@@ -267,6 +267,15 @@ func (r *Runner) ReactToComment(ctx context.Context, repo string, commentID int6
 	return nil
 }
 
+// ClosePR closes a pull request identified by its URL.
+func (r *Runner) ClosePR(ctx context.Context, prURL string) error {
+	_, err := r.run(ctx, "", r.bin, "pr", "close", prURL)
+	if err != nil {
+		return fmt.Errorf("closing PR: %w", err)
+	}
+	return nil
+}
+
 // CloseIssue closes a GitHub issue.
 func (r *Runner) CloseIssue(ctx context.Context, repo string, issueNumber int) error {
 	_, err := r.run(ctx, "", r.bin, "issue", "close", fmt.Sprintf("%d", issueNumber),
