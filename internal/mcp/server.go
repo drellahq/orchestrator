@@ -39,6 +39,7 @@ type PROpener interface {
 	CommentOnIssue(ctx context.Context, repo string, issue int, body string) error
 	UpdatePRTitle(ctx context.Context, prURL, title string) error
 	PostReview(ctx context.Context, repo string, pr int, event, body string) error
+	ClosePR(ctx context.Context, prURL string) error
 }
 
 // OpenPRInput is the input schema for the open_pr tool.
@@ -73,6 +74,10 @@ type UploadImageInput struct {
 
 var safeFilenameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
 
+// ClosePRInput is the input schema for the close_pr tool.
+type ClosePRInput struct {
+	PRURL string `json:"pr_url" jsonschema_description:"URL of the pull request to close (must be a PR opened by this task)"`
+}
 // PostReviewInput is the input schema for the post_review tool.
 type PostReviewInput struct {
 	Repo  string `json:"repo" jsonschema_description:"Target repository as owner/repo (e.g. osbuild/osbuild)"`
@@ -469,6 +474,64 @@ func New(logger *slog.Logger, taskName string, taskDir *task.Dir, puller CodePul
 			return &mcp.CallToolResult{
 				Content: []mcp.Content{
 					&mcp.TextContent{Text: fmt.Sprintf("Comment posted on %s", input.PRURL)},
+				},
+			}, nil, nil
+		})
+
+		mcp.AddTool(mcpServer, &mcp.Tool{
+			Name:        "close_pr",
+			Description: "Close a pull request opened by this task",
+		}, func(ctx context.Context, req *mcp.CallToolRequest, input *ClosePRInput) (*mcp.CallToolResult, any, error) {
+			logger.Info("PR close requested", "task", taskName, "pr_url", input.PRURL)
+
+			state, err := taskDir.LoadState()
+			if err != nil {
+				logger.Error("Failed to load task state", "task", taskName, "error", err)
+				return &mcp.CallToolResult{
+					Content: []mcp.Content{
+						&mcp.TextContent{Text: fmt.Sprintf("close_pr failed: %v", err)},
+					},
+					IsError: true,
+				}, nil, nil
+			}
+
+			found := false
+			for _, pr := range state.Resources.GitHub.PRs {
+				if pr.URL == input.PRURL {
+					found = true
+					break
+				}
+			}
+			if !found {
+				logger.Warn("PR close denied: PR not owned by task", "task", taskName, "pr_url", input.PRURL)
+				return &mcp.CallToolResult{
+					Content: []mcp.Content{
+						&mcp.TextContent{Text: fmt.Sprintf("PR %q was not opened by this task", input.PRURL)},
+					},
+					IsError: true,
+				}, nil, nil
+			}
+
+			if err := prOpener.ClosePR(ctx, input.PRURL); err != nil {
+				logger.Error("Failed to close PR", "task", taskName, "error", err)
+				return &mcp.CallToolResult{
+					Content: []mcp.Content{
+						&mcp.TextContent{Text: fmt.Sprintf("close_pr failed: %v", err)},
+					},
+					IsError: true,
+				}, nil, nil
+			}
+
+			if err := taskDir.UpdatePR(input.PRURL, func(pr *task.PR) {
+				pr.Closed = true
+			}); err != nil {
+				logger.Warn("Failed to update PR state", "task", taskName, "error", err)
+			}
+
+			logger.Info("PR closed", "task", taskName, "pr_url", input.PRURL)
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{
+					&mcp.TextContent{Text: fmt.Sprintf("Closed %s", input.PRURL)},
 				},
 			}, nil, nil
 		})

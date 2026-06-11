@@ -79,6 +79,10 @@ type stubPROpener struct {
 	gotReviewPR    int
 	gotReviewEvent string
 	gotReviewBody  string
+
+	closeErr    error
+	closeCalled bool
+	gotCloseURL string
 }
 
 func (s *stubPROpener) AuthenticatedUser(_ context.Context) (string, error) {
@@ -141,6 +145,12 @@ func (s *stubPROpener) PostReview(_ context.Context, repo string, pr int, event,
 	s.gotReviewEvent = event
 	s.gotReviewBody = body
 	return s.reviewErr
+}
+
+func (s *stubPROpener) ClosePR(_ context.Context, prURL string) error {
+	s.closeCalled = true
+	s.gotCloseURL = prURL
+	return s.closeErr
 }
 
 func startTestServer(t *testing.T, puller CodePuller, prOpener PROpener, allowedRepos []string, authors ...string) (*task.Dir, *Server, string) {
@@ -227,7 +237,7 @@ func TestServerListTools(t *testing.T) {
 		t.Fatalf("ListTools() error: %v", err)
 	}
 
-	wantTools := map[string]bool{"open_pr": false, "update_pr": false, "comment_on_pr": false, "post_review": false}
+	wantTools := map[string]bool{"open_pr": false, "update_pr": false, "comment_on_pr": false, "close_pr": false, "post_review": false}
 	for _, tool := range result.Tools {
 		if _, ok := wantTools[tool.Name]; ok {
 			wantTools[tool.Name] = true
@@ -1155,6 +1165,117 @@ func TestCommentOnPRTool(t *testing.T) {
 			}
 			if tt.wantTitleCalled && tt.opener.gotTitleTitle != tt.wantTitle {
 				t.Errorf("gotTitleTitle = %q, want %q", tt.opener.gotTitleTitle, tt.wantTitle)
+			}
+		})
+	}
+}
+
+func TestClosePRTool(t *testing.T) {
+	const ownedPRURL = "https://github.com/osbuild/osbuild/pull/42"
+
+	tests := []struct {
+		name            string
+		opener          *stubPROpener
+		seedPR          bool
+		input           map[string]any
+		wantError       bool
+		wantText        string
+		wantCloseCalled bool
+		wantClosed      bool
+	}{
+		{
+			name:   "successful close of owned PR",
+			opener: &stubPROpener{user: "testuser"},
+			seedPR: true,
+			input: map[string]any{
+				"pr_url": ownedPRURL,
+			},
+			wantText:        "Closed",
+			wantCloseCalled: true,
+			wantClosed:      true,
+		},
+		{
+			name:   "rejected for unowned PR",
+			opener: &stubPROpener{user: "testuser"},
+			seedPR: false,
+			input: map[string]any{
+				"pr_url": "https://github.com/other/repo/pull/99",
+			},
+			wantError:       true,
+			wantText:        "was not opened by this task",
+			wantCloseCalled: false,
+		},
+		{
+			name:   "gh close failure",
+			opener: &stubPROpener{user: "testuser", closeErr: fmt.Errorf("forbidden")},
+			seedPR: true,
+			input: map[string]any{
+				"pr_url": ownedPRURL,
+			},
+			wantError:       true,
+			wantText:        "forbidden",
+			wantCloseCalled: true,
+			wantClosed:      false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			td, _, endpoint := startTestServer(t, &stubPuller{}, tt.opener, []string{"osbuild/*"})
+
+			if tt.seedPR {
+				if err := td.AddPR(task.PR{
+					URL:    ownedPRURL,
+					Repo:   "osbuild/osbuild",
+					Branch: "fix-bug",
+					Base:   "main",
+				}); err != nil {
+					t.Fatalf("AddPR() error: %v", err)
+				}
+			}
+
+			session := connectClient(t, endpoint)
+			result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+				Name:      "close_pr",
+				Arguments: tt.input,
+			})
+			if err != nil {
+				t.Fatalf("CallTool() protocol error: %v", err)
+			}
+
+			if result.IsError != tt.wantError {
+				t.Errorf("IsError = %v, want %v", result.IsError, tt.wantError)
+			}
+
+			var text string
+			for _, c := range result.Content {
+				if tc, ok := c.(*mcp.TextContent); ok {
+					text = tc.Text
+				}
+			}
+			if !strings.Contains(text, tt.wantText) {
+				t.Errorf("result text %q does not contain %q", text, tt.wantText)
+			}
+
+			if tt.opener.closeCalled != tt.wantCloseCalled {
+				t.Errorf("closeCalled = %v, want %v", tt.opener.closeCalled, tt.wantCloseCalled)
+			}
+
+			if tt.wantCloseCalled && tt.opener.gotCloseURL != tt.input["pr_url"] {
+				t.Errorf("gotCloseURL = %q, want %q", tt.opener.gotCloseURL, tt.input["pr_url"])
+			}
+
+			if tt.seedPR {
+				state, stateErr := td.LoadState()
+				if stateErr != nil {
+					t.Fatalf("LoadState() error: %v", stateErr)
+				}
+				if len(state.Resources.GitHub.PRs) != 1 {
+					t.Fatalf("expected 1 PR, got %d", len(state.Resources.GitHub.PRs))
+				}
+				if state.Resources.GitHub.PRs[0].Closed != tt.wantClosed {
+					t.Errorf("PR Closed = %v, want %v", state.Resources.GitHub.PRs[0].Closed, tt.wantClosed)
+				}
 			}
 		})
 	}

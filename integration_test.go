@@ -70,6 +70,10 @@ func (t *testPROpener) PostReview(_ context.Context, repo string, pr int, event,
 	return nil
 }
 
+func (t *testPROpener) ClosePR(_ context.Context, prURL string) error {
+	return nil
+}
+
 // testTF returns the path to a minimal .tf file for integration testing.
 // It installs git and a mock claude script via init_script.
 func testTF(t *testing.T) string {
