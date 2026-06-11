@@ -667,13 +667,19 @@
     return result;
   }
 
-  async function showTaskNotification(task) {
+  async function showTaskNotification(task, newStatus) {
     if (getNotifyPermission() !== 'granted') return;
     var reg = state.notify.swRegistration;
     if (!reg) return;
+    var title = newStatus === 'waiting'
+      ? 'Task waiting for review: ' + task.name
+      : 'Task completed: ' + task.name;
+    var body = task.description || (newStatus === 'waiting'
+      ? 'A task is waiting for review.'
+      : 'A task has finished.');
     try {
-      await reg.showNotification('Task completed: ' + task.name, {
-        body: task.description || 'A task has finished.',
+      await reg.showNotification(title, {
+        body: body,
         tag: 'task-' + task.name,
         data: { url: '#task/' + encodeURIComponent(task.name) },
       });
@@ -802,8 +808,12 @@
       if (prevTasks.size > 0) {
         for (const [name, task] of state.tasks) {
           var prev = prevTasks.get(name);
-          if (prev && computeStatus(prev) !== 'done' && computeStatus(task) === 'done') {
-            showTaskNotification(task);
+          if (!prev) continue;
+          var prevStatus = computeStatus(prev);
+          var newStatus = computeStatus(task);
+          if (prevStatus === newStatus) continue;
+          if (newStatus === 'done' || (prevStatus === 'in_progress' && newStatus === 'waiting')) {
+            showTaskNotification(task, newStatus);
           }
         }
       }
