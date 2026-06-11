@@ -421,6 +421,45 @@ main {
   gap: 0.5rem;
 }
 
+/* --- Notify Button --- */
+
+.meta-notify {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+
+.notify-btn {
+  font-family: var(--font);
+  font-size: 0.75rem;
+  background: none;
+  border: 1px solid var(--border);
+  padding: 0.25rem 0.6rem;
+  cursor: pointer;
+  transition: all 0.15s;
+  color: var(--text-dim);
+}
+.notify-btn:hover:not(:disabled) {
+  border-color: var(--green-dim);
+  color: var(--green);
+}
+.notify-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.notify-granted {
+  color: var(--green-soft);
+  border-color: var(--green-dim);
+}
+.notify-denied {
+  color: var(--red);
+  border-color: #6e2d28;
+}
+.notify-default {
+  color: var(--amber);
+  border-color: #5c4a1a;
+}
+
 /* --- Transcript --- */
 
 #transcript-container {

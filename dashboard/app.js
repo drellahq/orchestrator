@@ -17,6 +17,10 @@
     runCount: 0,
     pollTimers: { taskList: null, transcript: null },
     knownVersion: null,
+    notify: {
+      swRegistration: null,
+      supported: ('serviceWorker' in navigator) && ('Notification' in window),
+    },
   };
 
   // ── DOM helpers ──
@@ -392,7 +396,11 @@
 
     html += '<div class="meta-desc">' + escapeHtml(task.description) + '</div>';
 
+    html += '<div class="meta-notify"><button id="notify-btn" type="button"></button></div>';
+
     $('#task-meta').innerHTML = html;
+    updateNotifyButton();
+    $('#notify-btn').addEventListener('click', handleNotifyClick);
   }
 
   // ── Render: transcript entries ──
@@ -638,6 +646,80 @@
     return div;
   }
 
+  // ── Notifications ──
+
+  async function registerServiceWorker() {
+    if (!state.notify.supported) return;
+    try {
+      state.notify.swRegistration = await navigator.serviceWorker.register('/sw.js');
+    } catch (_) {}
+  }
+
+  function getNotifyPermission() {
+    if (!state.notify.supported) return 'unsupported';
+    return Notification.permission;
+  }
+
+  async function requestNotifyPermission() {
+    if (!state.notify.supported) return 'unsupported';
+    var result = await Notification.requestPermission();
+    updateNotifyButton();
+    return result;
+  }
+
+  async function showTaskNotification(task) {
+    if (getNotifyPermission() !== 'granted') return;
+    var reg = state.notify.swRegistration;
+    if (!reg) return;
+    try {
+      await reg.showNotification('Task completed: ' + task.name, {
+        body: task.description || 'A task has finished.',
+        tag: 'task-' + task.name,
+        data: { url: '#task/' + encodeURIComponent(task.name) },
+      });
+    } catch (_) {}
+  }
+
+  function notifyButtonLabel() {
+    var perm = getNotifyPermission();
+    if (perm === 'unsupported') return '[notify: unsupported]';
+    if (perm === 'granted') return '[notify: on]';
+    if (perm === 'denied') return '[notify: blocked]';
+    return '[notify: off]';
+  }
+
+  function updateNotifyButton() {
+    var btn = $('#notify-btn');
+    if (!btn) return;
+    var perm = getNotifyPermission();
+    btn.textContent = notifyButtonLabel();
+    btn.className = 'notify-btn notify-' + perm;
+    btn.disabled = (perm === 'unsupported');
+    btn.title = perm === 'granted'
+      ? 'Notifications enabled — click to re-register service worker'
+      : perm === 'denied'
+        ? 'Notifications blocked by browser — reset in site settings'
+        : perm === 'unsupported'
+          ? 'Browser does not support notifications'
+          : 'Click to enable notifications';
+  }
+
+  async function handleNotifyClick() {
+    var perm = getNotifyPermission();
+    if (perm === 'denied') {
+      showToast('Notifications blocked — reset permission in your browser\'s site settings');
+      return;
+    }
+    await requestNotifyPermission();
+    if (!state.notify.swRegistration) {
+      await registerServiceWorker();
+    }
+    updateNotifyButton();
+    if (getNotifyPermission() === 'granted') {
+      showToast('Notifications enabled');
+    }
+  }
+
   // ── Views ──
 
   async function showTaskList() {
@@ -713,8 +795,19 @@
         const names = await discoverTasks();
         metas = await Promise.all(names.map(fetchTaskMeta));
       }
+      var prevTasks = new Map(state.tasks);
       state.tasks.clear();
       for (const m of metas) state.tasks.set(m.name, m);
+
+      if (prevTasks.size > 0) {
+        for (const [name, task] of state.tasks) {
+          var prev = prevTasks.get(name);
+          if (prev && computeStatus(prev) !== 'done' && computeStatus(task) === 'done') {
+            showTaskNotification(task);
+          }
+        }
+      }
+
       if (!state.currentTask) renderTaskList();
       setStatus(metas.length + ' tasks | ' + new Date().toLocaleTimeString());
 
@@ -890,6 +983,7 @@
       if (e.target === this) closeConfigDialog();
     });
 
+    registerServiceWorker();
     loadVersionFooter();
     loadConfigFooter();
     handleRoute();
