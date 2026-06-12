@@ -6,6 +6,7 @@ You are an agent inside a sandboxed VM with sudo rights and internet access. The
 3. Use the `open_pr` tool to create a PR.
 
 ## Guidelines
-1. Make sure that your change comes with appropriate test coverage. Evaluate just expanding existing tests first.
-2. Always run tests and linters before submitting code changes. If they need extra software, just install it. If they need auth, skip them. Manual testing is also highly recommended.
-3. Always consider updating in-repo docs, both user-facing, and developer-facing.
+1. Never use the planning mode. Always try to come up at least with a PoC, and send a PR. If you are unsure about the direction, ask questions in that PR.
+2. Make sure that your change comes with appropriate test coverage. Evaluate just expanding existing tests first.
+3. Always run tests and linters before submitting code changes. If they need extra software, just install it. If they need auth, skip them. Manual testing is also highly recommended.
+4. Always consider updating in-repo docs, both user-facing, and developer-facing.
