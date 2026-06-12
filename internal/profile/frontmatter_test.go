@@ -224,6 +224,86 @@ profile: test
 	}
 }
 
+func TestParseFrontMatter_AgentBackend(t *testing.T) {
+	body := `---
+profile: code-review
+agent: opencode
+repo: org/repo
+---
+
+Review this PR.`
+
+	fm, err := ParseFrontMatterFull(body)
+	if err != nil {
+		t.Fatalf("ParseFrontMatterFull() error: %v", err)
+	}
+
+	if fm.Profile != "code-review" {
+		t.Errorf("Profile = %q, want %q", fm.Profile, "code-review")
+	}
+	if fm.AgentBackend != "opencode" {
+		t.Errorf("AgentBackend = %q, want %q", fm.AgentBackend, "opencode")
+	}
+	if fm.Vars["PROFILE_REPO"] != "org/repo" {
+		t.Errorf("PROFILE_REPO = %q, want %q", fm.Vars["PROFILE_REPO"], "org/repo")
+	}
+	if fm.Description != "Review this PR." {
+		t.Errorf("Description = %q, want %q", fm.Description, "Review this PR.")
+	}
+	// "agent" should not appear as a PROFILE_* var
+	if _, ok := fm.Vars["PROFILE_AGENT"]; ok {
+		t.Error("agent key should not appear as PROFILE_AGENT var")
+	}
+}
+
+func TestParseFrontMatter_AgentOnly(t *testing.T) {
+	body := `---
+agent: opencode
+---
+
+Do some work.`
+
+	fm, err := ParseFrontMatterFull(body)
+	if err != nil {
+		t.Fatalf("ParseFrontMatterFull() error: %v", err)
+	}
+
+	if fm.Profile != "" {
+		t.Errorf("Profile = %q, want empty", fm.Profile)
+	}
+	if fm.AgentBackend != "opencode" {
+		t.Errorf("AgentBackend = %q, want %q", fm.AgentBackend, "opencode")
+	}
+	if fm.Description != "Do some work." {
+		t.Errorf("Description = %q, want %q", fm.Description, "Do some work.")
+	}
+}
+
+func TestParseFrontMatter_BackwardCompatible(t *testing.T) {
+	body := `---
+profile: code-review
+repo: org/repo
+pr: 42
+---
+
+Review this pull request.`
+
+	// The original ParseFrontMatter should still work unchanged
+	profile, vars, desc, err := ParseFrontMatter(body)
+	if err != nil {
+		t.Fatalf("ParseFrontMatter() error: %v", err)
+	}
+	if profile != "code-review" {
+		t.Errorf("profile = %q, want %q", profile, "code-review")
+	}
+	if vars["PROFILE_REPO"] != "org/repo" {
+		t.Errorf("PROFILE_REPO = %q", vars["PROFILE_REPO"])
+	}
+	if desc != "Review this pull request." {
+		t.Errorf("description = %q", desc)
+	}
+}
+
 func TestToEnvKey(t *testing.T) {
 	tests := []struct {
 		input string
