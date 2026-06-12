@@ -8,70 +8,91 @@ import (
 	"github.com/goccy/go-yaml"
 )
 
+// FrontMatter holds the parsed front matter from an issue body.
+type FrontMatter struct {
+	Profile      string
+	AgentBackend string
+	Vars         map[string]string
+	Description  string
+}
+
 // ParseFrontMatter extracts YAML front matter from an issue body.
 //
 // The front matter is delimited by "---" lines at the start of the body:
 //
 //	---
 //	profile: code-review
+//	agent: opencode
 //	repo: org/repo
 //	pr: 42
 //	---
 //
 //	Review this pull request.
 //
-// Returns the profile name (from the "profile" key), remaining key-value pairs
-// as PROFILE_* environment variable mappings, and the body after the front matter.
+// Returns the profile name (from the "profile" key), agent backend (from the
+// "agent" key), remaining key-value pairs as PROFILE_* environment variable
+// mappings, and the body after the front matter.
 // If no front matter is present, profile and vars are empty and the full body is returned.
 func ParseFrontMatter(body string) (profile string, vars map[string]string, description string, err error) {
-	vars = make(map[string]string)
+	fm, err := ParseFrontMatterFull(body)
+	if err != nil {
+		return "", nil, body, err
+	}
+	return fm.Profile, fm.Vars, fm.Description, nil
+}
+
+// ParseFrontMatterFull extracts YAML front matter from an issue body,
+// returning all parsed fields including the agent backend.
+func ParseFrontMatterFull(body string) (*FrontMatter, error) {
+	fm := &FrontMatter{
+		Vars:        make(map[string]string),
+		Description: body,
+	}
 
 	trimmed := strings.TrimLeftFunc(body, unicode.IsSpace)
 	if !strings.HasPrefix(trimmed, "---") {
-		return "", vars, body, nil
+		return fm, nil
 	}
 
 	// Find the closing delimiter
 	rest := trimmed[3:] // skip opening "---"
 	rest = strings.TrimLeft(rest, " \t")
 	if len(rest) == 0 || rest[0] != '\n' {
-		// "---" followed by non-whitespace content is not front matter
-		return "", vars, body, nil
+		return fm, nil
 	}
 	rest = rest[1:] // skip the newline after "---"
 
 	closeIdx := strings.Index(rest, "\n---")
 	if closeIdx == -1 {
-		// No closing delimiter — treat as no front matter
-		return "", vars, body, nil
+		return fm, nil
 	}
 
 	fmContent := rest[:closeIdx]
 	afterClose := rest[closeIdx+4:] // skip "\n---"
 
-	// Parse YAML front matter
 	var raw map[string]interface{}
 	if err := yaml.Unmarshal([]byte(fmContent), &raw); err != nil {
-		return "", vars, body, err
+		return nil, err
 	}
 
-	// Extract profile key
 	if v, ok := raw["profile"]; ok {
-		profile = toString(v)
+		fm.Profile = toString(v)
 		delete(raw, "profile")
 	}
 
-	// Convert remaining keys to PROFILE_* env vars
-	for k, v := range raw {
-		envKey := "PROFILE_" + toEnvKey(k)
-		vars[envKey] = toString(v)
+	if v, ok := raw["agent"]; ok {
+		fm.AgentBackend = toString(v)
+		delete(raw, "agent")
 	}
 
-	// The description is everything after the closing delimiter,
-	// with leading whitespace trimmed.
-	description = strings.TrimLeftFunc(afterClose, unicode.IsSpace)
+	for k, v := range raw {
+		envKey := "PROFILE_" + toEnvKey(k)
+		fm.Vars[envKey] = toString(v)
+	}
 
-	return profile, vars, description, nil
+	fm.Description = strings.TrimLeftFunc(afterClose, unicode.IsSpace)
+
+	return fm, nil
 }
 
 // toEnvKey converts a front matter key to an environment variable suffix:

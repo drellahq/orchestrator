@@ -520,16 +520,21 @@ func (d *Daemon) defaultNewTaskFunc(ctx context.Context, taskName, description, 
 func buildNewTaskArgs(configPath, taskName, description, sourceRepo string, sourceIssue int, labels []string) []string {
 	args := []string{"task", "new", "--config", configPath}
 
-	profileName, vars, strippedDesc, fmErr := profile.ParseFrontMatter(description)
+	fm, fmErr := profile.ParseFrontMatterFull(description)
+	strippedDesc := description
 	if fmErr != nil {
 		slog.Warn("Failed to parse front matter, using raw description", "task", taskName, "error", fmErr)
-		strippedDesc = description
-	}
-	if profileName != "" {
-		args = append(args, "--profile", profileName)
-	}
-	for k, v := range vars {
-		args = append(args, "--var", k+"="+v)
+	} else {
+		strippedDesc = fm.Description
+		if fm.Profile != "" {
+			args = append(args, "--profile", fm.Profile)
+		}
+		if fm.AgentBackend != "" {
+			args = append(args, "--agent-backend", fm.AgentBackend)
+		}
+		for k, v := range fm.Vars {
+			args = append(args, "--var", k+"="+v)
+		}
 	}
 	if sourceRepo != "" && sourceIssue > 0 {
 		args = append(args, "--source-repo", sourceRepo, "--source-issue", strconv.Itoa(sourceIssue))
