@@ -7,6 +7,11 @@
 # Directory where task output (code, conversations, metadata) is stored.
 # output_dir: "./tasks"
 
+# Public base URL of the orchestrator web server. When set, the upload_image
+# MCP tool is enabled — images are stored in tasks/<name>/images/ and served
+# at <base_url>/tasks/<name>/images/<file>.
+# base_url: "https://drella.example.com"
+
 # Sandbox backend: "gjoll" (VMs) or "podman" (containers).
 # Defaults to "gjoll" for backward compatibility.
 # sandbox_backend: "gjoll"
