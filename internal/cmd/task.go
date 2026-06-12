@@ -34,6 +34,7 @@ var profileVars []string
 var sourceRepo string
 var sourceIssue int
 var taskLabels []string
+var agentBackendFlag string
 
 var taskCmd = &cobra.Command{
 	Use:   "task",
@@ -65,6 +66,7 @@ func init() {
 	taskNewCmd.Flags().StringVar(&sourceRepo, "source-repo", "", "tasks-repo the task was spawned from (e.g. myorg/tasks)")
 	taskNewCmd.Flags().IntVar(&sourceIssue, "source-issue", 0, "GitHub issue number in the tasks-repo")
 	taskNewCmd.Flags().StringSliceVar(&taskLabels, "label", nil, "GitHub issue labels (e.g. --label rhel)")
+	taskNewCmd.Flags().StringVar(&agentBackendFlag, "agent-backend", "", "override agent backend for this task (e.g. \"opencode\")")
 	taskCmd.AddCommand(taskNewCmd)
 	taskCmd.AddCommand(taskContinueCmd)
 	taskCmd.AddCommand(taskWatchCmd)
@@ -101,7 +103,7 @@ func runTask(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	return executeTask(ctx, taskName, taskDescription, taskDir, cfg, ghRunner, false, author, profileName, profileVars, taskLabels)
+	return executeTask(ctx, taskName, taskDescription, taskDir, cfg, ghRunner, false, author, profileName, profileVars, taskLabels, agentBackendFlag)
 }
 
 func continueTask(cmd *cobra.Command, args []string) error {
@@ -130,7 +132,7 @@ func continueTask(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("loading task state: %w", err)
 	}
 
-	return executeTask(ctx, taskName, taskDescription, taskDir, cfg, ghRunner, true, state.Author, "", nil, nil)
+	return executeTask(ctx, taskName, taskDescription, taskDir, cfg, ghRunner, true, state.Author, "", nil, nil, "")
 }
 
 func loadConfigAndSetupLogging() (*config.Config, error) {
@@ -163,8 +165,12 @@ func createSandboxRunner(cfg *config.Config, backend agent.Backend) (sandbox.Run
 	return sandbox.NewFromConfig(cfg.SandboxBackend, cfg.GjollEnv, cfg.PodmanImage, cfg.AnthropicKeyFile, mcpserver.MCPRemotePort, backend.InstallCmd())
 }
 
-func executeTask(ctx context.Context, taskName, taskDescription string, taskDir *task.Dir, cfg *config.Config, ghRunner *gh.Runner, continueSession bool, author string, profileName string, profileVars []string, labels []string) error {
-	backend, err := agent.New(cfg.AgentBackend)
+func executeTask(ctx context.Context, taskName, taskDescription string, taskDir *task.Dir, cfg *config.Config, ghRunner *gh.Runner, continueSession bool, author string, profileName string, profileVars []string, labels []string, agentBackendOverride string) error {
+	backendName := cfg.AgentBackend
+	if agentBackendOverride != "" {
+		backendName = agentBackendOverride
+	}
+	backend, err := agent.New(backendName)
 	if err != nil {
 		return fmt.Errorf("creating agent backend: %w", err)
 	}
