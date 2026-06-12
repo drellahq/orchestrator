@@ -184,6 +184,11 @@ func (d *Dir) AttachmentsPath() string {
 	return filepath.Join(d.root, "attachments")
 }
 
+// ImagesPath returns the path to uploaded images on the host.
+func (d *Dir) ImagesPath() string {
+	return filepath.Join(d.root, "images")
+}
+
 // TranscriptPath returns the path to the stream-json transcript file.
 func (d *Dir) TranscriptPath() string {
 	return filepath.Join(d.root, "transcript.jsonl")

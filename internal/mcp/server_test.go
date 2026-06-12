@@ -2,9 +2,11 @@ package mcp
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -154,7 +156,7 @@ func startTestServer(t *testing.T, puller CodePuller, prOpener PROpener, allowed
 		author = authors[0]
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	s := New(logger, "test-task", td, puller, prOpener, allowedRepos, author, "")
+	s := New(logger, "test-task", td, puller, prOpener, allowedRepos, author, "", "")
 	if err := s.StartOn("127.0.0.1:0"); err != nil {
 		t.Fatalf("StartOn() error: %v", err)
 	}
@@ -192,7 +194,7 @@ func TestStartAllocatesDynamicPort(t *testing.T) {
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 
-	s1 := New(logger, "task-1", td, nil, nil, nil, "", "")
+	s1 := New(logger, "task-1", td, nil, nil, nil, "", "", "")
 	if err := s1.Start(); err != nil {
 		t.Fatalf("Start() error: %v", err)
 	}
@@ -204,7 +206,7 @@ func TestStartAllocatesDynamicPort(t *testing.T) {
 
 	dir2 := t.TempDir()
 	td2, _ := task.Create(dir2, "dyn-port-test-2")
-	s2 := New(logger, "task-2", td2, nil, nil, nil, "", "")
+	s2 := New(logger, "task-2", td2, nil, nil, nil, "", "", "")
 	if err := s2.Start(); err != nil {
 		t.Fatalf("Start() second server: %v", err)
 	}
@@ -660,7 +662,7 @@ func TestOpenPRLinksOriginatingIssue(t *testing.T) {
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	s := New(logger, "tasks-42-add_dark_mode", td, puller, opener, []string{"org/*"}, "", "org/tasks")
+	s := New(logger, "tasks-42-add_dark_mode", td, puller, opener, []string{"org/*"}, "", "org/tasks", "")
 	if err := s.StartOn("127.0.0.1:0"); err != nil {
 		t.Fatalf("StartOn() error: %v", err)
 	}
@@ -1265,5 +1267,168 @@ func TestPostReviewTool(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func startTestServerWithBaseURL(t *testing.T, baseURL string) (*task.Dir, string) {
+	t.Helper()
+	dir := t.TempDir()
+	td, err := task.Create(dir, "img-task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	s := New(logger, "img-task", td, nil, nil, nil, "", "", baseURL)
+	if err := s.StartOn("127.0.0.1:0"); err != nil {
+		t.Fatalf("StartOn() error: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Stop(context.Background()) })
+	endpoint := fmt.Sprintf("http://%s", s.Addr().String())
+	return td, endpoint
+}
+
+func TestUploadImageTool(t *testing.T) {
+	pngData := base64.StdEncoding.EncodeToString([]byte("fake-png-bytes"))
+
+	tests := []struct {
+		name      string
+		input     map[string]any
+		wantError bool
+		wantText  string
+	}{
+		{
+			name: "successful upload",
+			input: map[string]any{
+				"filename": "screenshot.png",
+				"data":     pngData,
+			},
+			wantText: "![screenshot.png](https://drella.example.com/tasks/img-task/images/screenshot.png)",
+		},
+		{
+			name: "invalid filename with path traversal",
+			input: map[string]any{
+				"filename": "../etc/passwd",
+				"data":     pngData,
+			},
+			wantError: true,
+			wantText:  "invalid filename",
+		},
+		{
+			name: "invalid filename with slash",
+			input: map[string]any{
+				"filename": "foo/bar.png",
+				"data":     pngData,
+			},
+			wantError: true,
+			wantText:  "invalid filename",
+		},
+		{
+			name: "missing file extension",
+			input: map[string]any{
+				"filename": "screenshot",
+				"data":     pngData,
+			},
+			wantError: true,
+			wantText:  "must have a file extension",
+		},
+		{
+			name: "invalid base64",
+			input: map[string]any{
+				"filename": "screenshot.png",
+				"data":     "not-valid-base64!!!",
+			},
+			wantError: true,
+			wantText:  "invalid base64",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			td, endpoint := startTestServerWithBaseURL(t, "https://drella.example.com")
+			session := connectClient(t, endpoint)
+
+			result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+				Name:      "upload_image",
+				Arguments: tt.input,
+			})
+			if err != nil {
+				t.Fatalf("CallTool() protocol error: %v", err)
+			}
+
+			if result.IsError != tt.wantError {
+				t.Errorf("IsError = %v, want %v", result.IsError, tt.wantError)
+			}
+
+			var text string
+			for _, c := range result.Content {
+				if tc, ok := c.(*mcp.TextContent); ok {
+					text = tc.Text
+				}
+			}
+			if !strings.Contains(text, tt.wantText) {
+				t.Errorf("result text %q does not contain %q", text, tt.wantText)
+			}
+
+			if !tt.wantError {
+				imgPath := filepath.Join(td.ImagesPath(), tt.input["filename"].(string))
+				data, err := os.ReadFile(imgPath)
+				if err != nil {
+					t.Fatalf("image file not found at %s: %v", imgPath, err)
+				}
+				wantRaw, _ := base64.StdEncoding.DecodeString(tt.input["data"].(string))
+				if string(data) != string(wantRaw) {
+					t.Errorf("image content mismatch: got %d bytes, want %d bytes", len(data), len(wantRaw))
+				}
+			}
+		})
+	}
+}
+
+func TestUploadImageNotRegisteredWithoutBaseURL(t *testing.T) {
+	_, endpoint := startTestServerWithBaseURL(t, "")
+	session := connectClient(t, endpoint)
+
+	result, err := session.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("ListTools() error: %v", err)
+	}
+	for _, tool := range result.Tools {
+		if tool.Name == "upload_image" {
+			t.Error("upload_image should not be registered when baseURL is empty")
+		}
+	}
+}
+
+func TestUploadImageTrailingSlash(t *testing.T) {
+	_, endpoint := startTestServerWithBaseURL(t, "https://drella.example.com/")
+	session := connectClient(t, endpoint)
+
+	pngData := base64.StdEncoding.EncodeToString([]byte("test"))
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "upload_image",
+		Arguments: map[string]any{
+			"filename": "test.png",
+			"data":     pngData,
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool() error: %v", err)
+	}
+	if result.IsError {
+		t.Fatal("unexpected error")
+	}
+
+	var text string
+	for _, c := range result.Content {
+		if tc, ok := c.(*mcp.TextContent); ok {
+			text = tc.Text
+		}
+	}
+	if strings.Contains(text, "//tasks") {
+		t.Errorf("double slash in URL: %s", text)
+	}
+	wantURL := "https://drella.example.com/tasks/img-task/images/test.png"
+	if !strings.Contains(text, wantURL) {
+		t.Errorf("got %q, want URL %q", text, wantURL)
 	}
 }

@@ -2,11 +2,15 @@ package mcp
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"path"
+	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/drellahq/orchestrator/internal/task"
@@ -60,6 +64,14 @@ type CommentOnPRInput struct {
 	Body  string `json:"body" jsonschema_description:"Comment body (markdown supported)"`
 	Title string `json:"title,omitempty" jsonschema_description:"Optional new title for the pull request. If empty, the title is not changed."`
 }
+
+// UploadImageInput is the input schema for the upload_image tool.
+type UploadImageInput struct {
+	Filename string `json:"filename" jsonschema_description:"Name for the image file (e.g. screenshot.png). Only alphanumeric, dashes, underscores, and dots allowed."`
+	Data     string `json:"data" jsonschema_description:"Base64-encoded image data"`
+}
+
+var safeFilenameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
 
 // PostReviewInput is the input schema for the post_review tool.
 type PostReviewInput struct {
@@ -144,11 +156,80 @@ func resolveOriginatingIssue(tasksRepo, taskName string, state *task.State) (rep
 // non-empty, the open_pr tool is registered. When author is non-empty, a
 // Co-authored-by trailer is appended to each new commit before pushing.
 // tasksRepo is the daemon tasks_repo used to link PRs back to originating issues.
-func New(logger *slog.Logger, taskName string, taskDir *task.Dir, puller CodePuller, prOpener PROpener, allowedRepos []string, author, tasksRepo string) *Server {
+// baseURL, when non-empty, enables the upload_image tool — uploaded files are
+// stored in the task's images/ subdirectory and served at baseURL/tasks/<name>/images/<file>.
+func New(logger *slog.Logger, taskName string, taskDir *task.Dir, puller CodePuller, prOpener PROpener, allowedRepos []string, author, tasksRepo, baseURL string) *Server {
 	mcpServer := mcp.NewServer(&mcp.Implementation{
 		Name:    "orchestrator",
 		Version: "0.1.0",
 	}, nil)
+
+	if baseURL != "" {
+		mcp.AddTool(mcpServer, &mcp.Tool{
+			Name:        "upload_image",
+			Description: "Upload a base64-encoded image and get back a public URL for use in PR comments and reviews",
+		}, func(ctx context.Context, req *mcp.CallToolRequest, input *UploadImageInput) (*mcp.CallToolResult, any, error) {
+			logger.Info("Image upload requested", "task", taskName, "filename", input.Filename)
+
+			if !safeFilenameRe.MatchString(input.Filename) {
+				return &mcp.CallToolResult{
+					Content: []mcp.Content{
+						&mcp.TextContent{Text: fmt.Sprintf("invalid filename %q: only alphanumeric characters, dashes, underscores, and dots are allowed", input.Filename)},
+					},
+					IsError: true,
+				}, nil, nil
+			}
+
+			if filepath.Ext(input.Filename) == "" {
+				return &mcp.CallToolResult{
+					Content: []mcp.Content{
+						&mcp.TextContent{Text: fmt.Sprintf("filename %q must have a file extension (e.g. .png, .jpg)", input.Filename)},
+					},
+					IsError: true,
+				}, nil, nil
+			}
+
+			raw, err := base64.StdEncoding.DecodeString(input.Data)
+			if err != nil {
+				return &mcp.CallToolResult{
+					Content: []mcp.Content{
+						&mcp.TextContent{Text: fmt.Sprintf("upload_image failed: invalid base64 data: %v", err)},
+					},
+					IsError: true,
+				}, nil, nil
+			}
+
+			imagesDir := taskDir.ImagesPath()
+			if err := os.MkdirAll(imagesDir, 0755); err != nil {
+				return &mcp.CallToolResult{
+					Content: []mcp.Content{
+						&mcp.TextContent{Text: fmt.Sprintf("upload_image failed: %v", err)},
+					},
+					IsError: true,
+				}, nil, nil
+			}
+
+			dest := filepath.Join(imagesDir, input.Filename)
+			if err := os.WriteFile(dest, raw, 0644); err != nil {
+				return &mcp.CallToolResult{
+					Content: []mcp.Content{
+						&mcp.TextContent{Text: fmt.Sprintf("upload_image failed: %v", err)},
+					},
+					IsError: true,
+				}, nil, nil
+			}
+
+			url := strings.TrimRight(baseURL, "/") + "/tasks/" + taskName + "/images/" + input.Filename
+			logger.Info("Image uploaded", "task", taskName, "filename", input.Filename, "url", url)
+
+			markdown := fmt.Sprintf("![%s](%s)", input.Filename, url)
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{
+					&mcp.TextContent{Text: markdown},
+				},
+			}, nil, nil
+		})
+	}
 
 	if prOpener != nil && len(allowedRepos) > 0 {
 		mcp.AddTool(mcpServer, &mcp.Tool{

@@ -18,6 +18,7 @@ type DaemonConfig struct {
 type Config struct {
 	SlackWebhook string       `yaml:"slack_webhook"`
 	OutputDir    string       `yaml:"output_dir"`
+	BaseURL      string       `yaml:"base_url"`
 	
 	// Sandbox backend: "gjoll" (VMs) or "podman" (containers)
 	SandboxBackend string `yaml:"sandbox_backend"`
