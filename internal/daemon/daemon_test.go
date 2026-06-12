@@ -757,6 +757,38 @@ func TestBuildNewTaskArgs_VarsOnly(t *testing.T) {
 	}
 }
 
+func TestBuildNewTaskArgs_WithAgentBackend(t *testing.T) {
+	description := "---\nagent: opencode\nprofile: code-review\n---\n\nReview this PR."
+
+	args := buildNewTaskArgs("/etc/config.yaml", "my-task", description, "", 0)
+
+	assertContains(t, args, "--agent-backend", "opencode")
+	assertContains(t, args, "--profile", "code-review")
+
+	if args[len(args)-1] != "Review this PR." {
+		t.Errorf("expected stripped description, got %q", args[len(args)-1])
+	}
+}
+
+func TestBuildNewTaskArgs_AgentOnly(t *testing.T) {
+	description := "---\nagent: opencode\n---\n\nDo some work."
+
+	args := buildNewTaskArgs("/etc/config.yaml", "my-task", description, "", 0)
+
+	assertContains(t, args, "--agent-backend", "opencode")
+
+	// No --profile flag expected
+	for _, a := range args {
+		if a == "--profile" {
+			t.Error("unexpected --profile flag when no profile key")
+		}
+	}
+
+	if args[len(args)-1] != "Do some work." {
+		t.Errorf("expected stripped description, got %q", args[len(args)-1])
+	}
+}
+
 // assertContains checks that args contains a flag followed by its value.
 func assertContains(t *testing.T, args []string, flag, value string) {
 	t.Helper()

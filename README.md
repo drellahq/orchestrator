@@ -196,6 +196,28 @@ the container. When using gjoll, the agent must be installed by the `.tf` file's
 `init_script` output — see the [gjoll examples](https://github.com/drellabot/gjoll/tree/main/examples)
 for both Claude Code and OpenCode variants.
 
+**Per-task override.** You can override the backend for a single task using the
+`--agent-backend` flag:
+
+```bash
+orchestrator task new --agent-backend opencode my-task "Fix the bug"
+```
+
+When creating tasks from GitHub issues, add `agent: opencode` to the YAML front
+matter (same syntax as `profile:`):
+
+```markdown
+---
+agent: opencode
+profile: code-review
+repo: org/repo
+---
+
+Review this pull request.
+```
+
+The per-task override takes precedence over the `agent_backend` config field.
+
 ### Issue attachments
 
 When a task is created from a tasks-repo GitHub issue (`--source-repo` / `--source-issue`, set automatically by the daemon), the orchestrator scans the **task description** for `https://github.com/user-attachments/...` links (the daemon passes the full issue body, so no extra API call is needed). If the description has no such links but `--source-issue` is set, the issue body is re-fetched via `gh api` before scanning. Matching files are downloaded on the host using `gh` credentials and copied into the sandbox at `~/attachments/`. The initial Claude prompt includes a manifest listing the local filenames. Requires an authenticated `gh` on the host.
