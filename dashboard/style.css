@@ -687,6 +687,15 @@ main {
 .version-footer:empty {
   display: none;
 }
+#footer-versions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 1.5rem;
+}
+#footer-config {
+  order: 1;
+}
 
 .version-component {
   white-space: nowrap;
@@ -826,6 +835,9 @@ a.version-value:hover {
   }
   .version-footer {
     padding: 0.3rem 0.75rem;
+    gap: 0.25rem 0.75rem;
+  }
+  #footer-versions {
     gap: 0.25rem 0.75rem;
   }
   .entry {
