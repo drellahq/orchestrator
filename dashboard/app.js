@@ -900,14 +900,18 @@
       const resp = await fetch('/config.yaml');
       if (!resp.ok) return;
       configYaml = await resp.text();
-      var span = document.createElement('span');
-      span.className = 'version-component config-trigger';
-      span.innerHTML = 'config: <span class="version-value">[view]</span>';
-      span.addEventListener('click', function (e) {
-        e.preventDefault();
-        showConfigDialog();
-      });
-      $('#version-footer').appendChild(span);
+      var el = document.getElementById('footer-config');
+      if (!el) {
+        el = document.createElement('span');
+        el.id = 'footer-config';
+        el.className = 'version-component config-trigger';
+        el.innerHTML = 'config: <span class="version-value">[view]</span>';
+        el.addEventListener('click', function (e) {
+          e.preventDefault();
+          showConfigDialog();
+        });
+        $('#version-footer').appendChild(el);
+      }
       if (window.location.hash === '#config') {
         showConfigDialog();
       }
@@ -953,7 +957,13 @@
         return '<span class="version-component">' + label + ' ' + value + '</span>';
       });
       if (parts.length > 0) {
-        $('#version-footer').innerHTML = parts.join('');
+        var el = document.getElementById('footer-versions');
+        if (!el) {
+          el = document.createElement('span');
+          el.id = 'footer-versions';
+          $('#version-footer').appendChild(el);
+        }
+        el.innerHTML = parts.join('');
       }
     } catch (_) {
       // version info is best-effort
@@ -992,7 +1002,8 @@
     updateNotifyButton();
     $('#notify-btn').addEventListener('click', handleNotifyClick);
     registerServiceWorker();
-    loadVersionFooter().then(loadConfigFooter);
+    loadVersionFooter();
+    loadConfigFooter();
     handleRoute();
   }
 
