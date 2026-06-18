@@ -992,8 +992,7 @@
     updateNotifyButton();
     $('#notify-btn').addEventListener('click', handleNotifyClick);
     registerServiceWorker();
-    loadVersionFooter();
-    loadConfigFooter();
+    loadVersionFooter().then(loadConfigFooter);
     handleRoute();
   }
 
