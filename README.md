@@ -81,6 +81,7 @@ The `orchestrator.yaml` file supports:
 | `profiles_dir`              | (empty)                   | Local directory override for profiles (takes precedence over `profiles_repo`) |
 | `daemon.poll_interval`      | `60s`                     | How often the daemon polls for new PR comments and tasks |
 | `daemon.allowed_commenters` | `[]`                      | GitHub usernames allowed to trigger `task continue` via PR comments and to create tasks via `tasks_repo` issues |
+| `daemon.allowed_commenters_orgs` | `{}`                 | Map of GitHub org → role (`"member"` or `"owner"`); resolved members are merged with `allowed_commenters` on startup and SIGHUP reload |
 | `daemon.tasks_repo`         | (empty)                   | GitHub repo to monitor for task specs and issues (e.g. `myorg/tasks`) |
 
 ## Local Development
