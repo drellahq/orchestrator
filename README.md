@@ -391,6 +391,37 @@ Review this pull request.
 
 The `profile` key selects the profile. Other keys become `PROFILE_*` environment variables.
 
+## Building RHEL Images
+
+To build RHEL images from a sandbox VM without exposing subscription secrets:
+
+1. Place your Red Hat entitlement certificates on the orchestrator host:
+   ```bash
+   mkdir -p ~/.rhsm
+   cp /etc/pki/entitlement/<ID>.pem ~/.rhsm/entitlement.pem
+   cp /etc/pki/entitlement/<ID>-key.pem ~/.rhsm/entitlement-key.pem
+   chmod 600 ~/.rhsm/entitlement*.pem
+   ```
+
+2. Copy and adjust the RHEL sandbox config:
+   ```bash
+   cp configs/sandbox-rhel.tf.example configs/sandbox-rhel.tf
+   ```
+
+3. Configure `orchestrator.yaml` to use the RHEL environment:
+   ```yaml
+   gjoll_env: "./configs/sandbox-rhel.tf"
+   ```
+
+**How it works:** The RHEL CDN proxy uses gjoll's `client-cert` auth mode.
+The entitlement certificates stay on the orchestrator host — gjoll's proxy
+authenticates to `cdn.redhat.com` using TLS client certificates and exposes
+the content as `http://localhost:18081` inside the VM via an SSH reverse
+tunnel. The VM has no credentials and cannot access the certificates.
+
+The VM's RHEL repo files point at the local proxy, so `dnf` and `osbuild`
+can pull RHEL packages without any subscription setup inside the sandbox.
+
 ## Running Tests
 
 ### Unit tests
