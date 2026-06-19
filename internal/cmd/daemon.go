@@ -81,11 +81,16 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	}
 	slog.Info("Copied config", "path", configCopyPath)
 
-	if len(cfg.Daemon.AllowedCommenters) == 0 {
+	resolved := daemon.ResolveCommenters(ctx, ghRunner, cfg.Daemon.AllowedCommenters, cfg.Daemon.AllowedCommentersOrgs)
+	if err := daemon.WriteResolvedCommenters(cfg.OutputDir, resolved); err != nil {
+		slog.Warn("Failed to write resolved commenters", "error", err)
+	}
+
+	if len(resolved.Merged) == 0 {
 		slog.Warn("daemon.allowed_commenters is empty; no comments will trigger task continue")
 	}
 
-	d := daemon.New(ghRunner, interval, configPath, cfg.OutputDir, cfg.Daemon.AllowedCommenters, botUsername)
+	d := daemon.New(ghRunner, interval, configPath, cfg.OutputDir, resolved.Merged, botUsername)
 
 	if cfg.Daemon.TasksRepo != "" {
 		d.SetTasksRepo(cfg.Daemon.TasksRepo)
@@ -127,11 +132,16 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 				slog.Error("Failed to copy config on reload", "error", err)
 			}
 
-			d.Reload(newInterval, newCfg.Daemon.AllowedCommenters, newCfg.Daemon.TasksRepo)
+			newResolved := daemon.ResolveCommenters(ctx, ghRunner, newCfg.Daemon.AllowedCommenters, newCfg.Daemon.AllowedCommentersOrgs)
+			if err := daemon.WriteResolvedCommenters(cfg.OutputDir, newResolved); err != nil {
+				slog.Warn("Failed to write resolved commenters on reload", "error", err)
+			}
+
+			d.Reload(newInterval, newResolved.Merged, newCfg.Daemon.TasksRepo)
 		}
 	}()
 
-	slog.Info("Daemon starting", "interval", interval, "output_dir", cfg.OutputDir, "allowed_commenters", cfg.Daemon.AllowedCommenters, "bot_username", botUsername)
+	slog.Info("Daemon starting", "interval", interval, "output_dir", cfg.OutputDir, "allowed_commenters", resolved.Merged, "bot_username", botUsername)
 	return d.Run(ctx)
 }
 

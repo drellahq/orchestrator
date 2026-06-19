@@ -9,6 +9,11 @@
 		root * ./tasks
 		file_server
 	}
+	handle /resolved_commenters.yaml {
+		header Cache-Control "no-cache"
+		root * ./tasks
+		file_server
+	}
 	handle_path /tasks/* {
 		header Cache-Control "no-cache"
 		root * ./tasks

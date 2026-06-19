@@ -357,6 +357,25 @@ func (r *Runner) GetFileContent(ctx context.Context, repo, branch, path string) 
 	return strings.TrimSpace(out), nil
 }
 
+// ListOrgMembers returns the logins of members in a GitHub organization.
+// role must be "member" (all members) or "owner" (org admins only).
+func (r *Runner) ListOrgMembers(ctx context.Context, org, role string) ([]string, error) {
+	ghRole := "all"
+	if role == "owner" {
+		ghRole = "admin"
+	}
+	endpoint := fmt.Sprintf("/orgs/%s/members?role=%s&per_page=100", org, ghRole)
+	out, err := r.run(ctx, "", r.bin, "api", "--paginate", endpoint, "--jq", ".[].login")
+	if err != nil {
+		return nil, fmt.Errorf("listing %s members of %s: %w", role, org, err)
+	}
+	out = strings.TrimSpace(out)
+	if out == "" {
+		return nil, nil
+	}
+	return strings.Split(out, "\n"), nil
+}
+
 // Issue represents a GitHub issue (not a pull request).
 type Issue struct {
 	Number int         `json:"number"`

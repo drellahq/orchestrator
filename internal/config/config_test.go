@@ -83,6 +83,28 @@ func TestLoad(t *testing.T) {
 			},
 		},
 		{
+			name:      "allowed_commenters_orgs parsed",
+			writeFile: true,
+			yaml:      "daemon:\n  allowed_commenters:\n    - alice\n  allowed_commenters_orgs:\n    myorg: member\n    otherorg: owner\n",
+			want: Config{
+				OutputDir:        "./tasks",
+				SandboxBackend:   "gjoll",
+				GjollEnv:         "./configs/sandbox.tf",
+				PodmanImage:      "fedora:43",
+				AnthropicKeyFile: "~/.anthropic/api_key",
+				Daemon: DaemonConfig{
+					AllowedCommenters:     []string{"alice"},
+					AllowedCommentersOrgs: map[string]string{"myorg": "member", "otherorg": "owner"},
+				},
+			},
+		},
+		{
+			name:      "allowed_commenters_orgs invalid role",
+			writeFile: true,
+			yaml:      "daemon:\n  allowed_commenters_orgs:\n    myorg: admin\n",
+			wantErr:   true,
+		},
+		{
 			name:      "profiles config parsed",
 			writeFile: true,
 			yaml:      "profiles_repo: drellabot/profiles\nprofiles_dir: /tmp/profiles\n",

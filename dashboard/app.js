@@ -894,12 +894,19 @@
   // ── Config dialog ──
 
   var configYaml = '';
+  var resolvedCommenters = null;
 
   async function loadConfigFooter() {
     try {
-      const resp = await fetch('/config.yaml');
-      if (!resp.ok) return;
-      configYaml = await resp.text();
+      const [configResp, resolvedResp] = await Promise.all([
+        fetch('/config.yaml'),
+        fetch('/resolved_commenters.yaml').catch(function () { return { ok: false }; }),
+      ]);
+      if (!configResp.ok) return;
+      configYaml = await configResp.text();
+      if (resolvedResp.ok) {
+        resolvedCommenters = await resolvedResp.text();
+      }
       var el = document.getElementById('footer-config');
       if (!el) {
         el = document.createElement('span');
@@ -920,6 +927,24 @@
 
   function showConfigDialog() {
     $('#config-content').textContent = configYaml;
+    var resolvedEl = document.getElementById('resolved-commenters');
+    if (resolvedCommenters) {
+      if (!resolvedEl) {
+        var sep = document.createElement('div');
+        sep.className = 'config-separator';
+        sep.textContent = 'resolved commenters';
+        var pre = document.createElement('pre');
+        pre.id = 'resolved-commenters';
+        pre.className = 'config-pre';
+        var body = $('#config-dialog .dialog-body');
+        body.appendChild(sep);
+        body.appendChild(pre);
+        resolvedEl = pre;
+      }
+      resolvedEl.textContent = resolvedCommenters;
+    } else if (resolvedEl) {
+      resolvedEl.textContent = '';
+    }
     $('#config-dialog').classList.remove('hidden');
     if (window.location.hash !== '#config') {
       history.pushState(null, '', '#config');

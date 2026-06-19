@@ -10,9 +10,10 @@ import (
 
 // DaemonConfig holds settings for the daemon polling loop.
 type DaemonConfig struct {
-	PollInterval      string   `yaml:"poll_interval"`
-	AllowedCommenters []string `yaml:"allowed_commenters"`
-	TasksRepo         string   `yaml:"tasks_repo"`
+	PollInterval          string            `yaml:"poll_interval"`
+	AllowedCommenters     []string          `yaml:"allowed_commenters"`
+	AllowedCommentersOrgs map[string]string `yaml:"allowed_commenters_orgs"`
+	TasksRepo             string            `yaml:"tasks_repo"`
 }
 
 type Config struct {
@@ -73,6 +74,14 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.AnthropicKeyFile == "" {
 		cfg.AnthropicKeyFile = "~/.anthropic/api_key"
+	}
+
+	for org, role := range cfg.Daemon.AllowedCommentersOrgs {
+		switch role {
+		case "member", "owner":
+		default:
+			return nil, fmt.Errorf("daemon.allowed_commenters_orgs[%s]: invalid role %q (must be \"member\" or \"owner\")", org, role)
+		}
 	}
 
 	return cfg, nil

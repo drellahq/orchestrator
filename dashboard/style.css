@@ -787,6 +787,16 @@ a.version-value:hover {
   line-height: 1.5;
 }
 
+.config-separator {
+  margin-top: 1rem;
+  padding: 0.4rem 0;
+  border-top: 1px solid var(--border);
+  font-size: 0.75rem;
+  color: var(--green);
+  letter-spacing: 0.05em;
+  font-weight: 600;
+}
+
 /* --- Toast --- */
 
 .toast {

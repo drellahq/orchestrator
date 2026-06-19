@@ -46,6 +46,11 @@
 #   # Only comments from these GitHub users trigger task continue.
 #   allowed_commenters:
 #     - myuser
+#   # Grant comment permissions to members of a GitHub org.
+#   # Each key is an org name; value is "member" (all members) or "owner" (admins only).
+#   # Resolved members are merged with allowed_commenters on daemon start and SIGHUP reload.
+#   # allowed_commenters_orgs:
+#   #   myorg: member
 #   # Tasks repo to monitor for new specs in in-progress/ (e.g. "myorg/tasks").
 #   # When set, the daemon polls this repo for new spec files and spawns tasks.
 #   # tasks_repo: "myorg/tasks"
