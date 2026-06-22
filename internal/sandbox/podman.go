@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/drellabot/orchestrator/internal/shellutil"
+	"github.com/drellahq/orchestrator/internal/shellutil"
 )
 
 // PodmanRunner implements Runner using podman containers as sandboxes.

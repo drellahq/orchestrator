@@ -13,11 +13,11 @@ import (
 	"sync"
 	"time"
 
-	gh "github.com/drellabot/orchestrator/internal/github"
-	"github.com/drellabot/orchestrator/internal/gjoll"
-	"github.com/drellabot/orchestrator/internal/profile"
-	"github.com/drellabot/orchestrator/internal/prompts"
-	"github.com/drellabot/orchestrator/internal/task"
+	gh "github.com/drellahq/orchestrator/internal/github"
+	"github.com/drellahq/orchestrator/internal/gjoll"
+	"github.com/drellahq/orchestrator/internal/profile"
+	"github.com/drellahq/orchestrator/internal/prompts"
+	"github.com/drellahq/orchestrator/internal/task"
 )
 
 // PRRef ties a task name to one of its PRs.

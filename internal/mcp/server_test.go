@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/drellabot/orchestrator/internal/task"
+	"github.com/drellahq/orchestrator/internal/task"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 

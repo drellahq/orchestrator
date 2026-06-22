@@ -9,7 +9,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/drellabot/orchestrator/internal/shellutil"
+	"github.com/drellahq/orchestrator/internal/shellutil"
 )
 
 // Runner wraps the gh CLI for GitHub operations (fork, push, PR).

@@ -151,8 +151,8 @@ func TestRepoAllowed(t *testing.T) {
 		},
 		{
 			name:         "wildcard match",
-			allowedRepos: []string{"drellabot/*"},
-			repo:         "drellabot/orchestrator",
+			allowedRepos: []string{"drellahq/*"},
+			repo:         "drellahq/orchestrator",
 			want:         true,
 		},
 		{

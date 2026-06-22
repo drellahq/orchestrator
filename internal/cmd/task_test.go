@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/drellabot/orchestrator/internal/task"
+	"github.com/drellahq/orchestrator/internal/task"
 )
 
 func TestParseVarFlags(t *testing.T) {
