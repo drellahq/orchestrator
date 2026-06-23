@@ -165,3 +165,26 @@ func TestResolveTaskSource(t *testing.T) {
 		t.Error("expected not ok without source")
 	}
 }
+
+func TestHasLabel(t *testing.T) {
+	tests := []struct {
+		labels []string
+		name   string
+		want   bool
+	}{
+		{nil, "rhel", false},
+		{[]string{}, "rhel", false},
+		{[]string{"rhel"}, "rhel", true},
+		{[]string{"RHEL"}, "rhel", true},
+		{[]string{"rhel"}, "RHEL", true},
+		{[]string{"priority", "rhel"}, "rhel", true},
+		{[]string{"priority"}, "rhel", false},
+	}
+
+	for _, tt := range tests {
+		got := hasLabel(tt.labels, tt.name)
+		if got != tt.want {
+			t.Errorf("hasLabel(%v, %q) = %v, want %v", tt.labels, tt.name, got, tt.want)
+		}
+	}
+}

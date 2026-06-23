@@ -709,6 +709,41 @@ func TestListIssues_FieldValues(t *testing.T) {
 	}
 }
 
+func TestListIssues_WithLabels(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not found")
+	}
+
+	stdout := `[{"number":42,"title":"Build RHEL","body":"Need RHEL","labels":[{"name":"rhel"},{"name":"priority"}]}]`
+	script, _ := writeArgCapture(t, stdout)
+	r := New(script)
+
+	issues, err := r.ListIssues(context.Background(), "org/repo")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(issues) != 1 {
+		t.Fatalf("got %d issues, want 1", len(issues))
+	}
+	if len(issues[0].Labels) != 2 {
+		t.Fatalf("got %d labels, want 2", len(issues[0].Labels))
+	}
+	if !issues[0].HasLabel("rhel") {
+		t.Error("expected HasLabel(rhel) to be true")
+	}
+	if !issues[0].HasLabel("RHEL") {
+		t.Error("expected HasLabel to be case-insensitive")
+	}
+	if issues[0].HasLabel("other") {
+		t.Error("expected HasLabel(other) to be false")
+	}
+
+	names := issues[0].LabelNames()
+	if len(names) != 2 || names[0] != "rhel" || names[1] != "priority" {
+		t.Errorf("LabelNames() = %v, want [rhel priority]", names)
+	}
+}
+
 func TestFetchIssue(t *testing.T) {
 	if _, err := exec.LookPath("sh"); err != nil {
 		t.Skip("sh not found")

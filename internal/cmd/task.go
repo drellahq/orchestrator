@@ -16,10 +16,12 @@ import (
 	gh "github.com/drellahq/orchestrator/internal/github"
 	"github.com/drellahq/orchestrator/internal/issueattachments"
 	"github.com/drellahq/orchestrator/internal/logging"
-	"github.com/drellahq/orchestrator/internal/sandbox"
 	mcpserver "github.com/drellahq/orchestrator/internal/mcp"
 	"github.com/drellahq/orchestrator/internal/profile"
 	"github.com/drellahq/orchestrator/internal/prompts"
+	"github.com/drellahq/orchestrator/internal/rhel"
+	"github.com/drellahq/orchestrator/internal/sandbox"
+	"github.com/drellahq/orchestrator/internal/shellutil"
 	"github.com/drellahq/orchestrator/internal/task"
 	"github.com/spf13/cobra"
 )
@@ -29,6 +31,7 @@ var profileName string
 var profileVars []string
 var sourceRepo string
 var sourceIssue int
+var labelsFlag string
 
 var taskCmd = &cobra.Command{
 	Use:   "task",
@@ -59,6 +62,7 @@ func init() {
 	taskNewCmd.Flags().StringSliceVar(&profileVars, "var", nil, "profile variables as KEY=VALUE (e.g. --var PROFILE_PR=42)")
 	taskNewCmd.Flags().StringVar(&sourceRepo, "source-repo", "", "tasks-repo the task was spawned from (e.g. myorg/tasks)")
 	taskNewCmd.Flags().IntVar(&sourceIssue, "source-issue", 0, "GitHub issue number in the tasks-repo")
+	taskNewCmd.Flags().StringVar(&labelsFlag, "labels", "", "comma-separated GitHub issue labels (e.g. rhel,priority)")
 	taskCmd.AddCommand(taskNewCmd)
 	taskCmd.AddCommand(taskContinueCmd)
 	taskCmd.AddCommand(taskWatchCmd)
@@ -95,7 +99,12 @@ func runTask(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	return executeTask(ctx, taskName, taskDescription, taskDir, cfg, ghRunner, false, author, profileName, profileVars)
+	var labels []string
+	if labelsFlag != "" {
+		labels = strings.Split(labelsFlag, ",")
+	}
+
+	return executeTask(ctx, taskName, taskDescription, taskDir, cfg, ghRunner, false, author, profileName, profileVars, labels)
 }
 
 func continueTask(cmd *cobra.Command, args []string) error {
@@ -124,7 +133,7 @@ func continueTask(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("loading task state: %w", err)
 	}
 
-	return executeTask(ctx, taskName, taskDescription, taskDir, cfg, ghRunner, true, state.Author, "", nil)
+	return executeTask(ctx, taskName, taskDescription, taskDir, cfg, ghRunner, true, state.Author, "", nil, nil)
 }
 
 func loadConfigAndSetupLogging() (*config.Config, error) {
@@ -157,7 +166,7 @@ func createSandboxRunner(cfg *config.Config) (sandbox.Runner, error) {
 	return sandbox.NewFromConfig(cfg.SandboxBackend, cfg.GjollEnv, cfg.PodmanImage, cfg.AnthropicKeyFile, mcpserver.MCPRemotePort)
 }
 
-func executeTask(ctx context.Context, taskName, taskDescription string, taskDir *task.Dir, cfg *config.Config, ghRunner *gh.Runner, continueSession bool, author string, profileName string, profileVars []string) error {
+func executeTask(ctx context.Context, taskName, taskDescription string, taskDir *task.Dir, cfg *config.Config, ghRunner *gh.Runner, continueSession bool, author string, profileName string, profileVars []string, labels []string) error {
 	runner, err := createSandboxRunner(cfg)
 	if err != nil {
 		return fmt.Errorf("creating sandbox runner: %w", err)
@@ -244,6 +253,12 @@ func executeTask(ctx context.Context, taskName, taskDescription string, taskDir 
 			return fmt.Errorf("setting up sandbox: %w", err)
 		}
 		slog.Debug("Sandbox setup complete", "task", taskName)
+
+		if hasLabel(labels, "rhel") {
+			if err := setupRHELSubscription(ctx, runner, taskName); err != nil {
+				slog.Warn("Failed to setup RHEL subscription", "task", taskName, "error", err)
+			}
+		}
 
 		if err := copyAttachmentsToSandbox(ctx, runner, taskName, attachmentFiles); err != nil {
 			return fmt.Errorf("copying attachments to sandbox: %w", err)
@@ -511,6 +526,53 @@ func resolveTaskSource(taskDir *task.Dir, explicitRepo string, explicitIssue int
 		return "", 0, false
 	}
 	return repo, state.Source.IssueNumber, true
+}
+
+func hasLabel(labels []string, name string) bool {
+	for _, l := range labels {
+		if strings.EqualFold(l, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// setupRHELSubscription creates a Red Hat activation key and registers the
+// sandbox VM with subscription-manager. Credentials come from the orchestrator
+// environment (LIGHTSPEED_CLIENT_ID, LIGHTSPEED_CLIENT_SECRET, LIGHTSPEED_ORG_ID)
+// and are passed to the VM only via SSH — they never touch Terraform state.
+func setupRHELSubscription(ctx context.Context, runner sandbox.Runner, taskName string) error {
+	orgID := os.Getenv("LIGHTSPEED_ORG_ID")
+	clientID := os.Getenv("LIGHTSPEED_CLIENT_ID")
+	clientSecret := os.Getenv("LIGHTSPEED_CLIENT_SECRET")
+
+	if orgID == "" || clientID == "" || clientSecret == "" {
+		return fmt.Errorf("RHEL subscription requires LIGHTSPEED_ORG_ID, LIGHTSPEED_CLIENT_ID, and LIGHTSPEED_CLIENT_SECRET")
+	}
+
+	slog.Info("Setting up RHEL subscription", "task", taskName)
+
+	client := rhel.NewClient(clientID, clientSecret)
+	keyName := fmt.Sprintf("orchestrator-%s", taskName)
+
+	activationKey, err := client.CreateActivationKey(keyName)
+	if err != nil {
+		return fmt.Errorf("creating activation key: %w", err)
+	}
+	slog.Info("Created RHEL activation key", "task", taskName, "key", keyName)
+
+	if err := runner.SSH(ctx, taskName, "bash", "-c", runner.AsUser("sudo dnf install -y subscription-manager")); err != nil {
+		return fmt.Errorf("installing subscription-manager: %w", err)
+	}
+
+	registerCmd := fmt.Sprintf("sudo subscription-manager register --org %s --activationkey %s",
+		shellutil.Quote(orgID), shellutil.Quote(activationKey))
+	if err := runner.SSH(ctx, taskName, "bash", "-c", runner.AsUser(registerCmd)); err != nil {
+		return fmt.Errorf("registering with subscription-manager: %w", err)
+	}
+
+	slog.Info("RHEL subscription registered", "task", taskName)
+	return nil
 }
 
 func copyAttachmentsToSandbox(ctx context.Context, runner sandbox.Runner, taskName string, files []issueattachments.DownloadedFile) error {

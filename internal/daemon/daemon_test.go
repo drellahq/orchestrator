@@ -649,7 +649,7 @@ func TestProcessPR_AdvancesLastCommentIDPastRejected(t *testing.T) {
 }
 
 func TestBuildNewTaskArgs_WithSourceIssue(t *testing.T) {
-	args := buildNewTaskArgs("/etc/config.yaml", "tasks-42-add_dark_mode", "Fix it", "org/tasks", 42)
+	args := buildNewTaskArgs("/etc/config.yaml", "tasks-42-add_dark_mode", "Fix it", "org/tasks", 42, nil)
 
 	assertContains(t, args, "--source-repo", "org/tasks")
 	assertContains(t, args, "--source-issue", "42")
@@ -658,7 +658,7 @@ func TestBuildNewTaskArgs_WithSourceIssue(t *testing.T) {
 func TestBuildNewTaskArgs_WithFrontMatter(t *testing.T) {
 	description := "---\nprofile: code-review\nrepo: org/repo\npr: 42\n---\n\nReview this pull request."
 
-	args := buildNewTaskArgs("/etc/config.yaml", "my-task", description, "", 0)
+	args := buildNewTaskArgs("/etc/config.yaml", "my-task", description, "", 0, nil)
 
 	// Should have: task new --config <path> --profile code-review --var ... --var ... <name> <desc>
 	assertContains(t, args, "--config", "/etc/config.yaml")
@@ -685,7 +685,7 @@ func TestBuildNewTaskArgs_WithFrontMatter(t *testing.T) {
 func TestBuildNewTaskArgs_NoFrontMatter(t *testing.T) {
 	description := "Just a regular task description."
 
-	args := buildNewTaskArgs("/etc/config.yaml", "my-task", description, "", 0)
+	args := buildNewTaskArgs("/etc/config.yaml", "my-task", description, "", 0, nil)
 
 	// Should have: task new --config <path> <name> <desc>
 	if len(args) != 6 {
@@ -714,7 +714,7 @@ func TestBuildNewTaskArgs_NoFrontMatter(t *testing.T) {
 func TestBuildNewTaskArgs_MalformedFrontMatter(t *testing.T) {
 	description := "---\n{{invalid yaml\n---\n\nBody."
 
-	args := buildNewTaskArgs("/etc/config.yaml", "my-task", description, "", 0)
+	args := buildNewTaskArgs("/etc/config.yaml", "my-task", description, "", 0, nil)
 
 	// Should fall back to raw description
 	if args[len(args)-1] != description {
@@ -735,7 +735,7 @@ func TestBuildNewTaskArgs_MalformedFrontMatter(t *testing.T) {
 func TestBuildNewTaskArgs_ProfileOnly(t *testing.T) {
 	description := "---\nprofile: deploy\n---\n\nDeploy the service."
 
-	args := buildNewTaskArgs("/etc/config.yaml", "my-task", description, "", 0)
+	args := buildNewTaskArgs("/etc/config.yaml", "my-task", description, "", 0, nil)
 
 	assertContains(t, args, "--profile", "deploy")
 
@@ -754,7 +754,7 @@ func TestBuildNewTaskArgs_ProfileOnly(t *testing.T) {
 func TestBuildNewTaskArgs_VarsOnly(t *testing.T) {
 	description := "---\nrepo: org/repo\n---\n\nBody."
 
-	args := buildNewTaskArgs("/etc/config.yaml", "my-task", description, "", 0)
+	args := buildNewTaskArgs("/etc/config.yaml", "my-task", description, "", 0, nil)
 
 	// No --profile flag expected
 	for _, a := range args {
@@ -770,6 +770,29 @@ func TestBuildNewTaskArgs_VarsOnly(t *testing.T) {
 
 	if args[len(args)-1] != "Body." {
 		t.Errorf("expected stripped description, got %q", args[len(args)-1])
+	}
+}
+
+func TestBuildNewTaskArgs_WithLabels(t *testing.T) {
+	args := buildNewTaskArgs("/etc/config.yaml", "my-task", "Do it", "", 0, []string{"rhel", "priority"})
+
+	assertContains(t, args, "--labels", "rhel,priority")
+
+	if args[len(args)-2] != "my-task" {
+		t.Errorf("expected task name, got %q", args[len(args)-2])
+	}
+	if args[len(args)-1] != "Do it" {
+		t.Errorf("expected description, got %q", args[len(args)-1])
+	}
+}
+
+func TestBuildNewTaskArgs_EmptyLabels(t *testing.T) {
+	args := buildNewTaskArgs("/etc/config.yaml", "my-task", "Do it", "", 0, nil)
+
+	for _, a := range args {
+		if a == "--labels" {
+			t.Error("unexpected --labels flag when labels is nil")
+		}
 	}
 }
 
@@ -1141,7 +1164,7 @@ func TestRun_StopsPollingOnShutdown(t *testing.T) {
 
 	// Set up a slow newTaskFunc that would allow us to detect if it's called
 	taskLaunched := make(chan struct{})
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int, labels []string) error {
 		taskLaunched <- struct{}{}
 		time.Sleep(time.Second)
 		return nil

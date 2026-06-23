@@ -12,7 +12,8 @@ import (
 
 // NewTaskFunc is the function signature for launching a new task.
 // sourceRepo and sourceIssue are set when the task is spawned from a tasks-repo issue.
-type NewTaskFunc func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int) error
+// labels contains the GitHub issue labels (if any).
+type NewTaskFunc func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int, labels []string) error
 
 // processedSpecsFile is the filename used to track which specs have been picked up.
 const processedSpecsFile = "processed_specs.json"
@@ -246,7 +247,7 @@ func (d *Daemon) checkForNewSpecs(ctx context.Context) {
 				d.mu.Unlock()
 			}()
 
-			if err := d.newTaskFunc(context.WithoutCancel(ctx), name, desc, "", 0); err != nil {
+			if err := d.newTaskFunc(context.WithoutCancel(ctx), name, desc, "", 0, nil); err != nil {
 				slog.Error("task new failed", "task", name, "error", err)
 			}
 		}(taskName, description)
@@ -345,8 +346,10 @@ func (d *Daemon) checkForNewIssues(ctx context.Context) {
 			log.Debug("Failed to add rocket reaction to issue", "issue", issue.Number, "error", err)
 		}
 
+		labels := issue.LabelNames()
+
 		d.wg.Add(1)
-		go func(name, desc, repo string, issueNum int) {
+		go func(name, desc, repo string, issueNum int, labels []string) {
 			defer d.wg.Done()
 			defer func() {
 				d.mu.Lock()
@@ -354,10 +357,10 @@ func (d *Daemon) checkForNewIssues(ctx context.Context) {
 				d.mu.Unlock()
 			}()
 
-			if err := d.newTaskFunc(context.WithoutCancel(ctx), name, desc, repo, issueNum); err != nil {
+			if err := d.newTaskFunc(context.WithoutCancel(ctx), name, desc, repo, issueNum, labels); err != nil {
 				slog.Error("task new failed", "task", name, "error", err)
 			}
-		}(taskName, description, tasksRepo, issue.Number)
+		}(taskName, description, tasksRepo, issue.Number, labels)
 	}
 }
 
