@@ -7,8 +7,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/drellabot/orchestrator/internal/daemon"
-	gh "github.com/drellabot/orchestrator/internal/github"
+	"github.com/drellahq/orchestrator/internal/daemon"
+	gh "github.com/drellahq/orchestrator/internal/github"
 	"github.com/spf13/cobra"
 )
 

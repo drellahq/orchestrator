@@ -1,6 +1,6 @@
 package main
 
-import "github.com/drellabot/orchestrator/internal/cmd"
+import "github.com/drellahq/orchestrator/internal/cmd"
 
 func main() {
 	cmd.Execute()

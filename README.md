@@ -16,13 +16,13 @@ The orchestrator bridges untrusted sandbox execution with trusted host operation
 ## Installation
 
 ```bash
-go install github.com/drellabot/orchestrator/cmd/orchestrator@latest
+go install github.com/drellahq/orchestrator/cmd/orchestrator@latest
 ```
 
 Or build from source:
 
 ```bash
-git clone https://github.com/drellabot/orchestrator.git
+git clone https://github.com/drellahq/orchestrator.git
 cd orchestrator
 go build -o orchestrator ./cmd/orchestrator
 ```

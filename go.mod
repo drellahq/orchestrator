@@ -1,4 +1,4 @@
-module github.com/drellabot/orchestrator
+module github.com/drellahq/orchestrator
 
 go 1.24.1
 

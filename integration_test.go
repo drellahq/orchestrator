@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/drellabot/orchestrator/internal/gjoll"
-	mcpserver "github.com/drellabot/orchestrator/internal/mcp"
-	"github.com/drellabot/orchestrator/internal/task"
+	"github.com/drellahq/orchestrator/internal/gjoll"
+	mcpserver "github.com/drellahq/orchestrator/internal/mcp"
+	"github.com/drellahq/orchestrator/internal/task"
 )
 
 const sandboxName = "orch-integ-test"

@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/drellabot/orchestrator/internal/sandbox"
-	"github.com/drellabot/orchestrator/internal/shellutil"
+	"github.com/drellahq/orchestrator/internal/sandbox"
+	"github.com/drellahq/orchestrator/internal/shellutil"
 )
 
 // Apply writes the profile's configuration into a sandbox.
