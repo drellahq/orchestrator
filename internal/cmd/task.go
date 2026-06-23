@@ -241,6 +241,12 @@ func executeTask(ctx context.Context, taskName, taskDescription string, taskDir 
 	}
 
 	var activationKeyName string
+	defer func() {
+		if activationKeyName != "" {
+			deleteActivationKey(cfg, activationKeyName)
+		}
+	}()
+
 	if !continueSession {
 		if err := setupSandbox(ctx, runner, taskName, taskDir, cfg, profileName, profileVars); err != nil {
 			return fmt.Errorf("setting up sandbox: %w", err)
@@ -252,14 +258,10 @@ func executeTask(ctx context.Context, taskName, taskDescription string, taskDir 
 		}
 
 		keyName, err := subscribeRHEL(ctx, runner, taskName, cfg)
+		activationKeyName = keyName
 		if err != nil {
 			return fmt.Errorf("subscribing sandbox to RHEL: %w", err)
 		}
-		activationKeyName = keyName
-	}
-
-	if activationKeyName != "" {
-		defer deleteActivationKey(cfg, activationKeyName)
 	}
 
 	taskDescription += issueattachments.Manifest(attachmentFiles)
