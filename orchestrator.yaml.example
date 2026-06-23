@@ -23,6 +23,11 @@
 # Path to Anthropic API key file (will be copied into containers).
 # anthropic_key_file: "~/.anthropic/api_key"
 
+# RHEL subscription for sandbox VMs. When set (along with LIGHTSPEED_CLIENT_ID
+# and LIGHTSPEED_CLIENT_SECRET env vars), the orchestrator creates a per-task
+# activation key, subscribes the sandbox, and deletes the key on cleanup.
+# rhsm_org_id: "12345678"
+
 # Repos the sandbox is allowed to open PRs against (supports wildcards).
 # Requires gh CLI authentication on the host.
 # allowed_repos:

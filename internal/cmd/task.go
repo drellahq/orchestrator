@@ -16,10 +16,11 @@ import (
 	gh "github.com/drellabot/orchestrator/internal/github"
 	"github.com/drellabot/orchestrator/internal/issueattachments"
 	"github.com/drellabot/orchestrator/internal/logging"
-	"github.com/drellabot/orchestrator/internal/sandbox"
 	mcpserver "github.com/drellabot/orchestrator/internal/mcp"
 	"github.com/drellabot/orchestrator/internal/profile"
 	"github.com/drellabot/orchestrator/internal/prompts"
+	"github.com/drellabot/orchestrator/internal/rhsm"
+	"github.com/drellabot/orchestrator/internal/sandbox"
 	"github.com/drellabot/orchestrator/internal/task"
 	"github.com/spf13/cobra"
 )
@@ -239,6 +240,7 @@ func executeTask(ctx context.Context, taskName, taskDescription string, taskDir 
 		slog.Warn("Failed to set status to in_progress", "task", taskName, "error", err)
 	}
 
+	var activationKeyName string
 	if !continueSession {
 		if err := setupSandbox(ctx, runner, taskName, taskDir, cfg, profileName, profileVars); err != nil {
 			return fmt.Errorf("setting up sandbox: %w", err)
@@ -248,6 +250,16 @@ func executeTask(ctx context.Context, taskName, taskDescription string, taskDir 
 		if err := copyAttachmentsToSandbox(ctx, runner, taskName, attachmentFiles); err != nil {
 			return fmt.Errorf("copying attachments to sandbox: %w", err)
 		}
+
+		keyName, err := subscribeRHEL(ctx, runner, taskName, cfg)
+		if err != nil {
+			return fmt.Errorf("subscribing sandbox to RHEL: %w", err)
+		}
+		activationKeyName = keyName
+	}
+
+	if activationKeyName != "" {
+		defer deleteActivationKey(cfg, activationKeyName)
 	}
 
 	taskDescription += issueattachments.Manifest(attachmentFiles)
@@ -511,6 +523,59 @@ func resolveTaskSource(taskDir *task.Dir, explicitRepo string, explicitIssue int
 		return "", 0, false
 	}
 	return repo, state.Source.IssueNumber, true
+}
+
+// subscribeRHEL creates a per-task RHSM activation key, installs
+// subscription-manager in the sandbox, and registers the system. Returns the
+// activation key name so the caller can clean it up, or "" if RHSM is not
+// configured.
+func subscribeRHEL(ctx context.Context, runner sandbox.Runner, taskName string, cfg *config.Config) (string, error) {
+	clientID := os.Getenv("LIGHTSPEED_CLIENT_ID")
+	clientSecret := os.Getenv("LIGHTSPEED_CLIENT_SECRET")
+	if clientID == "" || clientSecret == "" || cfg.RHSMOrgID == "" {
+		slog.Debug("RHSM not configured, skipping RHEL subscription")
+		return "", nil
+	}
+
+	client := rhsm.NewClient(clientID, clientSecret, cfg.RHSMOrgID)
+	keyName := "drella-" + taskName
+
+	slog.Info("Creating RHSM activation key", "task", taskName, "key", keyName)
+	if err := client.CreateActivationKey(ctx, keyName); err != nil {
+		return "", fmt.Errorf("creating activation key: %w", err)
+	}
+
+	slog.Info("Installing subscription-manager in sandbox", "task", taskName)
+	installCmd := runner.AsUser("sudo dnf install -y subscription-manager")
+	if err := runner.SSH(ctx, taskName, "bash", "-c", installCmd); err != nil {
+		return keyName, fmt.Errorf("installing subscription-manager: %w", err)
+	}
+
+	slog.Info("Registering sandbox with RHEL", "task", taskName)
+	registerCmd := fmt.Sprintf("sudo subscription-manager register --org %s --activationkey %s", cfg.RHSMOrgID, keyName)
+	registerCmd = runner.AsUser(registerCmd)
+	if err := runner.SSH(ctx, taskName, "bash", "-c", registerCmd); err != nil {
+		return keyName, fmt.Errorf("registering with subscription-manager: %w", err)
+	}
+
+	slog.Info("Sandbox subscribed to RHEL", "task", taskName)
+	return keyName, nil
+}
+
+// deleteActivationKey removes the per-task activation key from RHSM. Errors
+// are logged but not returned — cleanup is best-effort.
+func deleteActivationKey(cfg *config.Config, keyName string) {
+	clientID := os.Getenv("LIGHTSPEED_CLIENT_ID")
+	clientSecret := os.Getenv("LIGHTSPEED_CLIENT_SECRET")
+	if clientID == "" || clientSecret == "" {
+		return
+	}
+
+	client := rhsm.NewClient(clientID, clientSecret, cfg.RHSMOrgID)
+	slog.Info("Deleting RHSM activation key", "key", keyName)
+	if err := client.DeleteActivationKey(context.Background(), keyName); err != nil {
+		slog.Warn("Failed to delete RHSM activation key", "key", keyName, "error", err)
+	}
 }
 
 func copyAttachmentsToSandbox(ctx context.Context, runner sandbox.Runner, taskName string, files []issueattachments.DownloadedFile) error {

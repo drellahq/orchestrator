@@ -95,7 +95,7 @@ output "init_script" {
   value = <<-EOT
     #!/bin/bash
     set -euo pipefail
-    sudo dnf install -y git-core tmux
+    sudo dnf install -y git-core tmux subscription-manager
     curl -fsSL https://claude.ai/install.sh | bash
 
     # Configure Claude Code to use Vertex AI via local proxy

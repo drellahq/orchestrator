@@ -29,6 +29,9 @@ type Config struct {
 	PodmanImage      string `yaml:"podman_image"`       // container image (e.g. "fedora:43")
 	AnthropicKeyFile string `yaml:"anthropic_key_file"` // path to API key for mounting
 	
+	// RHSM activation key settings (for subscribing sandbox VMs to build RHEL)
+	RHSMOrgID string `yaml:"rhsm_org_id"`
+
 	AllowedRepos []string     `yaml:"allowed_repos"`
 	ProfilesRepo string       `yaml:"profiles_repo"`
 	ProfilesDir  string       `yaml:"profiles_dir"`
