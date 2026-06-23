@@ -71,6 +71,15 @@ func (r *Runner) EnsureFork(ctx context.Context, upstream string) (string, error
 	return user + "/" + parts[1], nil
 }
 
+// IsFork reports whether the given repository is a fork of another repository.
+func (r *Runner) IsFork(ctx context.Context, repo string) (bool, error) {
+	out, err := r.run(ctx, "", r.bin, "api", fmt.Sprintf("repos/%s", repo), "--jq", ".fork")
+	if err != nil {
+		return false, fmt.Errorf("checking fork status of %s: %w", repo, err)
+	}
+	return strings.TrimSpace(out) == "true", nil
+}
+
 // AddCoAuthorTrailers fetches the upstream base branch, identifies new commits
 // on sourceRef, and appends the given trailer to each commit that lacks it.
 func (r *Runner) AddCoAuthorTrailers(ctx context.Context, repoDir, upstream, base, sourceRef, trailer string) error {

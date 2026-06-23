@@ -38,6 +38,9 @@ type stubPROpener struct {
 	forkErr    error
 	forkCalled bool
 
+	isForkResult bool
+	isForkErr    error
+
 	pushErr     error
 	gotRepoDir  string
 	gotForkName string
@@ -86,6 +89,10 @@ func (s *stubPROpener) AuthenticatedUser(_ context.Context) (string, error) {
 func (s *stubPROpener) EnsureFork(_ context.Context, upstream string) (string, error) {
 	s.forkCalled = true
 	return s.forkName, s.forkErr
+}
+
+func (s *stubPROpener) IsFork(_ context.Context, repo string) (bool, error) {
+	return s.isForkResult, s.isForkErr
 }
 
 func (s *stubPROpener) PushBranch(_ context.Context, repoDir, forkFullName, branch, sourceRef string) error {
@@ -216,7 +223,7 @@ func TestStartAllocatesDynamicPort(t *testing.T) {
 }
 
 func TestServerListTools(t *testing.T) {
-	opener := &stubPROpener{user: "testuser", forkName: "testuser/repo", prURL: "https://github.com/org/repo/pull/1"}
+	opener := &stubPROpener{user: "testuser", forkName: "testuser/repo", isForkResult: true, prURL: "https://github.com/org/repo/pull/1"}
 	_, _, endpoint := startTestServer(t, &stubPuller{}, opener, []string{"org/*"})
 	session := connectClient(t, endpoint)
 
@@ -255,7 +262,7 @@ func TestOpenPRTool(t *testing.T) {
 			puller: &stubPuller{},
 			opener: &stubPROpener{
 				user:     "testuser",
-				forkName: "testuser/osbuild",
+				forkName: "testuser/osbuild", isForkResult: true,
 				prURL:    "https://github.com/osbuild/osbuild/pull/42",
 			},
 			allowedRepos: []string{"osbuild/*"},
@@ -296,7 +303,7 @@ func TestOpenPRTool(t *testing.T) {
 			puller: &stubPuller{},
 			opener: &stubPROpener{
 				user:     "testuser",
-				forkName: "testuser/osbuild",
+				forkName: "testuser/osbuild", isForkResult: true,
 				prURL:    "https://github.com/osbuild/osbuild/pull/43",
 			},
 			allowedRepos:   []string{"osbuild/osbuild"},
@@ -332,7 +339,7 @@ func TestOpenPRTool(t *testing.T) {
 			puller: &stubPuller{err: fmt.Errorf("connection refused")},
 			opener: &stubPROpener{
 				user:     "testuser",
-				forkName: "testuser/osbuild",
+				forkName: "testuser/osbuild", isForkResult: true,
 			},
 			allowedRepos: []string{"osbuild/*"},
 			input: map[string]any{
@@ -371,7 +378,7 @@ func TestOpenPRTool(t *testing.T) {
 			puller: &stubPuller{},
 			opener: &stubPROpener{
 				user:     "testuser",
-				forkName: "testuser/osbuild",
+				forkName: "testuser/osbuild", isForkResult: true,
 				pushErr:  fmt.Errorf("push rejected"),
 			},
 			allowedRepos:   []string{"osbuild/*"},
@@ -392,7 +399,7 @@ func TestOpenPRTool(t *testing.T) {
 			puller: &stubPuller{},
 			opener: &stubPROpener{
 				user:     "testuser",
-				forkName: "testuser/osbuild",
+				forkName: "testuser/osbuild", isForkResult: true,
 				prErr:    fmt.Errorf("duplicate PR"),
 			},
 			allowedRepos:   []string{"osbuild/*"},
@@ -514,7 +521,7 @@ func TestOpenPRToolWithAuthor(t *testing.T) {
 		puller := &stubPuller{}
 		opener := &stubPROpener{
 			user:     "testuser",
-			forkName: "testuser/osbuild",
+			forkName: "testuser/osbuild", isForkResult: true,
 			prURL:    "https://github.com/osbuild/osbuild/pull/42",
 		}
 		_, _, endpoint := startTestServer(t, puller, opener, []string{"osbuild/*"}, "Jane Doe <jane@example.com>")
@@ -553,7 +560,7 @@ func TestOpenPRToolWithAuthor(t *testing.T) {
 		puller := &stubPuller{}
 		opener := &stubPROpener{
 			user:     "testuser",
-			forkName: "testuser/osbuild",
+			forkName: "testuser/osbuild", isForkResult: true,
 			prURL:    "https://github.com/osbuild/osbuild/pull/42",
 		}
 		_, _, endpoint := startTestServer(t, puller, opener, []string{"osbuild/*"})
@@ -646,7 +653,7 @@ func TestOpenPRLinksOriginatingIssue(t *testing.T) {
 	puller := &stubPuller{}
 	opener := &stubPROpener{
 		user:     "testuser",
-		forkName: "testuser/org",
+		forkName: "testuser/org", isForkResult: true,
 		prURL:    "https://github.com/org/repo/pull/99",
 	}
 
@@ -709,7 +716,7 @@ func TestOpenPRSkipsIssueLinkWithoutSource(t *testing.T) {
 	puller := &stubPuller{}
 	opener := &stubPROpener{
 		user:     "testuser",
-		forkName: "testuser/org",
+		forkName: "testuser/org", isForkResult: true,
 		prURL:    "https://github.com/org/repo/pull/99",
 	}
 
@@ -742,7 +749,7 @@ func TestUpdatePRToolWithAuthor(t *testing.T) {
 		puller := &stubPuller{}
 		opener := &stubPROpener{
 			user:     "testuser",
-			forkName: "testuser/osbuild",
+			forkName: "testuser/osbuild", isForkResult: true,
 		}
 		td, _, endpoint := startTestServer(t, puller, opener, []string{"osbuild/*"}, "Jane Doe <jane@example.com>")
 
@@ -785,7 +792,7 @@ func TestUpdatePRToolWithAuthor(t *testing.T) {
 		puller := &stubPuller{}
 		opener := &stubPROpener{
 			user:     "testuser",
-			forkName: "testuser/osbuild",
+			forkName: "testuser/osbuild", isForkResult: true,
 		}
 		_, _, endpoint := startTestServer(t, puller, opener, []string{"osbuild/*"}, "Jane Doe <jane@example.com>")
 		session := connectClient(t, endpoint)
@@ -860,7 +867,7 @@ func TestUpdatePRTool(t *testing.T) {
 			puller: &stubPuller{},
 			opener: &stubPROpener{
 				user:     "testuser",
-				forkName: "testuser/osbuild",
+				forkName: "testuser/osbuild", isForkResult: true,
 			},
 			allowedRepos: []string{"osbuild/*"},
 			input: map[string]any{
@@ -907,7 +914,7 @@ func TestUpdatePRTool(t *testing.T) {
 			puller: &stubPuller{err: fmt.Errorf("connection refused")},
 			opener: &stubPROpener{
 				user:     "testuser",
-				forkName: "testuser/osbuild",
+				forkName: "testuser/osbuild", isForkResult: true,
 			},
 			allowedRepos: []string{"osbuild/*"},
 			input: map[string]any{
@@ -924,7 +931,7 @@ func TestUpdatePRTool(t *testing.T) {
 			puller: &stubPuller{},
 			opener: &stubPROpener{
 				user:     "testuser",
-				forkName: "testuser/osbuild",
+				forkName: "testuser/osbuild", isForkResult: true,
 				pushErr:  fmt.Errorf("push rejected"),
 			},
 			allowedRepos:   []string{"osbuild/*"},
@@ -1263,6 +1270,63 @@ func TestPostReviewTool(t *testing.T) {
 				if tt.opener.gotReviewBody != tt.input["body"] {
 					t.Errorf("gotReviewBody = %q, want %q", tt.opener.gotReviewBody, tt.input["body"])
 				}
+			}
+		})
+	}
+}
+
+func TestResolvePushTarget_ForkRedirect(t *testing.T) {
+	tests := []struct {
+		name           string
+		opener         *stubPROpener
+		repo           string
+		wantPushTarget string
+		wantForkOwner  string
+	}{
+		{
+			name: "genuine fork",
+			opener: &stubPROpener{
+				user:         "botuser",
+				forkName:     "botuser/repo",
+				isForkResult: true,
+			},
+			repo:           "org/repo",
+			wantPushTarget: "botuser/repo",
+			wantForkOwner:  "botuser",
+		},
+		{
+			name: "redirect not a fork",
+			opener: &stubPROpener{
+				user:         "botuser",
+				forkName:     "botuser/repo",
+				isForkResult: false,
+			},
+			repo:           "org/repo",
+			wantPushTarget: "org/repo",
+			wantForkOwner:  "org",
+		},
+		{
+			name: "same owner skips fork",
+			opener: &stubPROpener{
+				user: "org",
+			},
+			repo:           "org/repo",
+			wantPushTarget: "org/repo",
+			wantForkOwner:  "org",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pushTarget, forkOwner, err := resolvePushTarget(context.Background(), tt.repo, tt.opener)
+			if err != nil {
+				t.Fatalf("resolvePushTarget() error: %v", err)
+			}
+			if pushTarget != tt.wantPushTarget {
+				t.Errorf("pushTarget = %q, want %q", pushTarget, tt.wantPushTarget)
+			}
+			if forkOwner != tt.wantForkOwner {
+				t.Errorf("forkOwner = %q, want %q", forkOwner, tt.wantForkOwner)
 			}
 		})
 	}

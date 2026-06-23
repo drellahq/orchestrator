@@ -28,6 +28,7 @@ type CodePuller interface {
 type PROpener interface {
 	AuthenticatedUser(ctx context.Context) (string, error)
 	EnsureFork(ctx context.Context, upstream string) (string, error)
+	IsFork(ctx context.Context, repo string) (bool, error)
 	PushBranch(ctx context.Context, repoDir, forkFullName, branch, sourceRef string) error
 	CreatePR(ctx context.Context, upstream, forkOwner, branch, base, title, body string) (string, error)
 	AddCoAuthorTrailers(ctx context.Context, repoDir, upstream, base, sourceRef, trailer string) error
@@ -112,6 +113,18 @@ func resolvePushTarget(ctx context.Context, repo string, prOpener PROpener) (pus
 		if err != nil {
 			return "", "", fmt.Errorf("ensuring fork: %w", err)
 		}
+
+		// After a repo transfer (e.g. user/repo → org/repo), the old
+		// name becomes a redirect. EnsureFork may report the redirect
+		// as an existing "fork", but pushes land on the upstream and
+		// CreatePR fails because the fork ref doesn't exist. Verify
+		// the fork is genuine before using it.
+		if isFork, err := prOpener.IsFork(ctx, forkFullName); err == nil && !isFork {
+			slog.Warn("Fork is not a genuine fork (likely a redirect); pushing directly to upstream",
+				"fork", forkFullName, "upstream", repo)
+			return repo, repoOwner, nil
+		}
+
 		pushTarget = forkFullName
 	}
 	return pushTarget, forkOwner, nil
