@@ -311,6 +311,10 @@ main {
   color: var(--amber);
   border-color: #5c4a1a;
 }
+.status-error {
+  color: var(--red);
+  border-color: #5c1a1a;
+}
 .status-done {
   color: var(--text-dim);
   border-color: var(--border);
