@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	gh "github.com/drellabot/orchestrator/internal/github"
+	gh "github.com/drellahq/orchestrator/internal/github"
 )
 
 func TestTaskNameFromSpec(t *testing.T) {

@@ -9,8 +9,8 @@ import (
 	"path"
 	"strings"
 
-	"github.com/drellabot/orchestrator/internal/task"
-	"github.com/drellabot/orchestrator/internal/tasksource"
+	"github.com/drellahq/orchestrator/internal/task"
+	"github.com/drellahq/orchestrator/internal/tasksource"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 

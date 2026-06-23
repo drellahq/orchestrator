@@ -48,7 +48,7 @@
     },
     "prs": [
       {
-        "url": "https://github.com/drellabot/orchestrator/pull/42",
+        "url": "https://github.com/drellahq/orchestrator/pull/42",
         "repo": "orchestrator",
         "branch": "refactor-pr-polling",
         "base": "main",
@@ -68,7 +68,7 @@
     "author": "drella",
     "prs": [
       {
-        "url": "https://github.com/drellabot/orchestrator/pull/39",
+        "url": "https://github.com/drellahq/orchestrator/pull/39",
         "repo": "orchestrator",
         "branch": "caddy-health",
         "base": "main",
@@ -95,7 +95,7 @@
     "author": "drella",
     "prs": [
       {
-        "url": "https://github.com/drellabot/orchestrator/pull/37",
+        "url": "https://github.com/drellahq/orchestrator/pull/37",
         "repo": "orchestrator",
         "branch": "better-mcp-errors",
         "base": "main",
@@ -114,7 +114,7 @@
     "author": "drella",
     "prs": [
       {
-        "url": "https://github.com/drellabot/orchestrator/pull/34",
+        "url": "https://github.com/drellahq/orchestrator/pull/34",
         "repo": "orchestrator",
         "branch": "deps-may-2026",
         "base": "main",
@@ -135,7 +135,7 @@
     "author": "drella",
     "prs": [
       {
-        "url": "https://github.com/drellabot/orchestrator/pull/31",
+        "url": "https://github.com/drellahq/orchestrator/pull/31",
         "repo": "orchestrator",
         "branch": "fix-cleanup-race",
         "base": "main",
@@ -155,7 +155,7 @@
     "author": "drella",
     "prs": [
       {
-        "url": "https://github.com/drellabot/orchestrator/pull/28",
+        "url": "https://github.com/drellahq/orchestrator/pull/28",
         "repo": "orchestrator",
         "branch": "task-desc-state",
         "base": "main",

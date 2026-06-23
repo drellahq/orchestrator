@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/drellabot/orchestrator/internal/sandbox"
-	"github.com/drellabot/orchestrator/internal/shellutil"
+	"github.com/drellahq/orchestrator/internal/sandbox"
+	"github.com/drellahq/orchestrator/internal/shellutil"
 )
 
 // writeGjollCapture creates a shell script that appends all its arguments to a file,

@@ -35,7 +35,7 @@ func Get() Info {
 			}
 		}
 	}
-	orch.Repo = "drellabot/orchestrator"
+	orch.Repo = "drellahq/orchestrator"
 
 	info := Info{
 		Components: map[string]Component{

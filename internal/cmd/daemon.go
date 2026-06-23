@@ -10,11 +10,11 @@ import (
 	"syscall"
 	"time"
 
-	gh "github.com/drellabot/orchestrator/internal/github"
+	gh "github.com/drellahq/orchestrator/internal/github"
 
-	"github.com/drellabot/orchestrator/internal/config"
-	"github.com/drellabot/orchestrator/internal/daemon"
-	"github.com/drellabot/orchestrator/internal/version"
+	"github.com/drellahq/orchestrator/internal/config"
+	"github.com/drellahq/orchestrator/internal/daemon"
+	"github.com/drellahq/orchestrator/internal/version"
 	"github.com/spf13/cobra"
 )
 

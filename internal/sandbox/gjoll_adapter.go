@@ -6,8 +6,8 @@ import (
 	"io"
 	"strings"
 
-	"github.com/drellabot/orchestrator/internal/gjoll"
-	"github.com/drellabot/orchestrator/internal/shellutil"
+	"github.com/drellahq/orchestrator/internal/gjoll"
+	"github.com/drellahq/orchestrator/internal/shellutil"
 )
 
 // GjollAdapter wraps gjoll.Runner to implement the sandbox.Runner interface.

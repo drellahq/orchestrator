@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	gh "github.com/drellabot/orchestrator/internal/github"
-	"github.com/drellabot/orchestrator/internal/prompts"
-	"github.com/drellabot/orchestrator/internal/task"
+	gh "github.com/drellahq/orchestrator/internal/github"
+	"github.com/drellahq/orchestrator/internal/prompts"
+	"github.com/drellahq/orchestrator/internal/task"
 )
 
 func createTaskWithPRs(t *testing.T, outputDir, taskName string, prs []task.PR) {

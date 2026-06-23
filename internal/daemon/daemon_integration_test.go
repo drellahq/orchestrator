@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	gh "github.com/drellabot/orchestrator/internal/github"
-	"github.com/drellabot/orchestrator/internal/task"
+	gh "github.com/drellahq/orchestrator/internal/github"
+	"github.com/drellahq/orchestrator/internal/task"
 )
 
 // TestProcessPR_NewCommentsFlow verifies the full processPR flow:
