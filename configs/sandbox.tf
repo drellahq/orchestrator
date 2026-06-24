@@ -91,12 +91,32 @@ output "public_ip" {
 }
 output "instance_id" { value = tostring(libvirt_domain.sandbox.id) }
 output "ssh_user"    { value = "fedora" }
+variable "rhel_org_id" {
+  type        = string
+  description = "Red Hat organization ID for subscription-manager registration"
+  default     = ""
+  sensitive   = true
+}
+
+variable "rhel_activation_key" {
+  type        = string
+  description = "Red Hat activation key for subscription-manager registration"
+  default     = ""
+  sensitive   = true
+}
+
 output "init_script" {
   value = <<-EOT
     #!/bin/bash
     set -euo pipefail
     sudo dnf install -y git-core tmux
     curl -fsSL https://claude.ai/install.sh | bash
+
+    # Register with Red Hat subscription-manager if credentials are provided
+    %{if var.rhel_org_id != "" && var.rhel_activation_key != ""}
+    sudo dnf install -y subscription-manager
+    sudo subscription-manager register --org '${var.rhel_org_id}' --activationkey '${var.rhel_activation_key}'
+    %{endif}
 
     # Configure Claude Code to use Vertex AI via local proxy
     cat >> ~/.bashrc <<'RCEOF'

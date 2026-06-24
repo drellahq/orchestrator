@@ -366,12 +366,37 @@ func (r *Runner) GetFileContent(ctx context.Context, repo, branch, path string) 
 	return strings.TrimSpace(out), nil
 }
 
+// Label represents a GitHub issue label.
+type Label struct {
+	Name string `json:"name"`
+}
+
 // Issue represents a GitHub issue (not a pull request).
 type Issue struct {
 	Number int         `json:"number"`
 	Title  string      `json:"title"`
 	Body   string      `json:"body"`
 	User   CommentUser `json:"user"`
+	Labels []Label     `json:"labels"`
+}
+
+// HasLabel reports whether the issue has a label with the given name (case-insensitive).
+func (i Issue) HasLabel(name string) bool {
+	for _, l := range i.Labels {
+		if strings.EqualFold(l.Name, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// LabelNames returns a string slice of all label names.
+func (i Issue) LabelNames() []string {
+	names := make([]string, len(i.Labels))
+	for idx, l := range i.Labels {
+		names[idx] = l.Name
+	}
+	return names
 }
 
 // ListIssues returns open issues (excluding pull requests) for a repo.
@@ -392,6 +417,7 @@ func (r *Runner) ListIssues(ctx context.Context, repo string) ([]Issue, error) {
 		Title       string      `json:"title"`
 		Body        string      `json:"body"`
 		User        CommentUser `json:"user"`
+		Labels      []Label     `json:"labels"`
 		PullRequest *struct {
 			URL string `json:"url"`
 		} `json:"pull_request"`
@@ -417,6 +443,7 @@ func (r *Runner) ListIssues(ctx context.Context, repo string) ([]Issue, error) {
 			Title:  ri.Title,
 			Body:   ri.Body,
 			User:   ri.User,
+			Labels: ri.Labels,
 		})
 	}
 	return issues, nil

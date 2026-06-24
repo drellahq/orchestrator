@@ -493,13 +493,13 @@ func (d *Daemon) defaultContinueFunc(ctx context.Context, taskName, prompt strin
 	return nil
 }
 
-func (d *Daemon) defaultNewTaskFunc(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int) error {
+func (d *Daemon) defaultNewTaskFunc(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int, labels []string) error {
 	exe, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("getting executable path: %w", err)
 	}
 
-	args := buildNewTaskArgs(d.configPath, taskName, description, sourceRepo, sourceIssue)
+	args := buildNewTaskArgs(d.configPath, taskName, description, sourceRepo, sourceIssue, labels)
 
 	cmd := exec.CommandContext(ctx, exe, args...)
 	cmd.Stdout = os.Stdout
@@ -516,7 +516,8 @@ func (d *Daemon) defaultNewTaskFunc(ctx context.Context, taskName, description, 
 // the argument list for "task new". If front matter contains a profile,
 // --profile is added. Non-profile keys become --var KEY=VALUE flags.
 // sourceRepo and sourceIssue are set when spawning from a tasks-repo issue.
-func buildNewTaskArgs(configPath, taskName, description, sourceRepo string, sourceIssue int) []string {
+// labels are forwarded as --label flags.
+func buildNewTaskArgs(configPath, taskName, description, sourceRepo string, sourceIssue int, labels []string) []string {
 	args := []string{"task", "new", "--config", configPath}
 
 	profileName, vars, strippedDesc, fmErr := profile.ParseFrontMatter(description)
@@ -532,6 +533,9 @@ func buildNewTaskArgs(configPath, taskName, description, sourceRepo string, sour
 	}
 	if sourceRepo != "" && sourceIssue > 0 {
 		args = append(args, "--source-repo", sourceRepo, "--source-issue", strconv.Itoa(sourceIssue))
+	}
+	for _, l := range labels {
+		args = append(args, "--label", l)
 	}
 
 	args = append(args, taskName, strippedDesc)
