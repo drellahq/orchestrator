@@ -551,7 +551,7 @@ func setupRHELSubscription(ctx context.Context, taskName string) error {
 		return fmt.Errorf("creating activation key: %w", err)
 	}
 
-	slog.Info("RHEL activation key created", "task", taskName, "key", keyName)
+	slog.Info("RHEL activation key created", "task", taskName, "key", logging.Redacted(keyName))
 
 	os.Setenv("TF_VAR_rhel_org_id", orgID)
 	os.Setenv("TF_VAR_rhel_activation_key", keyName)
