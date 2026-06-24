@@ -1412,6 +1412,44 @@ func TestRecoverOrphanedTasks_SkipsOtherStatuses(t *testing.T) {
 	}
 }
 
+func TestRecoverOrphanedTasks_SkipsErrorStatus(t *testing.T) {
+	dir := t.TempDir()
+	createTaskWithPRs(t, dir, "error-task", nil)
+	td, _ := task.Open(dir, "error-task")
+	td.SetStatus(task.StatusError)
+
+	d := New(ghNew(writeOpenPRScript(t)), time.Minute, "", dir, nil, "testbot")
+	d.recoverOrphanedTasks()
+
+	state, err := td.LoadState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Status != task.StatusError {
+		t.Errorf("Status = %q, want %q (should not change for error task)", state.Status, task.StatusError)
+	}
+}
+
+func TestCleanupSandboxes_CleansErrorStatus(t *testing.T) {
+	dir := t.TempDir()
+	createTaskWithPRs(t, dir, "error-cleanup", nil)
+	td, _ := task.Open(dir, "error-cleanup")
+	td.SetStatus(task.StatusError)
+
+	var destroyed []string
+	d := New(ghNew(writeOpenPRScript(t)), time.Minute, "", dir, nil, "testbot")
+	d.SetDownFunc(func(ctx context.Context, taskName string) error {
+		destroyed = append(destroyed, taskName)
+		return nil
+	})
+
+	d.cleanupSandboxes(context.Background())
+
+	if len(destroyed) != 1 || destroyed[0] != "error-cleanup" {
+		t.Errorf("expected destruction of error-cleanup, got %v", destroyed)
+	}
+}
+
 func TestProcessPR_SetsStatusDoneWhenAllPRsClosed(t *testing.T) {
 	if _, err := exec.LookPath("sh"); err != nil {
 		t.Skip("sh not found")

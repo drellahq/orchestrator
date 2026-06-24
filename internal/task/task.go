@@ -84,6 +84,7 @@ const (
 	StatusInProgress = "in_progress"
 	StatusWaiting    = "waiting"
 	StatusDone       = "done"
+	StatusError      = "error"
 )
 
 // State holds task metadata and mutable state persisted to state.json.

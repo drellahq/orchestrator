@@ -172,7 +172,7 @@
 
   function statusBadge(task) {
     const s = computeStatus(task);
-    const labels = { in_progress: 'in progress', waiting: 'waiting', done: 'done' };
+    const labels = { in_progress: 'in progress', waiting: 'waiting', done: 'done', error: 'error' };
     const label = labels[s] || s;
     return '<span class="status-badge status-' + s + '">' + escapeHtml(label) + '</span>';
   }
@@ -246,6 +246,7 @@
 
   const STATUS_LANES = [
     { key: 'in_progress', label: 'in progress' },
+    { key: 'error', label: 'error' },
     { key: 'waiting', label: 'waiting for review' },
     { key: 'done', label: 'done' },
   ];
@@ -261,7 +262,7 @@
       return;
     }
 
-    const groups = { in_progress: [], waiting: [], done: [] };
+    const groups = { in_progress: [], error: [], waiting: [], done: [] };
     for (const task of all) {
       const s = computeStatus(task);
       (groups[s] || groups.done).push(task);
@@ -668,12 +669,16 @@
     if (getNotifyPermission() !== 'granted' || !state.notify.enabled) return;
     var reg = state.notify.swRegistration;
     if (!reg) return;
-    var title = newStatus === 'waiting'
-      ? 'Task waiting for review: ' + task.name
-      : 'Task completed: ' + task.name;
-    var body = task.description || (newStatus === 'waiting'
-      ? 'A task is waiting for review.'
-      : 'A task has finished.');
+    var title = newStatus === 'error'
+      ? 'Task failed: ' + task.name
+      : newStatus === 'waiting'
+        ? 'Task waiting for review: ' + task.name
+        : 'Task completed: ' + task.name;
+    var body = task.description || (newStatus === 'error'
+      ? 'A task exited with an error.'
+      : newStatus === 'waiting'
+        ? 'A task is waiting for review.'
+        : 'A task has finished.');
     try {
       await reg.showNotification(title, {
         body: body,
@@ -821,7 +826,7 @@
           var prevStatus = computeStatus(prev);
           var newStatus = computeStatus(task);
           if (prevStatus === newStatus) continue;
-          if (newStatus === 'done' || (prevStatus === 'in_progress' && newStatus === 'waiting')) {
+          if (newStatus === 'done' || newStatus === 'error' || (prevStatus === 'in_progress' && newStatus === 'waiting')) {
             showTaskNotification(task, newStatus);
           }
         }

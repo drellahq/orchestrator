@@ -305,9 +305,9 @@ func executeTask(ctx context.Context, taskName, taskDescription string, taskDir 
 
 	tw := newTranscriptWriter(os.Stdout, verbose)
 	w := io.MultiWriter(tw, transcriptFile)
-	if err := runner.SSHProxyOutput(ctx, taskName, w, sshOpts, "bash", "-c", runner.AsUser(runScriptPath)); err != nil {
-		slog.Error("Claude exited with error", "task", taskName, "error", err)
-		// Don't return error - still want to archive results
+	var claudeErr error
+	if claudeErr = runner.SSHProxyOutput(ctx, taskName, w, sshOpts, "bash", "-c", runner.AsUser(runScriptPath)); claudeErr != nil {
+		slog.Error("Claude exited with error", "task", taskName, "error", claudeErr)
 	}
 
 	slog.Info("Claude finished", "task", taskName)
@@ -329,6 +329,8 @@ func executeTask(ctx context.Context, taskName, taskDescription string, taskDir 
 		finalStatus := task.StatusDone
 		if state.HasOpenPRs() {
 			finalStatus = task.StatusWaiting
+		} else if claudeErr != nil {
+			finalStatus = task.StatusError
 		}
 		if err := taskDir.SetStatus(finalStatus); err != nil {
 			slog.Warn("Failed to set final status", "task", taskName, "error", err)
@@ -353,6 +355,7 @@ func buildRunScript(taskDescription string, continueSession bool) string {
 source ~/.bashrc
 export PATH="$HOME/.local/bin:$PATH"
 export ANTHROPIC_API_KEY="$(cat ~/.anthropic/api_key 2>/dev/null || true)"
+set -o pipefail
 stdbuf -oL claude --dangerously-skip-permissions -p --verbose \
   --effort max \
   --output-format stream-json --append-system-prompt-file ~/system-prompt.md \
