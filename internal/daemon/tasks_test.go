@@ -194,7 +194,7 @@ func TestCheckForNewSpecs_PicksUpNewSpec(t *testing.T) {
 	var mu sync.Mutex
 	var capturedTasks []struct{ name, desc string }
 	done := make(chan struct{}, 1)
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int, labels []string) error {
 		mu.Lock()
 		capturedTasks = append(capturedTasks, struct{ name, desc string }{taskName, description})
 		mu.Unlock()
@@ -254,7 +254,7 @@ func TestCheckForNewSpecs_SkipsAlreadyProcessed(t *testing.T) {
 	d.SetTasksRepo("org/tasks")
 
 	called := false
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int, labels []string) error {
 		called = true
 		return nil
 	})
@@ -280,7 +280,7 @@ func TestCheckForNewSpecs_SkipsRunningTask(t *testing.T) {
 	d.SetTaskRunning("add-dark-mode", true)
 
 	called := false
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int, labels []string) error {
 		called = true
 		return nil
 	})
@@ -314,7 +314,7 @@ func TestCheckForNewSpecs_SkipsNonMdFiles(t *testing.T) {
 	d.SetTasksRepo("org/tasks")
 
 	called := false
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int, labels []string) error {
 		called = true
 		return nil
 	})
@@ -342,7 +342,7 @@ func TestCheckForNewSpecs_MultipleSpecs(t *testing.T) {
 	var mu sync.Mutex
 	var capturedNames []string
 	done := make(chan struct{}, 2)
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int, labels []string) error {
 		mu.Lock()
 		capturedNames = append(capturedNames, taskName)
 		mu.Unlock()
@@ -390,7 +390,7 @@ func TestCheckForNewSpecs_SetsRunningState(t *testing.T) {
 
 	started := make(chan struct{})
 	finish := make(chan struct{})
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int, labels []string) error {
 		close(started)
 		<-finish
 		return nil
@@ -438,7 +438,7 @@ func TestCheckForNewSpecs_CloneFails(t *testing.T) {
 	d.SetTasksRepo("org/tasks")
 
 	called := false
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int, labels []string) error {
 		called = true
 		return nil
 	})
@@ -465,7 +465,7 @@ func TestCheckForNewSpecs_IdempotentAcrossCalls(t *testing.T) {
 	var mu sync.Mutex
 	callCount := 0
 	done := make(chan struct{}, 2)
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int, labels []string) error {
 		mu.Lock()
 		callCount++
 		mu.Unlock()
@@ -685,7 +685,7 @@ func TestCheckForNewIssues_PicksUpNewIssue(t *testing.T) {
 		sourceIssue          int
 	}
 	done := make(chan struct{}, 1)
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int, labels []string) error {
 		mu.Lock()
 		capturedTasks = append(capturedTasks, struct {
 			name, desc, sourceRepo string
@@ -753,7 +753,7 @@ func TestCheckForNewIssues_TitleOnlyWhenNoBody(t *testing.T) {
 
 	var capturedDesc string
 	done := make(chan struct{}, 1)
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int, labels []string) error {
 		capturedDesc = description
 		done <- struct{}{}
 		return nil
@@ -788,7 +788,7 @@ func TestCheckForNewIssues_SkipsUnallowedAuthor(t *testing.T) {
 	d.SetTasksRepo("org/tasks")
 
 	called := false
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int, labels []string) error {
 		called = true
 		return nil
 	})
@@ -833,7 +833,7 @@ func TestCheckForNewIssues_SkipsAlreadyProcessed(t *testing.T) {
 	d.SetTasksRepo("org/tasks")
 
 	called := false
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int, labels []string) error {
 		called = true
 		return nil
 	})
@@ -863,7 +863,7 @@ func TestCheckForNewIssues_SkipsRunningTask(t *testing.T) {
 	d.SetTaskRunning("tasks-7-add_dark_mode", true)
 
 	called := false
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int, labels []string) error {
 		called = true
 		return nil
 	})
@@ -902,7 +902,7 @@ func TestCheckForNewIssues_FiltersPullRequests(t *testing.T) {
 	var mu sync.Mutex
 	var capturedNames []string
 	done := make(chan struct{}, 2)
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int, labels []string) error {
 		mu.Lock()
 		capturedNames = append(capturedNames, taskName)
 		mu.Unlock()
@@ -950,7 +950,7 @@ func TestCheckForNewIssues_MultipleIssues(t *testing.T) {
 	var mu sync.Mutex
 	var capturedNames []string
 	done := make(chan struct{}, 2)
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int, labels []string) error {
 		mu.Lock()
 		capturedNames = append(capturedNames, taskName)
 		mu.Unlock()
@@ -1003,7 +1003,7 @@ func TestCheckForNewIssues_IdempotentAcrossCalls(t *testing.T) {
 	var mu sync.Mutex
 	callCount := 0
 	done := make(chan struct{}, 2)
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int, labels []string) error {
 		mu.Lock()
 		callCount++
 		mu.Unlock()
@@ -1048,7 +1048,7 @@ func TestCheckForNewIssues_SetsRunningState(t *testing.T) {
 
 	started := make(chan struct{})
 	finish := make(chan struct{})
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int, labels []string) error {
 		close(started)
 		<-finish
 		return nil
@@ -1090,7 +1090,7 @@ func TestCheckForNewIssues_ReactsRocketOnAccepted(t *testing.T) {
 	d.SetTasksRepo("org/tasks")
 
 	done := make(chan struct{}, 1)
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int, labels []string) error {
 		done <- struct{}{}
 		return nil
 	})
@@ -1133,7 +1133,7 @@ func TestCheckForNewIssues_ReactsConfusedOnRejected(t *testing.T) {
 	d.SetTasksRepo("org/tasks")
 
 	called := false
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int, labels []string) error {
 		called = true
 		return nil
 	})
@@ -1155,6 +1155,55 @@ func TestCheckForNewIssues_ReactsConfusedOnRejected(t *testing.T) {
 	}
 	if !foundConfused {
 		t.Errorf("expected confused reaction on issue 7, got: %v", reactions)
+	}
+}
+
+func TestCheckForNewIssues_PassesLabels(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not found")
+	}
+
+	dir := t.TempDir()
+
+	rawJSON := `[{"number":10,"title":"Build RHEL","body":"content","user":{"login":"alice"},"labels":[{"name":"rhel"},{"name":"priority"}]}]`
+	script := writeIssuesScript(t, rawJSON)
+
+	d := New(gh.New(script), time.Minute, "", dir, []string{"alice"}, "testbot")
+	d.SetTasksRepo("org/tasks")
+
+	var capturedLabels []string
+	done := make(chan struct{}, 1)
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int, labels []string) error {
+		capturedLabels = labels
+		done <- struct{}{}
+		return nil
+	})
+
+	d.checkForNewIssues(context.Background())
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for newTaskFunc")
+	}
+
+	time.Sleep(50 * time.Millisecond)
+
+	if len(capturedLabels) != 2 {
+		t.Fatalf("expected 2 labels, got %d: %v", len(capturedLabels), capturedLabels)
+	}
+	foundRHEL := false
+	foundPriority := false
+	for _, l := range capturedLabels {
+		if l == "rhel" {
+			foundRHEL = true
+		}
+		if l == "priority" {
+			foundPriority = true
+		}
+	}
+	if !foundRHEL || !foundPriority {
+		t.Errorf("expected labels [rhel, priority], got %v", capturedLabels)
 	}
 }
 

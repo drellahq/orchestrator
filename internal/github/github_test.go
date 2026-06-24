@@ -709,6 +709,74 @@ func TestListIssues_FieldValues(t *testing.T) {
 	}
 }
 
+func TestListIssues_ParsesLabels(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not found")
+	}
+
+	stdout := `[{"number":1,"title":"Build RHEL","body":"Build it","labels":[{"name":"rhel"},{"name":"priority"}]}]`
+	script, _ := writeArgCapture(t, stdout)
+	r := New(script)
+
+	issues, err := r.ListIssues(context.Background(), "org/repo")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(issues) != 1 {
+		t.Fatalf("got %d issues, want 1", len(issues))
+	}
+	if len(issues[0].Labels) != 2 {
+		t.Fatalf("got %d labels, want 2", len(issues[0].Labels))
+	}
+	if issues[0].Labels[0].Name != "rhel" {
+		t.Errorf("Labels[0].Name = %q, want %q", issues[0].Labels[0].Name, "rhel")
+	}
+	if issues[0].Labels[1].Name != "priority" {
+		t.Errorf("Labels[1].Name = %q, want %q", issues[0].Labels[1].Name, "priority")
+	}
+}
+
+func TestIssueHasLabel(t *testing.T) {
+	issue := Issue{
+		Labels: []Label{{Name: "rhel"}, {Name: "Priority"}},
+	}
+
+	if !issue.HasLabel("rhel") {
+		t.Error("expected HasLabel(rhel) = true")
+	}
+	if !issue.HasLabel("RHEL") {
+		t.Error("expected HasLabel(RHEL) = true (case-insensitive)")
+	}
+	if !issue.HasLabel("priority") {
+		t.Error("expected HasLabel(priority) = true (case-insensitive)")
+	}
+	if issue.HasLabel("missing") {
+		t.Error("expected HasLabel(missing) = false")
+	}
+}
+
+func TestIssueLabelNames(t *testing.T) {
+	issue := Issue{
+		Labels: []Label{{Name: "rhel"}, {Name: "priority"}},
+	}
+
+	names := issue.LabelNames()
+	if len(names) != 2 {
+		t.Fatalf("got %d names, want 2", len(names))
+	}
+	if names[0] != "rhel" || names[1] != "priority" {
+		t.Errorf("names = %v, want [rhel priority]", names)
+	}
+}
+
+func TestIssueLabelNames_Empty(t *testing.T) {
+	issue := Issue{}
+	names := issue.LabelNames()
+	if len(names) != 0 {
+		t.Errorf("expected empty names, got %v", names)
+	}
+}
+
 func TestFetchIssue(t *testing.T) {
 	if _, err := exec.LookPath("sh"); err != nil {
 		t.Skip("sh not found")

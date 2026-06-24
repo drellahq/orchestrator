@@ -649,7 +649,7 @@ func TestProcessPR_AdvancesLastCommentIDPastRejected(t *testing.T) {
 }
 
 func TestBuildNewTaskArgs_WithSourceIssue(t *testing.T) {
-	args := buildNewTaskArgs("/etc/config.yaml", "tasks-42-add_dark_mode", "Fix it", "org/tasks", 42)
+	args := buildNewTaskArgs("/etc/config.yaml", "tasks-42-add_dark_mode", "Fix it", "org/tasks", 42, nil)
 
 	assertContains(t, args, "--source-repo", "org/tasks")
 	assertContains(t, args, "--source-issue", "42")
@@ -658,7 +658,7 @@ func TestBuildNewTaskArgs_WithSourceIssue(t *testing.T) {
 func TestBuildNewTaskArgs_WithFrontMatter(t *testing.T) {
 	description := "---\nprofile: code-review\nrepo: org/repo\npr: 42\n---\n\nReview this pull request."
 
-	args := buildNewTaskArgs("/etc/config.yaml", "my-task", description, "", 0)
+	args := buildNewTaskArgs("/etc/config.yaml", "my-task", description, "", 0, nil)
 
 	// Should have: task new --config <path> --profile code-review --var ... --var ... <name> <desc>
 	assertContains(t, args, "--config", "/etc/config.yaml")
@@ -685,7 +685,7 @@ func TestBuildNewTaskArgs_WithFrontMatter(t *testing.T) {
 func TestBuildNewTaskArgs_NoFrontMatter(t *testing.T) {
 	description := "Just a regular task description."
 
-	args := buildNewTaskArgs("/etc/config.yaml", "my-task", description, "", 0)
+	args := buildNewTaskArgs("/etc/config.yaml", "my-task", description, "", 0, nil)
 
 	// Should have: task new --config <path> <name> <desc>
 	if len(args) != 6 {
@@ -714,7 +714,7 @@ func TestBuildNewTaskArgs_NoFrontMatter(t *testing.T) {
 func TestBuildNewTaskArgs_MalformedFrontMatter(t *testing.T) {
 	description := "---\n{{invalid yaml\n---\n\nBody."
 
-	args := buildNewTaskArgs("/etc/config.yaml", "my-task", description, "", 0)
+	args := buildNewTaskArgs("/etc/config.yaml", "my-task", description, "", 0, nil)
 
 	// Should fall back to raw description
 	if args[len(args)-1] != description {
@@ -735,7 +735,7 @@ func TestBuildNewTaskArgs_MalformedFrontMatter(t *testing.T) {
 func TestBuildNewTaskArgs_ProfileOnly(t *testing.T) {
 	description := "---\nprofile: deploy\n---\n\nDeploy the service."
 
-	args := buildNewTaskArgs("/etc/config.yaml", "my-task", description, "", 0)
+	args := buildNewTaskArgs("/etc/config.yaml", "my-task", description, "", 0, nil)
 
 	assertContains(t, args, "--profile", "deploy")
 
@@ -754,7 +754,7 @@ func TestBuildNewTaskArgs_ProfileOnly(t *testing.T) {
 func TestBuildNewTaskArgs_VarsOnly(t *testing.T) {
 	description := "---\nrepo: org/repo\n---\n\nBody."
 
-	args := buildNewTaskArgs("/etc/config.yaml", "my-task", description, "", 0)
+	args := buildNewTaskArgs("/etc/config.yaml", "my-task", description, "", 0, nil)
 
 	// No --profile flag expected
 	for _, a := range args {
@@ -786,6 +786,42 @@ func assertContains(t *testing.T, args []string, flag, value string) {
 		}
 	}
 	t.Errorf("flag %s not found in args: %v", flag, args)
+}
+
+func TestBuildNewTaskArgs_WithLabels(t *testing.T) {
+	args := buildNewTaskArgs("/etc/config.yaml", "my-task", "Do it", "org/tasks", 1, []string{"rhel", "priority"})
+
+	labels := collectFlagValues(args, "--label")
+	if len(labels) != 2 {
+		t.Fatalf("expected 2 --label flags, got %d: %v", len(labels), labels)
+	}
+	wantLabels := map[string]bool{"rhel": true, "priority": true}
+	for _, l := range labels {
+		if !wantLabels[l] {
+			t.Errorf("unexpected label %q", l)
+		}
+	}
+}
+
+func TestBuildNewTaskArgs_NilLabels(t *testing.T) {
+	args := buildNewTaskArgs("/etc/config.yaml", "my-task", "Do it", "", 0, nil)
+
+	for _, a := range args {
+		if a == "--label" {
+			t.Error("unexpected --label flag when labels is nil")
+		}
+	}
+}
+
+// collectFlagValues collects all values following the given flag.
+func collectFlagValues(args []string, flag string) []string {
+	var values []string
+	for i, a := range args {
+		if a == flag && i+1 < len(args) {
+			values = append(values, args[i+1])
+		}
+	}
+	return values
 }
 
 // collectVarArgs collects --var KEY=VALUE pairs into a map.
@@ -1141,7 +1177,7 @@ func TestRun_StopsPollingOnShutdown(t *testing.T) {
 
 	// Set up a slow newTaskFunc that would allow us to detect if it's called
 	taskLaunched := make(chan struct{})
-	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int) error {
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int, labels []string) error {
 		taskLaunched <- struct{}{}
 		time.Sleep(time.Second)
 		return nil
