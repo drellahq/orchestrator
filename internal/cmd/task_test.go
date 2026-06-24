@@ -82,6 +82,7 @@ func TestBuildRunScript(t *testing.T) {
 			wantContains: []string{
 				"#!/bin/bash",
 				"source ~/.bashrc",
+				"set -o pipefail",
 				"--dangerously-skip-permissions",
 				"--effort max",
 				"--output-format stream-json",
