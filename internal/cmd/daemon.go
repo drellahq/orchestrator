@@ -81,11 +81,28 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	}
 	slog.Info("Copied config", "path", configCopyPath)
 
-	if len(cfg.Daemon.AllowedCommenters) == 0 {
+	allowedCommenters := cfg.Daemon.AllowedCommenters
+	if len(cfg.Daemon.AllowedCommentersOrgs) > 0 {
+		resolved, err := config.ResolveAllowedCommenters(ctx, &cfg.Daemon, ghRunner)
+		if err != nil {
+			slog.Warn("Failed to resolve org commenters", "error", err)
+		} else {
+			allowedCommenters = resolved.Merged
+			if err := config.WriteResolvedCommenters(cfg.OutputDir, resolved); err != nil {
+				slog.Warn("Failed to write resolved commenters", "error", err)
+			}
+			slog.Info("Resolved allowed commenters from orgs",
+				"static", len(cfg.Daemon.AllowedCommenters),
+				"from_orgs", len(resolved.Merged)-len(cfg.Daemon.AllowedCommenters),
+				"total", len(resolved.Merged))
+		}
+	}
+
+	if len(allowedCommenters) == 0 {
 		slog.Warn("daemon.allowed_commenters is empty; no comments will trigger task continue")
 	}
 
-	d := daemon.New(ghRunner, interval, configPath, cfg.OutputDir, cfg.Daemon.AllowedCommenters, botUsername)
+	d := daemon.New(ghRunner, interval, configPath, cfg.OutputDir, allowedCommenters, botUsername)
 
 	if cfg.Daemon.TasksRepo != "" {
 		d.SetTasksRepo(cfg.Daemon.TasksRepo)
@@ -127,7 +144,20 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 				slog.Error("Failed to copy config on reload", "error", err)
 			}
 
-			d.Reload(newInterval, newCfg.Daemon.AllowedCommenters, newCfg.Daemon.TasksRepo)
+			reloadedCommenters := newCfg.Daemon.AllowedCommenters
+			if len(newCfg.Daemon.AllowedCommentersOrgs) > 0 {
+				resolved, err := config.ResolveAllowedCommenters(ctx, &newCfg.Daemon, ghRunner)
+				if err != nil {
+					slog.Warn("Failed to resolve org commenters on reload", "error", err)
+				} else {
+					reloadedCommenters = resolved.Merged
+					if err := config.WriteResolvedCommenters(newCfg.OutputDir, resolved); err != nil {
+						slog.Warn("Failed to write resolved commenters on reload", "error", err)
+					}
+				}
+			}
+
+			d.Reload(newInterval, reloadedCommenters, newCfg.Daemon.TasksRepo)
 		}
 	}()
 

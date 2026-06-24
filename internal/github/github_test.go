@@ -893,6 +893,85 @@ func TestReactToIssue(t *testing.T) {
 	}
 }
 
+func TestListOrgMembers(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not found")
+	}
+
+	tests := []struct {
+		name       string
+		stdout     string
+		role       string
+		wantLogins []string
+		wantRole   string
+		wantErr    bool
+	}{
+		{
+			name:       "maintainer returns all members",
+			stdout:     "alice\nbob\ncharlie\n",
+			role:       "maintainer",
+			wantLogins: []string{"alice", "bob", "charlie"},
+			wantRole:   "all",
+		},
+		{
+			name:       "owner returns admins only",
+			stdout:     "alice\n",
+			role:       "owner",
+			wantLogins: []string{"alice"},
+			wantRole:   "admin",
+		},
+		{
+			name:       "empty org",
+			stdout:     "",
+			role:       "maintainer",
+			wantLogins: nil,
+			wantRole:   "all",
+		},
+		{
+			name:    "invalid role",
+			stdout:  "",
+			role:    "contributor",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			script, outFile := writeArgCapture(t, tt.stdout)
+			r := New(script)
+
+			logins, err := r.ListOrgMembers(context.Background(), "testorg", tt.role)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if len(logins) != len(tt.wantLogins) {
+				t.Fatalf("got %d logins %v, want %d %v", len(logins), logins, len(tt.wantLogins), tt.wantLogins)
+			}
+			for i, want := range tt.wantLogins {
+				if logins[i] != want {
+					t.Errorf("login[%d] = %q, want %q", i, logins[i], want)
+				}
+			}
+
+			if tt.wantRole != "" {
+				gotArgs := readArgs(t, outFile)
+				wantEndpoint := fmt.Sprintf("/orgs/testorg/members?role=%s&per_page=100", tt.wantRole)
+				wantArgs := []string{"api", "--paginate", wantEndpoint, "--jq", ".[].login"}
+				if !equalArgs(gotArgs, wantArgs) {
+					t.Errorf("args = %v, want %v", gotArgs, wantArgs)
+				}
+			}
+		})
+	}
+}
+
 func equalArgs(got, want []string) bool {
 	if len(got) != len(want) {
 		return false

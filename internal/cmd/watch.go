@@ -7,6 +7,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/drellahq/orchestrator/internal/config"
 	"github.com/drellahq/orchestrator/internal/daemon"
 	gh "github.com/drellahq/orchestrator/internal/github"
 	"github.com/spf13/cobra"
@@ -58,7 +59,16 @@ func runTaskWatch(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("GitHub CLI not authenticated: %w", err)
 	}
 
-	prompt, err := daemon.WatchTask(ctx, ghRunner, cfg.OutputDir, taskName, cfg.Daemon.AllowedCommenters, botUsername, 5*time.Second)
+	allowedCommenters := cfg.Daemon.AllowedCommenters
+	if len(cfg.Daemon.AllowedCommentersOrgs) > 0 {
+		resolved, resolveErr := config.ResolveAllowedCommenters(ctx, &cfg.Daemon, ghRunner)
+		if resolveErr != nil {
+			return fmt.Errorf("resolving org commenters: %w", resolveErr)
+		}
+		allowedCommenters = resolved.Merged
+	}
+
+	prompt, err := daemon.WatchTask(ctx, ghRunner, cfg.OutputDir, taskName, allowedCommenters, botUsername, 5*time.Second)
 	if err != nil {
 		return err
 	}
