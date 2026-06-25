@@ -200,7 +200,7 @@ func executeTask(ctx context.Context, taskName, taskDescription string, taskDir 
 		}
 	} else {
 		if hasLabel(labels, "rhel") {
-			if err := setupRHELSubscription(ctx, taskName); err != nil {
+			if err := setupRHELSubscription(ctx, taskName, taskDir); err != nil {
 				slog.Warn("RHEL subscription setup failed, continuing without it", "task", taskName, "error", err)
 			}
 		}
@@ -537,7 +537,9 @@ func hasLabel(labels []string, name string) bool {
 // setupRHELSubscription creates an activation key via the Red Hat API and sets
 // TF_VAR_ environment variables so the sandbox init_script can register with
 // subscription-manager. The env vars are inherited by the gjoll subprocess.
-func setupRHELSubscription(ctx context.Context, taskName string) error {
+// The activation key is also persisted in the task's state_secrets.json so it
+// can be recovered on orchestrator restart.
+func setupRHELSubscription(ctx context.Context, taskName string, taskDir *task.Dir) error {
 	clientID := os.Getenv("LIGHTSPEED_CLIENT_ID")
 	clientSecret := os.Getenv("LIGHTSPEED_CLIENT_SECRET")
 	orgID := os.Getenv("LIGHTSPEED_ORG_ID")
@@ -555,6 +557,10 @@ func setupRHELSubscription(ctx context.Context, taskName string) error {
 	}
 
 	slog.Info("RHEL activation key created", "task", taskName, "key", keyName)
+
+	if err := taskDir.SaveSecret("rhel_activation_key", keyName); err != nil {
+		slog.Warn("Failed to persist RHEL activation key to state_secrets.json", "task", taskName, "error", err)
+	}
 
 	os.Setenv("TF_VAR_rhel_org_id", orgID)
 	os.Setenv("TF_VAR_rhel_activation_key", keyName)
