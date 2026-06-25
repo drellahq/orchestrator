@@ -9,7 +9,7 @@ self.addEventListener('notificationclick', function (event) {
           return client.focus();
         }
       }
-      return clients.openWindow(url);
+      return clients.openWindow(new URL(url, self.registration.scope).href);
     })
   );
 });
