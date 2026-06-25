@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"log/slog"
@@ -550,8 +552,14 @@ func setupRHELSubscription(ctx context.Context, taskName string, taskDir *task.D
 
 	slog.Info("Creating RHEL activation key", "task", taskName)
 
+	var suffix [4]byte
+	if _, err := rand.Read(suffix[:]); err != nil {
+		return fmt.Errorf("generating random suffix: %w", err)
+	}
+	akName := fmt.Sprintf("orchestrator-%s-%s", taskName, hex.EncodeToString(suffix[:]))
+
 	client := rhel.NewClient(clientID, clientSecret)
-	keyName, err := client.CreateActivationKey(ctx, "orchestrator-"+taskName)
+	keyName, err := client.CreateActivationKey(ctx, akName)
 	if err != nil {
 		return fmt.Errorf("creating activation key: %w", err)
 	}
