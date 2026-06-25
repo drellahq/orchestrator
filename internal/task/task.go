@@ -88,17 +88,20 @@ const (
 )
 
 // State holds task metadata and mutable state persisted to state.json.
+// Secrets are loaded from state_secrets.json and merged in on load;
+// they are never written back to state.json.
 type State struct {
-	Name             string    `json:"name"`
-	Description      string    `json:"description"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
-	Author           string    `json:"author,omitempty"`
-	Source           *Source   `json:"source,omitempty"`
-	Resources        Resources `json:"resources"`
-	Status           string    `json:"status,omitempty"`
-	SandboxDestroyed bool      `json:"sandbox_destroyed,omitempty"`
-	Usage            *Usage    `json:"usage,omitempty"`
+	Name             string            `json:"name"`
+	Description      string            `json:"description"`
+	CreatedAt        time.Time         `json:"created_at"`
+	UpdatedAt        time.Time         `json:"updated_at"`
+	Author           string            `json:"author,omitempty"`
+	Source           *Source            `json:"source,omitempty"`
+	Resources        Resources         `json:"resources"`
+	Status           string            `json:"status,omitempty"`
+	SandboxDestroyed bool              `json:"sandbox_destroyed,omitempty"`
+	Usage            *Usage            `json:"usage,omitempty"`
+	Secrets          map[string]string `json:"-"`
 }
 
 // HasOpenPRs reports whether the state has any PRs that are not closed.
@@ -224,6 +227,14 @@ func (d *Dir) loadStateLocked() (*State, error) {
 	var s State
 	if err := json.Unmarshal(data, &s); err != nil {
 		return nil, fmt.Errorf("unmarshaling state: %w", err)
+	}
+
+	secrets, err := d.loadSecretsLocked()
+	if err != nil {
+		return nil, fmt.Errorf("loading secrets: %w", err)
+	}
+	if len(secrets) > 0 {
+		s.Secrets = secrets
 	}
 	return &s, nil
 }
