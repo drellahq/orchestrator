@@ -82,16 +82,13 @@
     return '';
   }
 
-  function parseBudgetFromYaml(yaml) {
-    var budget = {};
-    var m;
-    m = yaml.match(/max-budget-usd:\s*([\d.]+)/);
-    if (m) budget.max_budget_usd = parseFloat(m[1]);
-    m = yaml.match(/warn-budget-usd:\s*([\d.]+)/);
-    if (m) budget.warn_budget_usd = parseFloat(m[1]);
-    m = yaml.match(/critical-budget-usd:\s*([\d.]+)/);
-    if (m) budget.critical_budget_usd = parseFloat(m[1]);
-    return budget;
+  async function loadBudgetConfig() {
+    try {
+      var resp = await fetch('/budget.json');
+      if (!resp.ok) return;
+      var parsed = await resp.json();
+      Object.assign(state.budget, parsed);
+    } catch (_) {}
   }
 
   function showToast(msg) {
@@ -953,8 +950,7 @@
       if (!resp.ok) return;
       configYaml = await resp.text();
       if (!isMockMode()) {
-        var parsed = parseBudgetFromYaml(configYaml);
-        Object.assign(state.budget, parsed);
+        await loadBudgetConfig();
       }
       var el = document.getElementById('footer-config');
       if (!el) {

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -81,6 +82,10 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 	}
 	slog.Info("Copied config", "path", configCopyPath)
 
+	if err := writeBudgetJSON(cfg, cfg.OutputDir); err != nil {
+		return fmt.Errorf("writing budget.json: %w", err)
+	}
+
 	if len(cfg.Daemon.AllowedCommenters) == 0 {
 		slog.Warn("daemon.allowed_commenters is empty; no comments will trigger task continue")
 	}
@@ -126,6 +131,9 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 			if err := copyFile(configPath, configCopyPath); err != nil {
 				slog.Error("Failed to copy config on reload", "error", err)
 			}
+			if err := writeBudgetJSON(newCfg, cfg.OutputDir); err != nil {
+				slog.Error("Failed to write budget.json on reload", "error", err)
+			}
 
 			d.Reload(newInterval, newCfg.Daemon.AllowedCommenters, newCfg.Daemon.TasksRepo)
 		}
@@ -133,6 +141,14 @@ func runDaemon(cmd *cobra.Command, args []string) error {
 
 	slog.Info("Daemon starting", "interval", interval, "output_dir", cfg.OutputDir, "allowed_commenters", cfg.Daemon.AllowedCommenters, "bot_username", botUsername)
 	return d.Run(ctx)
+}
+
+func writeBudgetJSON(cfg *config.Config, outputDir string) error {
+	data, err := json.Marshal(cfg.Agent)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(outputDir, "budget.json"), data, 0644)
 }
 
 func copyFile(src, dst string) error {
