@@ -23,3 +23,6 @@
 
 # Config (may contain secrets)
 orchestrator.yaml
+
+# Runtime output directory (tasks, budget.json, version.json, config.yaml copy)
+tasks/
