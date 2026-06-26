@@ -9,6 +9,11 @@
 		root * ./tasks
 		file_server
 	}
+	handle /budget.json {
+		header Cache-Control "no-cache"
+		root * ./tasks
+		file_server
+	}
 	handle_path /tasks/* {
 		@secrets path_regexp secrets /state_secrets\.json$
 		respond @secrets 403
