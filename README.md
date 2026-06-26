@@ -203,18 +203,18 @@ for both Claude Code and OpenCode variants.
 orchestrator task new --agent-backend opencode my-task "Fix the bug"
 ```
 
-When creating tasks from GitHub issues, add `agent: opencode` to the YAML front
-matter (same syntax as `profile:`):
+When creating tasks from GitHub issues, add `agent: opencode` to the task header
+(same syntax as `profile:`):
 
-```markdown
----
+````markdown
+```
 agent: opencode
 profile: code-review
 repo: org/repo
----
+```
 
 Review this pull request.
-```
+````
 
 The per-task override takes precedence over the `agent_backend` config field.
 
@@ -425,21 +425,24 @@ servers:
     scope: user              # optional
 ```
 
-### Issue front matter
+### Task header
 
-When processing issues, YAML front matter can specify a profile and pass variables to `setup.sh`:
+When processing issues, a task header can specify a profile and pass variables to `setup.sh`.
+Use backtick-fenced blocks so the header renders as a code block in Markdown:
 
-```markdown
----
+````markdown
+```
 profile: code-review
 repo: org/repo
 pr: 42
----
-
-Review this pull request.
 ```
 
+Review this pull request.
+````
+
 The `profile` key selects the profile. Other keys become `PROFILE_*` environment variables.
+
+`---` delimiters are also accepted for backward compatibility.
 
 ## Running Tests
 
