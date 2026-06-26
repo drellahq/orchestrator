@@ -322,7 +322,14 @@ func (d *Daemon) checkForNewIssues(ctx context.Context) {
 
 		description := issue.Title
 		if issue.Body != "" {
-			description = issue.Title + "\n\n" + issue.Body
+			trimmedBody := strings.TrimSpace(issue.Body)
+			if strings.HasPrefix(trimmedBody, "---") || strings.HasPrefix(trimmedBody, "```") {
+				// Body starts with a task header; keep it at the
+				// front so buildNewTaskArgs can parse profile/agent/vars.
+				description = issue.Body + "\n\n" + issue.Title
+			} else {
+				description = issue.Title + "\n\n" + issue.Body
+			}
 		}
 
 		// Mark as processed before launching to avoid re-processing
