@@ -23,6 +23,8 @@
 
 # Config (may contain secrets)
 orchestrator.yaml
+.envrc
+Caddyfile
 
 # Runtime output directory (tasks, budget.json, version.json, config.yaml copy)
 tasks/
