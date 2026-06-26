@@ -776,7 +776,7 @@ func TestBuildNewTaskArgs_VarsOnly(t *testing.T) {
 func TestBuildNewTaskArgs_WithAgentBackend(t *testing.T) {
 	description := "---\nagent: opencode\nprofile: code-review\n---\n\nReview this PR."
 
-	args := buildNewTaskArgs("/etc/config.yaml", "my-task", description, "", 0)
+	args := buildNewTaskArgs("/etc/config.yaml", "my-task", description, "", 0, nil)
 
 	assertContains(t, args, "--agent-backend", "opencode")
 	assertContains(t, args, "--profile", "code-review")
@@ -789,7 +789,7 @@ func TestBuildNewTaskArgs_WithAgentBackend(t *testing.T) {
 func TestBuildNewTaskArgs_AgentOnly(t *testing.T) {
 	description := "---\nagent: opencode\n---\n\nDo some work."
 
-	args := buildNewTaskArgs("/etc/config.yaml", "my-task", description, "", 0)
+	args := buildNewTaskArgs("/etc/config.yaml", "my-task", description, "", 0, nil)
 
 	assertContains(t, args, "--agent-backend", "opencode")
 
