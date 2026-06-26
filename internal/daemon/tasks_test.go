@@ -736,6 +736,49 @@ func TestCheckForNewIssues_PicksUpNewIssue(t *testing.T) {
 	}
 }
 
+func TestCheckForNewIssues_FrontMatterWithTitle(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not found")
+	}
+
+	dir := t.TempDir()
+
+	issues := []gh.Issue{
+		{Number: 10, Title: "Fix the bug", Body: "---\nagent: opencode\nprofile: code-review\n---\n\nActual task description.", User: gh.CommentUser{Login: "alice"}},
+	}
+	script := writeIssuesScript(t, makeIssuesJSON(t, issues))
+
+	d := New(gh.New(script), time.Minute, "", dir, []string{"alice"}, "testbot")
+	d.SetTasksRepo("org/tasks")
+
+	var capturedDesc string
+	done := make(chan struct{}, 1)
+	d.SetNewTaskFunc(func(ctx context.Context, taskName, description, sourceRepo string, sourceIssue int, labels []string) error {
+		capturedDesc = description
+		done <- struct{}{}
+		return nil
+	})
+
+	d.checkForNewIssues(context.Background())
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out")
+	}
+
+	// The description should have the frontmatter at the start so
+	// buildNewTaskArgs can parse agent/profile from it.
+	if !strings.HasPrefix(strings.TrimSpace(capturedDesc), "---") {
+		t.Errorf("description should start with frontmatter, got %q", capturedDesc)
+	}
+
+	// Verify buildNewTaskArgs actually extracts the agent backend
+	args := buildNewTaskArgs("/etc/config.yaml", "test-task", capturedDesc, "", 0, nil)
+	assertContains(t, args, "--agent-backend", "opencode")
+	assertContains(t, args, "--profile", "code-review")
+}
+
 func TestCheckForNewIssues_TitleOnlyWhenNoBody(t *testing.T) {
 	if _, err := exec.LookPath("sh"); err != nil {
 		t.Skip("sh not found")
