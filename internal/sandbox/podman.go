@@ -107,6 +107,25 @@ func (r *PodmanRunner) Up(ctx context.Context, name string, config string) error
 		}
 	}
 
+	// Register with RHEL subscription-manager if credentials are provided.
+	// setupRHELSubscription in cmd/task.go sets these env vars before Up()
+	// is called; the gjoll backend picks them up via Terraform variables,
+	// but the podman backend must handle them explicitly.
+	rhelOrgID := os.Getenv("TF_VAR_rhel_org_id")
+	rhelAK := os.Getenv("TF_VAR_rhel_activation_key")
+	if rhelOrgID != "" && rhelAK != "" {
+		regCmds := []string{
+			"bash", "-c",
+			"dnf install -y subscription-manager && subscription-manager register" +
+				" --org " + shellutil.Quote(rhelOrgID) +
+				" --activationkey " + shellutil.Quote(rhelAK),
+		}
+		if err := r.SSH(ctx, name, regCmds...); err != nil {
+			_ = r.Down(context.Background(), name)
+			return fmt.Errorf("RHEL subscription registration: %w", err)
+		}
+	}
+
 	// Configure environment as claude user
 	configCmds := []string{
 		"bash", "-c",
