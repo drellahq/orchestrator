@@ -8,6 +8,13 @@ import (
 	"github.com/goccy/go-yaml"
 )
 
+// AgentConfig holds per-agent budget limits.
+type AgentConfig struct {
+	MaxBudgetUSD      float64 `yaml:"max-budget-usd"`
+	WarnBudgetUSD     float64 `yaml:"warn-budget-usd"`
+	CriticalBudgetUSD float64 `yaml:"critical-budget-usd"`
+}
+
 // DaemonConfig holds settings for the daemon polling loop.
 type DaemonConfig struct {
 	PollInterval      string   `yaml:"poll_interval"`
@@ -33,6 +40,7 @@ type Config struct {
 	AllowedRepos []string     `yaml:"allowed_repos"`
 	ProfilesRepo string       `yaml:"profiles_repo"`
 	ProfilesDir  string       `yaml:"profiles_dir"`
+	Agent        AgentConfig  `yaml:"agent"`
 	Daemon       DaemonConfig `yaml:"daemon"`
 }
 

@@ -97,6 +97,38 @@ func TestLoad(t *testing.T) {
 			},
 		},
 		{
+			name:      "agent config parsed",
+			writeFile: true,
+			yaml:      "agent:\n  max-budget-usd: 100\n  warn-budget-usd: 30\n  critical-budget-usd: 50\n",
+			want: Config{
+				OutputDir:        "./tasks",
+				SandboxBackend:   "gjoll",
+				GjollEnv:         "./configs/sandbox.tf",
+				PodmanImage:      "fedora:43",
+				AnthropicKeyFile: "~/.anthropic/api_key",
+				Agent: AgentConfig{
+					MaxBudgetUSD:      100,
+					WarnBudgetUSD:     30,
+					CriticalBudgetUSD: 50,
+				},
+			},
+		},
+		{
+			name:      "agent config partial",
+			writeFile: true,
+			yaml:      "agent:\n  max-budget-usd: 50\n",
+			want: Config{
+				OutputDir:        "./tasks",
+				SandboxBackend:   "gjoll",
+				GjollEnv:         "./configs/sandbox.tf",
+				PodmanImage:      "fedora:43",
+				AnthropicKeyFile: "~/.anthropic/api_key",
+				Agent: AgentConfig{
+					MaxBudgetUSD: 50,
+				},
+			},
+		},
+		{
 			name:      "invalid yaml",
 			writeFile: true,
 			yaml:      "{{invalid",

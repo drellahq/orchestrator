@@ -72,6 +72,7 @@ func TestBuildRunScript(t *testing.T) {
 		name            string
 		taskDescription string
 		continueSession bool
+		maxBudgetUSD    float64
 		wantContains    []string
 		wantNotContains []string
 	}{
@@ -94,6 +95,7 @@ func TestBuildRunScript(t *testing.T) {
 				"--continue",
 				"tee -a",
 				"cd ~/project",
+				"--max-budget-usd",
 			},
 		},
 		{
@@ -115,11 +117,30 @@ func TestBuildRunScript(t *testing.T) {
 				`'Fix the '\''bug'\'' in handler.go'`,
 			},
 		},
+		{
+			name:            "with max budget",
+			taskDescription: "Fix the bug",
+			continueSession: false,
+			maxBudgetUSD:    100,
+			wantContains: []string{
+				"--max-budget-usd 100.00",
+				"'Fix the bug'",
+			},
+		},
+		{
+			name:            "zero budget omits flag",
+			taskDescription: "Fix the bug",
+			continueSession: false,
+			maxBudgetUSD:    0,
+			wantNotContains: []string{
+				"--max-budget-usd",
+			},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := buildRunScript(tt.taskDescription, tt.continueSession)
+			got := buildRunScript(tt.taskDescription, tt.continueSession, tt.maxBudgetUSD)
 			for _, want := range tt.wantContains {
 				if !strings.Contains(got, want) {
 					t.Errorf("buildRunScript() missing %q\ngot:\n%s", want, got)

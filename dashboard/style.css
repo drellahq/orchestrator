@@ -246,6 +246,35 @@ main {
   cursor: help;
 }
 
+/* --- Budget thresholds --- */
+
+.budget-warn .task-usage,
+.budget-warn .meta-usage {
+  color: #ff9800;
+  font-weight: 700;
+}
+.budget-warn.task-card {
+  border-color: #ff9800;
+}
+.budget-warn #task-meta,
+#task-meta.budget-warn {
+  border-color: #ff9800;
+}
+
+.budget-critical .task-usage,
+.budget-critical .meta-usage {
+  color: var(--red);
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+.budget-critical.task-card {
+  border-color: var(--red);
+}
+.budget-critical #task-meta,
+#task-meta.budget-critical {
+  border-color: var(--red);
+}
+
 .pr-badge {
   position: relative;
   z-index: 1;
