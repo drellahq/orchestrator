@@ -10,9 +10,9 @@ import (
 
 // AgentConfig holds per-agent budget limits.
 type AgentConfig struct {
-	MaxBudgetUSD      float64 `yaml:"max-budget-usd"`
-	WarnBudgetUSD     float64 `yaml:"warn-budget-usd"`
-	CriticalBudgetUSD float64 `yaml:"critical-budget-usd"`
+	MaxBudgetUSD      float64 `yaml:"max-budget-usd" json:"max_budget_usd"`
+	WarnBudgetUSD     float64 `yaml:"warn-budget-usd" json:"warn_budget_usd"`
+	CriticalBudgetUSD float64 `yaml:"critical-budget-usd" json:"critical_budget_usd"`
 }
 
 // DaemonConfig holds settings for the daemon polling loop.

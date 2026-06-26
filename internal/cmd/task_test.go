@@ -1,10 +1,14 @@
 package cmd
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/drellahq/orchestrator/internal/config"
 	"github.com/drellahq/orchestrator/internal/task"
 )
 
@@ -152,6 +156,64 @@ func TestBuildRunScript(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestWriteBudgetJSON(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &config.Config{
+		Agent: config.AgentConfig{
+			MaxBudgetUSD:      100,
+			WarnBudgetUSD:     30,
+			CriticalBudgetUSD: 50,
+		},
+	}
+
+	if err := writeBudgetJSON(cfg, dir); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "budget.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var got map[string]float64
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+
+	if got["max_budget_usd"] != 100 {
+		t.Errorf("max_budget_usd = %v, want 100", got["max_budget_usd"])
+	}
+	if got["warn_budget_usd"] != 30 {
+		t.Errorf("warn_budget_usd = %v, want 30", got["warn_budget_usd"])
+	}
+	if got["critical_budget_usd"] != 50 {
+		t.Errorf("critical_budget_usd = %v, want 50", got["critical_budget_usd"])
+	}
+}
+
+func TestWriteBudgetJSON_zeroes(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &config.Config{}
+
+	if err := writeBudgetJSON(cfg, dir); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "budget.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var got map[string]float64
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+
+	if got["max_budget_usd"] != 0 {
+		t.Errorf("max_budget_usd = %v, want 0", got["max_budget_usd"])
 	}
 }
 
