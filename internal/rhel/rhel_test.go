@@ -123,6 +123,95 @@ func TestCreateActivationKey_KeyCreationError(t *testing.T) {
 	}
 }
 
+func TestDeleteActivationKey(t *testing.T) {
+	var tokenCalls atomic.Int32
+	var deleteCalls atomic.Int32
+
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
+		tokenCalls.Add(1)
+		json.NewEncoder(w).Encode(map[string]string{"access_token": "test-token"})
+	})
+
+	mux.HandleFunc("/api/rhsm/v2/activation_keys/", func(w http.ResponseWriter, r *http.Request) {
+		deleteCalls.Add(1)
+		if r.Method != http.MethodDelete {
+			t.Errorf("delete: expected DELETE, got %s", r.Method)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
+			t.Errorf("delete: Authorization = %q", got)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := NewClient("test-id", "test-secret")
+	c.tokenURL = srv.URL + "/token"
+	c.apiURL = srv.URL + "/api/rhsm/v2"
+	c.httpClient = srv.Client()
+
+	err := c.DeleteActivationKey(context.Background(), "task-42")
+	if err != nil {
+		t.Fatalf("DeleteActivationKey: %v", err)
+	}
+	if tokenCalls.Load() != 1 {
+		t.Errorf("token endpoint called %d times", tokenCalls.Load())
+	}
+	if deleteCalls.Load() != 1 {
+		t.Errorf("delete endpoint called %d times", deleteCalls.Load())
+	}
+}
+
+func TestDeleteActivationKey_NotFound(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]string{"access_token": "tok"})
+	})
+	mux.HandleFunc("/api/rhsm/v2/activation_keys/", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	})
+
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := NewClient("id", "secret")
+	c.tokenURL = srv.URL + "/token"
+	c.apiURL = srv.URL + "/api/rhsm/v2"
+	c.httpClient = srv.Client()
+
+	err := c.DeleteActivationKey(context.Background(), "missing-key")
+	if err != nil {
+		t.Fatalf("expected no error for 404, got: %v", err)
+	}
+}
+
+func TestDeleteActivationKey_ServerError(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]string{"access_token": "tok"})
+	})
+	mux.HandleFunc("/api/rhsm/v2/activation_keys/", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(`{"error":"server error"}`))
+	})
+
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := NewClient("id", "secret")
+	c.tokenURL = srv.URL + "/token"
+	c.apiURL = srv.URL + "/api/rhsm/v2"
+	c.httpClient = srv.Client()
+
+	err := c.DeleteActivationKey(context.Background(), "key-1")
+	if err == nil {
+		t.Fatal("expected error for 500 response")
+	}
+}
+
 func TestCreateActivationKey_WrappedResponse(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {

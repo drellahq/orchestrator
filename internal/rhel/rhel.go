@@ -141,3 +141,33 @@ func (c *Client) CreateActivationKey(ctx context.Context, name string) (string, 
 	// Fall back to the name we requested
 	return name, nil
 }
+
+// DeleteActivationKey removes an activation key by name.
+func (c *Client) DeleteActivationKey(ctx context.Context, name string) error {
+	token, err := c.token(ctx)
+	if err != nil {
+		return fmt.Errorf("obtaining access token: %w", err)
+	}
+
+	endpoint := c.apiURL + "/activation_keys/" + url.PathEscape(name)
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, endpoint, nil)
+	if err != nil {
+		return fmt.Errorf("building delete request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("deleting activation key: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil
+	}
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("activation key deletion failed (%d): %s", resp.StatusCode, body)
+	}
+	return nil
+}

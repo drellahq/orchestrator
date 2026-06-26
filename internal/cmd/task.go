@@ -254,6 +254,8 @@ func executeTask(ctx context.Context, taskName, taskDescription string, taskDir 
 		if stopErr := runner.Stop(context.Background(), taskName); stopErr != nil {
 			slog.Warn("Failed to stop sandbox", "task", taskName, "error", stopErr)
 		}
+
+		cleanupRHELSubscription(context.Background(), taskName, taskDir)
 	}()
 
 	slog.Info("Sandbox provisioned", "task", taskName)
@@ -566,6 +568,35 @@ func setupRHELSubscription(ctx context.Context, taskName string, taskDir *task.D
 	os.Setenv("TF_VAR_rhel_activation_key", keyName)
 
 	return nil
+}
+
+// cleanupRHELSubscription deletes the RHEL activation key created for the task.
+// It reads the key name from state_secrets.json and removes it from the RHSM API.
+func cleanupRHELSubscription(ctx context.Context, taskName string, taskDir *task.Dir) {
+	secrets, err := taskDir.LoadSecrets()
+	if err != nil || len(secrets) == 0 {
+		return
+	}
+
+	keyName, ok := secrets["rhel_activation_key"]
+	if !ok || keyName == "" {
+		return
+	}
+
+	clientID := os.Getenv("LIGHTSPEED_CLIENT_ID")
+	clientSecret := os.Getenv("LIGHTSPEED_CLIENT_SECRET")
+	if clientID == "" || clientSecret == "" {
+		slog.Warn("Cannot clean up RHEL activation key: missing LIGHTSPEED credentials", "task", taskName, "key", keyName)
+		return
+	}
+
+	slog.Info("Deleting RHEL activation key", "task", taskName, "key", keyName)
+	client := rhel.NewClient(clientID, clientSecret)
+	if err := client.DeleteActivationKey(ctx, keyName); err != nil {
+		slog.Warn("Failed to delete RHEL activation key", "task", taskName, "key", keyName, "error", err)
+		return
+	}
+	slog.Info("RHEL activation key deleted", "task", taskName, "key", keyName)
 }
 
 func copyAttachmentsToSandbox(ctx context.Context, runner sandbox.Runner, taskName string, files []issueattachments.DownloadedFile) error {
