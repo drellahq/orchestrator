@@ -240,7 +240,7 @@ func TestIntegration(t *testing.T) {
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	prOpener := &testPROpener{}
-	mcpSrv := mcpserver.New(logger, sandboxName, taskDir, runner, prOpener, []string{"test/*"}, "", "", "")
+	mcpSrv := mcpserver.New(logger, sandboxName, taskDir, runner, nil, prOpener, []string{"test/*"}, "", "", "")
 	if err := mcpSrv.Start(); err != nil {
 		t.Fatalf("MCP server start: %v", err)
 	}
@@ -490,7 +490,7 @@ func TestIntegrationWithAuthor(t *testing.T) {
 
 	prOpener := &testPROpener{}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	mcpSrv := mcpserver.New(logger, authorSandboxName, taskDir, runner, prOpener, []string{"test/*"}, "Test User <test@example.com>", "", "")
+	mcpSrv := mcpserver.New(logger, authorSandboxName, taskDir, runner, nil, prOpener, []string{"test/*"}, "Test User <test@example.com>", "", "")
 	if err := mcpSrv.Start(); err != nil {
 		t.Fatalf("MCP server start: %v", err)
 	}
@@ -536,7 +536,7 @@ echo "Result: $RESULT"`, remotePort, remotePort, remotePort)
 	// Verify a new MCP server created with the persisted author works correctly
 	// (simulates what task continue would do: load author from state, pass to MCP server)
 	prOpener2 := &testPROpener{}
-	mcpSrv2 := mcpserver.New(logger, authorSandboxName, taskDir, runner, prOpener2, []string{"test/*"}, state.Author, "", "")
+	mcpSrv2 := mcpserver.New(logger, authorSandboxName, taskDir, runner, nil, prOpener2, []string{"test/*"}, state.Author, "", "")
 	if err := mcpSrv2.Start(); err != nil {
 		t.Fatalf("MCP server 2 start: %v", err)
 	}
