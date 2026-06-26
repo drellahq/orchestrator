@@ -53,10 +53,17 @@ func TestCreateActivationKey(t *testing.T) {
 		if body["name"] != "task-42" {
 			t.Errorf("key: name = %q", body["name"])
 		}
+		for _, field := range []string{"role", "serviceLevel", "usage"} {
+			if _, ok := body[field]; ok {
+				t.Errorf("key: unexpected system purpose field %q", field)
+			}
+		}
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(map[string]string{"name": "task-42"})
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"body": map[string]string{"name": "task-42"},
+		})
 	})
 
 	srv := httptest.NewServer(mux)
@@ -123,7 +130,7 @@ func TestCreateActivationKey_KeyCreationError(t *testing.T) {
 	}
 }
 
-func TestCreateActivationKey_WrappedResponse(t *testing.T) {
+func TestCreateActivationKey_Response(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]string{"access_token": "tok"})
@@ -131,7 +138,12 @@ func TestCreateActivationKey_WrappedResponse(t *testing.T) {
 	mux.HandleFunc("/api/rhsm/v2/activation_keys", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"body": []map[string]string{{"name": "wrapped-key"}},
+			"body": map[string]interface{}{
+				"id":                    "2c94bafe9ef9c625019f04acf1dd7f91",
+				"name":                  "orchestrator-hello-test-7-a1b2c3d4",
+				"additionalRepositories": []any{},
+				"updatedAt":             "2026-06-26T16:04:30.000Z",
+			},
 		})
 	})
 
@@ -143,11 +155,11 @@ func TestCreateActivationKey_WrappedResponse(t *testing.T) {
 	c.apiURL = srv.URL + "/api/rhsm/v2"
 	c.httpClient = srv.Client()
 
-	name, err := c.CreateActivationKey(context.Background(), "test")
+	name, err := c.CreateActivationKey(context.Background(), "hello-test-7")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if name != "wrapped-key" {
-		t.Errorf("name = %q, want %q", name, "wrapped-key")
+	if name != "orchestrator-hello-test-7-a1b2c3d4" {
+		t.Errorf("name = %q, want %q", name, "orchestrator-hello-test-7-a1b2c3d4")
 	}
 }
