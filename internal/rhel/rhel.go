@@ -83,11 +83,10 @@ func (c *Client) CreateActivationKey(ctx context.Context, name string) (string, 
 		return "", fmt.Errorf("obtaining access token: %w", err)
 	}
 
+	// Only name is required; system purpose attributes (role, serviceLevel,
+	// usage) are org-specific and may not match available subscriptions.
 	payload := map[string]string{
-		"name":         name,
-		"serviceLevel": "Self-Support",
-		"role":         "Red Hat Enterprise Linux Server",
-		"usage":        "Development/Test",
+		"name": name,
 	}
 	payloadJSON, err := json.Marshal(payload)
 	if err != nil {
@@ -117,25 +116,15 @@ func (c *Client) CreateActivationKey(ctx context.Context, name string) (string, 
 	}
 
 	var keyResp struct {
-		Body []struct {
+		Body struct {
 			Name string `json:"name"`
 		} `json:"body"`
 	}
 	if err := json.Unmarshal(body, &keyResp); err != nil {
-		// Some API versions return the key directly
-		var direct struct {
-			Name string `json:"name"`
-		}
-		if err2 := json.Unmarshal(body, &direct); err2 != nil {
-			return "", fmt.Errorf("parsing activation key response: %w", err)
-		}
-		if direct.Name != "" {
-			return direct.Name, nil
-		}
 		return "", fmt.Errorf("parsing activation key response: %w", err)
 	}
-	if len(keyResp.Body) > 0 && keyResp.Body[0].Name != "" {
-		return keyResp.Body[0].Name, nil
+	if keyResp.Body.Name != "" {
+		return keyResp.Body.Name, nil
 	}
 
 	// Fall back to the name we requested
