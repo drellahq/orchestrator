@@ -14,6 +14,7 @@ KillMode=process
 StandardOutput=journal
 StandardError=journal
 Environment=HOME=%h
+EnvironmentFile=-%h/.env
 
 [Install]
 WantedBy=default.target
