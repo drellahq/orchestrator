@@ -8,8 +8,9 @@
 # output_dir: "./tasks"
 
 # Public base URL of the orchestrator web server. When set, the upload_image
-# MCP tool is enabled — images are stored in tasks/<name>/images/ and served
-# at <base_url>/tasks/<name>/images/<file>.
+# MCP tool is enabled — the agent passes an absolute sandbox path, the host
+# copies the file into tasks/<name>/images/, and returns a public URL at
+# <base_url>/tasks/<name>/images/<file>.
 # base_url: "https://drella.example.com"
 
 # Sandbox backend: "gjoll" (VMs) or "podman" (containers).

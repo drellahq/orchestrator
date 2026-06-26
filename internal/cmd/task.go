@@ -169,7 +169,7 @@ func executeTask(ctx context.Context, taskName, taskDescription string, taskDir 
 	logger := slog.Default()
 
 	// Start MCP server
-	mcpSrv := mcpserver.New(logger, taskName, taskDir, runner, ghRunner, cfg.AllowedRepos, author, cfg.Daemon.TasksRepo, cfg.BaseURL)
+	mcpSrv := mcpserver.New(logger, taskName, taskDir, runner, runner, ghRunner, cfg.AllowedRepos, author, cfg.Daemon.TasksRepo, cfg.BaseURL)
 	if err := mcpSrv.Start(); err != nil {
 		return fmt.Errorf("starting MCP server: %w", err)
 	}
