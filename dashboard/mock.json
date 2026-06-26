@@ -1,4 +1,10 @@
-[
+{
+  "budget": {
+    "max_budget_usd": 100,
+    "warn_budget_usd": 30,
+    "critical_budget_usd": 50
+  },
+  "tasks": [
   {
     "name": "add-retry-logic-to-sandbox-provisioning",
     "description": "Implement exponential backoff retry logic for sandbox VM provisioning failures. Currently a transient AWS API error causes the entire task to fail.",
@@ -33,7 +39,8 @@
     "author": "drella",
     "prs": [],
     "status": "in_progress",
-    "sandbox_destroyed": false
+    "sandbox_destroyed": false,
+    "usage": { "input_tokens": 12000, "output_tokens": 245000, "cache_read_input_tokens": 3200000, "cache_creation_input_tokens": 95000, "cost_usd": 62.38 }
   },
   {
     "name": "refactor-daemon-pr-polling",
@@ -58,7 +65,7 @@
     ],
     "status": "waiting",
     "sandbox_destroyed": true,
-    "usage": { "input_tokens": 3400, "output_tokens": 87200, "cache_read_input_tokens": 1480000, "cache_creation_input_tokens": 40000, "cost_usd": 7.4521 }
+    "usage": { "input_tokens": 3400, "output_tokens": 87200, "cache_read_input_tokens": 1480000, "cache_creation_input_tokens": 40000, "cost_usd": 35.12 }
   },
   {
     "name": "add-caddy-health-endpoint",
@@ -168,3 +175,4 @@
     "sandbox_destroyed": true
   }
 ]
+}

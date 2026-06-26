@@ -17,6 +17,7 @@
     runCount: 0,
     pollTimers: { taskList: null, transcript: null },
     knownVersion: null,
+    budget: { warn_budget_usd: 0, critical_budget_usd: 0, max_budget_usd: 0 },
     notify: {
       swRegistration: null,
       supported: ('serviceWorker' in navigator) && ('Notification' in window),
@@ -71,6 +72,26 @@
       return formatCost(usage.cost_usd);
     }
     return '';
+  }
+
+  function budgetLevel(costUSD) {
+    if (!costUSD || costUSD <= 0) return '';
+    var b = state.budget;
+    if (b.critical_budget_usd > 0 && costUSD >= b.critical_budget_usd) return 'budget-critical';
+    if (b.warn_budget_usd > 0 && costUSD >= b.warn_budget_usd) return 'budget-warn';
+    return '';
+  }
+
+  function parseBudgetFromYaml(yaml) {
+    var budget = {};
+    var m;
+    m = yaml.match(/max-budget-usd:\s*([\d.]+)/);
+    if (m) budget.max_budget_usd = parseFloat(m[1]);
+    m = yaml.match(/warn-budget-usd:\s*([\d.]+)/);
+    if (m) budget.warn_budget_usd = parseFloat(m[1]);
+    m = yaml.match(/critical-budget-usd:\s*([\d.]+)/);
+    if (m) budget.critical_budget_usd = parseFloat(m[1]);
+    return budget;
   }
 
   function showToast(msg) {
@@ -302,8 +323,9 @@
       .join('');
 
     const isRunning = computeStatus(task) === 'in_progress';
+    const bl = task.usage ? budgetLevel(task.usage.cost_usd) : '';
     const card = document.createElement('div');
-    card.className = 'task-card' + (isRunning ? ' task-card-running' : '');
+    card.className = 'task-card' + (isRunning ? ' task-card-running' : '') + (bl ? ' ' + bl : '');
     card.setAttribute('data-task', task.name);
     const usageStr = formatUsage(task.usage);
     const usageHtml = usageStr
@@ -384,7 +406,11 @@
       let allParts = [];
       if (tokenParts.length > 0) allParts.push(tokenParts.join(' '));
       if (task.usage.cost_usd) {
-        allParts.push('<span title="Total cost (USD)">' + formatCost(task.usage.cost_usd) + '</span>');
+        var budgetInfo = '';
+        if (state.budget.max_budget_usd > 0) {
+          budgetInfo = ' / ' + formatCost(state.budget.max_budget_usd);
+        }
+        allParts.push('<span title="Total cost (USD)">' + formatCost(task.usage.cost_usd) + budgetInfo + '</span>');
       }
       if (allParts.length > 0) {
         html += '<div><span class="meta-label">usage:</span><span class="meta-usage">' +
@@ -398,7 +424,11 @@
 
     html += '<div class="meta-desc">' + escapeHtml(task.description) + '</div>';
 
-    $('#task-meta').innerHTML = html;
+    var metaEl = $('#task-meta');
+    metaEl.innerHTML = html;
+    var bl = task.usage ? budgetLevel(task.usage.cost_usd) : '';
+    metaEl.classList.remove('budget-warn', 'budget-critical');
+    if (bl) metaEl.classList.add(bl);
   }
 
   // ── Render: transcript entries ──
@@ -800,7 +830,11 @@
   async function loadMockTasks() {
     const resp = await fetch('mock.json');
     if (!resp.ok) throw new Error('Failed to load mock.json: ' + resp.status);
-    return resp.json();
+    var data = await resp.json();
+    if (data.budget) {
+      Object.assign(state.budget, data.budget);
+    }
+    return data.tasks || data;
   }
 
   // ── Refresh ──
@@ -918,6 +952,10 @@
       const resp = await fetch('/config.yaml');
       if (!resp.ok) return;
       configYaml = await resp.text();
+      if (!isMockMode()) {
+        var parsed = parseBudgetFromYaml(configYaml);
+        Object.assign(state.budget, parsed);
+      }
       var el = document.getElementById('footer-config');
       if (!el) {
         el = document.createElement('span');

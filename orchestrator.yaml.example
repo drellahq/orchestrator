@@ -44,6 +44,18 @@
 # Local directory override for development (takes precedence over profiles_repo).
 # profiles_dir: ""
 
+# Agent budget limits. Controls how much a single Claude session can spend.
+# agent:
+#   # Hard spending cap passed to `claude --max-budget-usd`. Claude stops when
+#   # this limit is reached. Set to 0 or omit to disable.
+#   max-budget-usd: 100
+#   # Dashboard warning threshold — usage display turns orange when cost exceeds
+#   # this value.
+#   warn-budget-usd: 30
+#   # Dashboard critical threshold — usage display turns red when cost exceeds
+#   # this value.
+#   critical-budget-usd: 50
+
 # Daemon configuration for automatic PR comment polling.
 # daemon:
 #   # How often the daemon completes a full cycle across all PRs.

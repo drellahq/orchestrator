@@ -265,7 +265,7 @@ func executeTask(ctx context.Context, taskName, taskDescription string, taskDir 
 
 	// Build the Claude run script
 	slog.Info("Running Claude", "task", taskName)
-	runScript := buildRunScript(taskDescription, continueSession)
+	runScript := buildRunScript(taskDescription, continueSession, cfg.Agent.MaxBudgetUSD)
 
 	tmpRun, err := os.CreateTemp("", "run-claude-*.sh")
 	if err != nil {
@@ -343,7 +343,7 @@ func executeTask(ctx context.Context, taskName, taskDescription string, taskDir 
 	return nil
 }
 
-func buildRunScript(taskDescription string, continueSession bool) string {
+func buildRunScript(taskDescription string, continueSession bool, maxBudgetUSD float64) string {
 	escapedDesc := strings.ReplaceAll(taskDescription, "'", "'\\''")
 
 	var claudeFlags string
@@ -351,6 +351,11 @@ func buildRunScript(taskDescription string, continueSession bool) string {
 	if continueSession {
 		claudeFlags = "--continue"
 		teeFlag = "-a"
+	}
+
+	var budgetFlag string
+	if maxBudgetUSD > 0 {
+		budgetFlag = fmt.Sprintf("--max-budget-usd %.2f", maxBudgetUSD)
 	}
 
 	return fmt.Sprintf(`#!/bin/bash
@@ -361,9 +366,9 @@ set -o pipefail
 stdbuf -oL claude --dangerously-skip-permissions -p --verbose \
   --effort max \
   --output-format stream-json --append-system-prompt-file ~/system-prompt.md \
-  %s '%s' \
+  %s %s '%s' \
   </dev/null | stdbuf -oL tee %s ~/transcript.jsonl
-`, claudeFlags, escapedDesc, teeFlag)
+`, budgetFlag, claudeFlags, escapedDesc, teeFlag)
 }
 
 func setupSandbox(ctx context.Context, runner sandbox.Runner, taskName string, taskDir *task.Dir, cfg *config.Config, profileName string, profileVars []string) error {
