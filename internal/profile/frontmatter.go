@@ -18,14 +18,14 @@ type FrontMatter struct {
 
 // ParseFrontMatter extracts YAML front matter from an issue body.
 //
-// The front matter is delimited by "---" lines at the start of the body:
+// The front matter is delimited by "```" or "---" lines at the start of the body:
 //
-//	---
+//	```
 //	profile: code-review
 //	agent: opencode
 //	repo: org/repo
 //	pr: 42
-//	---
+//	```
 //
 //	Review this pull request.
 //
@@ -50,25 +50,32 @@ func ParseFrontMatterFull(body string) (*FrontMatter, error) {
 	}
 
 	trimmed := strings.TrimLeftFunc(body, unicode.IsSpace)
-	if !strings.HasPrefix(trimmed, "---") {
+
+	var delimiter string
+	switch {
+	case strings.HasPrefix(trimmed, "```"):
+		delimiter = "```"
+	case strings.HasPrefix(trimmed, "---"):
+		delimiter = "---"
+	default:
 		return fm, nil
 	}
 
-	// Find the closing delimiter
-	rest := trimmed[3:] // skip opening "---"
+	rest := trimmed[len(delimiter):]
 	rest = strings.TrimLeft(rest, " \t")
 	if len(rest) == 0 || rest[0] != '\n' {
 		return fm, nil
 	}
-	rest = rest[1:] // skip the newline after "---"
+	rest = rest[1:]
 
-	closeIdx := strings.Index(rest, "\n---")
+	closeMarker := "\n" + delimiter
+	closeIdx := strings.Index(rest, closeMarker)
 	if closeIdx == -1 {
 		return fm, nil
 	}
 
 	fmContent := rest[:closeIdx]
-	afterClose := rest[closeIdx+4:] // skip "\n---"
+	afterClose := rest[closeIdx+len(closeMarker):]
 
 	var raw map[string]interface{}
 	if err := yaml.Unmarshal([]byte(fmContent), &raw); err != nil {

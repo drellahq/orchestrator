@@ -304,6 +304,95 @@ Review this pull request.`
 	}
 }
 
+func TestParseFrontMatter_Backticks(t *testing.T) {
+	body := "```\nprofile: code-review\nrepo: org/repo\npr: 42\n```\n\nReview this pull request."
+
+	fm, err := ParseFrontMatterFull(body)
+	if err != nil {
+		t.Fatalf("ParseFrontMatterFull() error: %v", err)
+	}
+
+	if fm.Profile != "code-review" {
+		t.Errorf("Profile = %q, want %q", fm.Profile, "code-review")
+	}
+	if fm.Vars["PROFILE_REPO"] != "org/repo" {
+		t.Errorf("PROFILE_REPO = %q, want %q", fm.Vars["PROFILE_REPO"], "org/repo")
+	}
+	if fm.Vars["PROFILE_PR"] != "42" {
+		t.Errorf("PROFILE_PR = %q, want %q", fm.Vars["PROFILE_PR"], "42")
+	}
+	if fm.Description != "Review this pull request." {
+		t.Errorf("Description = %q, want %q", fm.Description, "Review this pull request.")
+	}
+}
+
+func TestParseFrontMatter_BackticksWithAgent(t *testing.T) {
+	body := "```\nagent: opencode\nprofile: code-review\nrepo: org/repo\n```\n\nReview this PR."
+
+	fm, err := ParseFrontMatterFull(body)
+	if err != nil {
+		t.Fatalf("ParseFrontMatterFull() error: %v", err)
+	}
+
+	if fm.AgentBackend != "opencode" {
+		t.Errorf("AgentBackend = %q, want %q", fm.AgentBackend, "opencode")
+	}
+	if fm.Profile != "code-review" {
+		t.Errorf("Profile = %q, want %q", fm.Profile, "code-review")
+	}
+	if fm.Vars["PROFILE_REPO"] != "org/repo" {
+		t.Errorf("PROFILE_REPO = %q, want %q", fm.Vars["PROFILE_REPO"], "org/repo")
+	}
+	if fm.Description != "Review this PR." {
+		t.Errorf("Description = %q, want %q", fm.Description, "Review this PR.")
+	}
+}
+
+func TestParseFrontMatter_BackticksNoClosing(t *testing.T) {
+	body := "```\nprofile: test\nkey: value\n\nBody without closing delimiter."
+
+	_, _, desc, err := ParseFrontMatter(body)
+	if err != nil {
+		t.Fatalf("ParseFrontMatter() error: %v", err)
+	}
+	if desc != body {
+		t.Errorf("description should be original body")
+	}
+}
+
+func TestParseFrontMatter_BackticksLeadingWhitespace(t *testing.T) {
+	body := "\n```\nprofile: test\n```\n\nBody."
+
+	profile, _, desc, err := ParseFrontMatter(body)
+	if err != nil {
+		t.Fatalf("ParseFrontMatter() error: %v", err)
+	}
+
+	if profile != "test" {
+		t.Errorf("profile = %q, want %q", profile, "test")
+	}
+	if desc != "Body." {
+		t.Errorf("description = %q", desc)
+	}
+}
+
+func TestParseFrontMatter_MismatchedDelimiters(t *testing.T) {
+	body := "```\nprofile: test\n---\n\nBody."
+
+	profile, _, desc, err := ParseFrontMatter(body)
+	if err != nil {
+		t.Fatalf("ParseFrontMatter() error: %v", err)
+	}
+
+	// Backtick opening looks for backtick closing; --- is not a match
+	if profile != "" {
+		t.Errorf("profile = %q, want empty (mismatched delimiters)", profile)
+	}
+	if desc != body {
+		t.Errorf("description should be original body")
+	}
+}
+
 func TestToEnvKey(t *testing.T) {
 	tests := []struct {
 		input string
