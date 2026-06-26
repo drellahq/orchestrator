@@ -1,18 +1,22 @@
 package config
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path"
+	"sort"
 
 	"github.com/goccy/go-yaml"
 )
 
 // DaemonConfig holds settings for the daemon polling loop.
 type DaemonConfig struct {
-	PollInterval      string   `yaml:"poll_interval"`
-	AllowedCommenters []string `yaml:"allowed_commenters"`
-	TasksRepo         string   `yaml:"tasks_repo"`
+	PollInterval      string            `yaml:"poll_interval"`
+	AllowedCommenters []string          `yaml:"allowed_commenters"`
+	AllowedCommentersOrgs map[string]string `yaml:"allowed_commenters_orgs"`
+	TasksRepo         string            `yaml:"tasks_repo"`
 }
 
 type Config struct {
@@ -46,6 +50,63 @@ func (c *Config) RepoAllowed(repo string) bool {
 		}
 	}
 	return false
+}
+
+// OrgMemberLister can list members of a GitHub organization.
+type OrgMemberLister interface {
+	ListOrgMembers(ctx context.Context, org, role string) ([]string, error)
+}
+
+// ResolvedCommenters holds the resolved allowed commenters list and metadata
+// about where each entry came from.
+type ResolvedCommenters struct {
+	Static   []string          `yaml:"static"`
+	OrgUsers map[string][]string `yaml:"org_users"`
+	Merged   []string          `yaml:"merged"`
+}
+
+// ResolveAllowedCommenters merges the static allowed_commenters list with
+// members fetched from allowed_commenters_orgs. It returns the merged
+// deduplicated list and the full resolution details.
+func ResolveAllowedCommenters(ctx context.Context, cfg *DaemonConfig, lister OrgMemberLister) (*ResolvedCommenters, error) {
+	resolved := &ResolvedCommenters{
+		Static:   cfg.AllowedCommenters,
+		OrgUsers: make(map[string][]string),
+	}
+
+	seen := make(map[string]bool)
+	for _, u := range cfg.AllowedCommenters {
+		seen[u] = true
+	}
+
+	for org, role := range cfg.AllowedCommentersOrgs {
+		members, err := lister.ListOrgMembers(ctx, org, role)
+		if err != nil {
+			slog.Warn("Failed to resolve org members, skipping", "org", org, "role", role, "error", err)
+			continue
+		}
+		resolved.OrgUsers[org] = members
+		for _, m := range members {
+			seen[m] = true
+		}
+	}
+
+	for u := range seen {
+		resolved.Merged = append(resolved.Merged, u)
+	}
+	sort.Strings(resolved.Merged)
+
+	return resolved, nil
+}
+
+// WriteResolvedCommenters writes the resolved commenters to a YAML file
+// in the output directory for dashboard visibility.
+func WriteResolvedCommenters(outputDir string, resolved *ResolvedCommenters) error {
+	data, err := yaml.Marshal(resolved)
+	if err != nil {
+		return fmt.Errorf("marshaling resolved commenters: %w", err)
+	}
+	return os.WriteFile(path.Join(outputDir, "allowed_commenters_resolved.yaml"), data, 0644)
 }
 
 func Load(path string) (*Config, error) {

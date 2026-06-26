@@ -449,6 +449,31 @@ func (r *Runner) ListIssues(ctx context.Context, repo string) ([]Issue, error) {
 	return issues, nil
 }
 
+// ListOrgMembers returns the logins of members of a GitHub organization.
+// role must be "maintainer" (all members) or "owner" (admins only).
+func (r *Runner) ListOrgMembers(ctx context.Context, org, role string) ([]string, error) {
+	apiRole := ""
+	switch role {
+	case "owner":
+		apiRole = "admin"
+	case "maintainer":
+		apiRole = "all"
+	default:
+		return nil, fmt.Errorf("invalid org role %q: must be \"maintainer\" or \"owner\"", role)
+	}
+
+	endpoint := fmt.Sprintf("/orgs/%s/members?role=%s&per_page=100", org, apiRole)
+	out, err := r.run(ctx, "", r.bin, "api", "--paginate", endpoint, "--jq", ".[].login")
+	if err != nil {
+		return nil, fmt.Errorf("listing org members for %s: %w", org, err)
+	}
+	out = strings.TrimSpace(out)
+	if out == "" {
+		return nil, nil
+	}
+	return strings.Split(out, "\n"), nil
+}
+
 func (r *Runner) run(ctx context.Context, dir, name string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	if dir != "" {

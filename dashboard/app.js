@@ -912,6 +912,7 @@
   // ── Config dialog ──
 
   var configYaml = '';
+  var resolvedCommentersYaml = '';
 
   async function loadConfigFooter() {
     try {
@@ -934,10 +935,62 @@
         showConfigDialog();
       }
     } catch (_) {}
+
+    loadResolvedCommenters();
+  }
+
+  async function loadResolvedCommenters() {
+    try {
+      const resp = await fetch('/allowed_commenters_resolved.yaml');
+      if (!resp.ok) return;
+      resolvedCommentersYaml = await resp.text();
+
+      var el = document.getElementById('footer-commenters');
+      if (!el) {
+        el = document.createElement('span');
+        el.id = 'footer-commenters';
+        el.className = 'version-component config-trigger';
+        $('#version-footer').appendChild(el);
+      }
+
+      var merged = parseSimpleYamlList(resolvedCommentersYaml, 'merged');
+      el.innerHTML = 'commenters: <span class="version-value" title="' +
+        escapeHtml(merged.join(', ')) + '">' + merged.length + '</span>';
+      el.addEventListener('click', function (e) {
+        e.preventDefault();
+        showConfigDialog();
+      });
+    } catch (_) {}
+  }
+
+  function parseSimpleYamlList(yaml, key) {
+    var items = [];
+    var lines = yaml.split('\n');
+    var inKey = false;
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i];
+      if (line.match(new RegExp('^' + key + ':'))) {
+        inKey = true;
+        continue;
+      }
+      if (inKey) {
+        var m = line.match(/^- (.+)/);
+        if (m) {
+          items.push(m[1].trim());
+        } else if (line.match(/^\S/)) {
+          break;
+        }
+      }
+    }
+    return items;
   }
 
   function showConfigDialog() {
-    $('#config-content').textContent = configYaml;
+    var content = configYaml;
+    if (resolvedCommentersYaml) {
+      content += '\n\n# ── Resolved allowed commenters ──\n' + resolvedCommentersYaml;
+    }
+    $('#config-content').textContent = content;
     $('#config-dialog').classList.remove('hidden');
     if (window.location.hash !== '#config') {
       history.pushState(null, '', '#config');
