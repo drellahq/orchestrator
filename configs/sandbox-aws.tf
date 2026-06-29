@@ -74,12 +74,33 @@ resource "aws_ec2_instance_state" "sandbox" {
 output "public_ip"   { value = var.gjoll_instance_state == "running" ? aws_instance.sandbox.public_ip : "" }
 output "instance_id" { value = aws_instance.sandbox.id }
 output "ssh_user"    { value = "fedora" }
+
+variable "rhel_org_id" {
+  type        = string
+  description = "Red Hat organization ID for subscription-manager registration"
+  default     = ""
+  sensitive   = true
+}
+
+variable "rhel_activation_key" {
+  type        = string
+  description = "Red Hat activation key for subscription-manager registration"
+  default     = ""
+  sensitive   = true
+}
+
 output "init_script" {
   value = <<-EOT
     #!/bin/bash
     set -euo pipefail
     curl -fsSL https://claude.ai/install.sh | bash
     sudo dnf install -y git-core
+
+    # Register with Red Hat subscription-manager if credentials are provided
+    %{if var.rhel_org_id != "" && var.rhel_activation_key != ""}
+    sudo dnf install -y subscription-manager
+    sudo subscription-manager register --org '${var.rhel_org_id}' --activationkey '${var.rhel_activation_key}'
+    %{endif}
 
     # Configure Claude Code to use Vertex AI via local proxy
     echo 'export CLAUDE_CODE_USE_VERTEX=1' >> ~/.bashrc
