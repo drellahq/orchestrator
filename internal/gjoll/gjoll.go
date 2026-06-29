@@ -22,8 +22,10 @@ func New(bin string) *Runner {
 }
 
 // Up provisions a sandbox VM from a .tf environment.
-func (r *Runner) Up(ctx context.Context, name, tfPath string) error {
-	return r.run(ctx, nil, "up", "-n", name, tfPath)
+// env contains additional environment variables (e.g. TF_VAR_*) for the
+// gjoll subprocess, avoiding process-global os.Setenv calls.
+func (r *Runner) Up(ctx context.Context, name, tfPath string, env []string) error {
+	return r.run(ctx, env, "up", "-n", name, tfPath)
 }
 
 // Start starts a stopped sandbox VM.

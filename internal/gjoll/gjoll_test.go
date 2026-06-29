@@ -66,6 +66,41 @@ func readArgs(t *testing.T, path string) []string {
 	return strings.Split(s, "\n")
 }
 
+func TestUpEnvVars(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not found")
+	}
+
+	dir := t.TempDir()
+	envFile := filepath.Join(dir, "env.txt")
+
+	script := filepath.Join(dir, "capture-env")
+	content := "#!/bin/sh\nenv > " + envFile + "\n"
+	if err := os.WriteFile(script, []byte(content), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	r := New(script)
+	env := []string{
+		"TF_VAR_rhel_org_id=org-123",
+		"TF_VAR_rhel_activation_key=key-abc",
+	}
+	if err := r.Up(context.Background(), "test", "/tmp/env.tf", env); err != nil {
+		t.Fatalf("Up with env: %v", err)
+	}
+
+	data, err := os.ReadFile(envFile)
+	if err != nil {
+		t.Fatalf("reading env file: %v", err)
+	}
+	envStr := string(data)
+	for _, want := range env {
+		if !strings.Contains(envStr, want) {
+			t.Errorf("env missing %q", want)
+		}
+	}
+}
+
 func TestCommandConstruction(t *testing.T) {
 	// Skip if /bin/sh is not available (unlikely but safe)
 	if _, err := exec.LookPath("sh"); err != nil {
@@ -80,7 +115,7 @@ func TestCommandConstruction(t *testing.T) {
 		{
 			name: "Up",
 			call: func(r *Runner, ctx context.Context) error {
-				return r.Up(ctx, "my-sandbox", "/path/to/env.tf")
+				return r.Up(ctx, "my-sandbox", "/path/to/env.tf", nil)
 			},
 			wantArgs: []string{"up", "-n", "my-sandbox", "/path/to/env.tf"},
 		},

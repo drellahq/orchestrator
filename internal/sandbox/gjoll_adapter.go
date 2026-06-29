@@ -24,8 +24,8 @@ func NewGjollAdapter(gjollBin string) *GjollAdapter {
 
 // Up provisions a sandbox VM using gjoll.
 // config is the path to the .tf file.
-func (a *GjollAdapter) Up(ctx context.Context, name string, config string) error {
-	return a.runner.Up(ctx, name, config)
+func (a *GjollAdapter) Up(ctx context.Context, name string, config string, env []string) error {
+	return a.runner.Up(ctx, name, config, env)
 }
 
 // Start starts a stopped sandbox.

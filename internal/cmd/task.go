@@ -213,9 +213,13 @@ func executeTask(ctx context.Context, taskName, taskDescription string, taskDir 
 			return fmt.Errorf("resuming sandbox: %w", err)
 		}
 	} else {
+		var sandboxEnv []string
 		if hasLabel(labels, "rhel") {
-			if err := setupRHELSubscription(ctx, taskName, taskDir); err != nil {
+			env, err := setupRHELSubscription(ctx, taskName, taskDir)
+			if err != nil {
 				slog.Warn("RHEL subscription setup failed, continuing without it", "task", taskName, "error", err)
+			} else {
+				sandboxEnv = env
 			}
 		}
 
@@ -225,7 +229,7 @@ func executeTask(ctx context.Context, taskName, taskDescription string, taskDir 
 		}
 
 		slog.Info("Provisioning sandbox", "task", taskName)
-		if err := runner.Up(ctx, taskName, tfPath); err != nil {
+		if err := runner.Up(ctx, taskName, tfPath, sandboxEnv); err != nil {
 			return fmt.Errorf("provisioning sandbox: %w", err)
 		}
 	}
@@ -528,32 +532,35 @@ func hasLabel(labels []string, name string) bool {
 	return false
 }
 
-// setupRHELSubscription creates an activation key via the Red Hat API and sets
-// TF_VAR_ environment variables so the sandbox init_script can register with
-// subscription-manager. The env vars are inherited by the gjoll subprocess.
+// setupRHELSubscription creates an activation key via the Red Hat API and
+// returns TF_VAR_ environment variables for the gjoll subprocess so the
+// sandbox init_script can register with subscription-manager.
+//
+// The env vars are returned as a slice (not set globally via os.Setenv) to
+// avoid race conditions when multiple tasks run concurrently in the daemon.
 // The activation key is also persisted in the task's state_secrets.json so it
 // can be recovered on orchestrator restart.
-func setupRHELSubscription(ctx context.Context, taskName string, taskDir *task.Dir) error {
+func setupRHELSubscription(ctx context.Context, taskName string, taskDir *task.Dir) ([]string, error) {
 	clientID := os.Getenv("LIGHTSPEED_CLIENT_ID")
 	clientSecret := os.Getenv("LIGHTSPEED_CLIENT_SECRET")
 	orgID := os.Getenv("LIGHTSPEED_ORG_ID")
 
 	if clientID == "" || clientSecret == "" || orgID == "" {
-		return fmt.Errorf("LIGHTSPEED_CLIENT_ID, LIGHTSPEED_CLIENT_SECRET, and LIGHTSPEED_ORG_ID must be set")
+		return nil, fmt.Errorf("LIGHTSPEED_CLIENT_ID, LIGHTSPEED_CLIENT_SECRET, and LIGHTSPEED_ORG_ID must be set")
 	}
 
 	slog.Info("Creating RHEL activation key", "task", taskName)
 
 	var suffix [4]byte
 	if _, err := rand.Read(suffix[:]); err != nil {
-		return fmt.Errorf("generating random suffix: %w", err)
+		return nil, fmt.Errorf("generating random suffix: %w", err)
 	}
 	akName := fmt.Sprintf("orchestrator-%s-%s", taskName, hex.EncodeToString(suffix[:]))
 
 	client := rhel.NewClient(clientID, clientSecret)
 	keyName, err := client.CreateActivationKey(ctx, akName)
 	if err != nil {
-		return fmt.Errorf("creating activation key: %w", err)
+		return nil, fmt.Errorf("creating activation key: %w", err)
 	}
 
 	slog.Info("RHEL activation key created", "task", taskName, "key", keyName)
@@ -562,10 +569,11 @@ func setupRHELSubscription(ctx context.Context, taskName string, taskDir *task.D
 		slog.Warn("Failed to persist RHEL activation key to state_secrets.json", "task", taskName, "error", err)
 	}
 
-	os.Setenv("TF_VAR_rhel_org_id", orgID)
-	os.Setenv("TF_VAR_rhel_activation_key", keyName)
-
-	return nil
+	env := []string{
+		"TF_VAR_rhel_org_id=" + orgID,
+		"TF_VAR_rhel_activation_key=" + keyName,
+	}
+	return env, nil
 }
 
 func copyAttachmentsToSandbox(ctx context.Context, runner sandbox.Runner, taskName string, files []issueattachments.DownloadedFile) error {

@@ -37,7 +37,8 @@ func NewPodman(image, anthropicKeyFile string, mcpPort int, agentInstallCmd stri
 }
 
 // Up provisions a new container sandbox.
-func (r *PodmanRunner) Up(ctx context.Context, name string, config string) error {
+// env is accepted for interface compatibility but unused by podman.
+func (r *PodmanRunner) Up(ctx context.Context, name string, config string, env []string) error {
 	args := []string{
 		"run", "-d",
 		"--name", name,

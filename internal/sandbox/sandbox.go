@@ -17,7 +17,10 @@ type Runner interface {
 	// Up provisions a new sandbox.
 	// For gjoll: config is the path to .tf file
 	// For podman: config is the container image name
-	Up(ctx context.Context, name string, config string) error
+	// env contains additional environment variables (e.g. TF_VAR_*) for the
+	// provisioning subprocess. These are appended to the inherited process
+	// environment, so callers do not need to set them globally.
+	Up(ctx context.Context, name string, config string, env []string) error
 
 	// Start starts a stopped sandbox.
 	Start(ctx context.Context, name string) error

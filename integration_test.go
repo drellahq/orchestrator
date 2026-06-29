@@ -196,7 +196,7 @@ func TestIntegration(t *testing.T) {
 
 	// 1. Provision sandbox
 	t.Log("Provisioning sandbox...")
-	if err := runner.Up(ctx, sandboxName, tfPath); err != nil {
+	if err := runner.Up(ctx, sandboxName, tfPath, nil); err != nil {
 		t.Fatalf("gjoll up failed: %v", err)
 	}
 
@@ -449,7 +449,7 @@ func TestIntegrationWithAuthor(t *testing.T) {
 	const authorSandboxName = "orch-integ-author"
 
 	t.Log("Provisioning sandbox for author test...")
-	if err := runner.Up(ctx, authorSandboxName, tfPath); err != nil {
+	if err := runner.Up(ctx, authorSandboxName, tfPath, nil); err != nil {
 		t.Fatalf("gjoll up failed: %v", err)
 	}
 
