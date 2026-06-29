@@ -116,10 +116,20 @@ output "init_script" {
     %{if var.rhel_org_id != "" && var.rhel_activation_key != ""}
     sudo dnf install -y subscription-manager
     sudo subscription-manager register --org '${var.rhel_org_id}' --activationkey '${var.rhel_activation_key}'
+
+    # Verify that registration produced entitlement certificates
+    if ! ls /etc/pki/entitlement/*-key.pem &>/dev/null; then
+      echo "ERROR: subscription-manager registered but no entitlement certificates found" >&2
+      echo "RHEL package repositories will not be available for image builds" >&2
+      exit 1
+    fi
     %{endif}
 
     # Configure Claude Code to use Vertex AI via local proxy
     cat >> ~/.bashrc <<'RCEOF'
+    %{if var.rhel_org_id != "" && var.rhel_activation_key != ""}
+    export RHEL_SUBSCRIBED=1
+    %{endif}
     export CLAUDE_CODE_USE_VERTEX=1
     export CLOUD_ML_REGION=global
     export ANTHROPIC_VERTEX_PROJECT_ID=itpc-gcp-core-pe-eng-claude

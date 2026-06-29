@@ -215,7 +215,7 @@ func executeTask(ctx context.Context, taskName, taskDescription string, taskDir 
 	} else {
 		if hasLabel(labels, "rhel") {
 			if err := setupRHELSubscription(ctx, taskName, taskDir); err != nil {
-				slog.Warn("RHEL subscription setup failed, continuing without it", "task", taskName, "error", err)
+				return fmt.Errorf("RHEL subscription setup failed (label 'rhel' requires working subscription): %w", err)
 			}
 		}
 

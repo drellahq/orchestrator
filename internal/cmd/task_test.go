@@ -1,9 +1,11 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -158,5 +160,65 @@ func TestResolveTaskSource(t *testing.T) {
 	}
 	if _, _, ok := resolveTaskSource(td2, "", 0, ""); ok {
 		t.Error("expected not ok without source")
+	}
+}
+
+func TestHasLabel(t *testing.T) {
+	tests := []struct {
+		name   string
+		labels []string
+		target string
+		want   bool
+	}{
+		{"exact match", []string{"rhel", "bug"}, "rhel", true},
+		{"case insensitive", []string{"RHEL", "bug"}, "rhel", true},
+		{"mixed case", []string{"Rhel"}, "rhel", true},
+		{"not present", []string{"centos", "bug"}, "rhel", false},
+		{"empty labels", []string{}, "rhel", false},
+		{"nil labels", nil, "rhel", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := hasLabel(tt.labels, tt.target); got != tt.want {
+				t.Errorf("hasLabel(%v, %q) = %v, want %v", tt.labels, tt.target, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSetupRHELSubscription_MissingEnvVars(t *testing.T) {
+	t.Setenv("LIGHTSPEED_CLIENT_ID", "")
+	t.Setenv("LIGHTSPEED_CLIENT_SECRET", "")
+	t.Setenv("LIGHTSPEED_ORG_ID", "")
+
+	dir := t.TempDir()
+	td, err := task.Create(dir, "rhel-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = setupRHELSubscription(context.Background(), "rhel-test", td)
+	if err == nil {
+		t.Fatal("expected error when LIGHTSPEED env vars are missing")
+	}
+	if got := err.Error(); !strings.Contains(got, "LIGHTSPEED_CLIENT_ID") {
+		t.Errorf("error should mention LIGHTSPEED_CLIENT_ID, got: %s", got)
+	}
+}
+
+func TestSetupRHELSubscription_PartialEnvVars(t *testing.T) {
+	t.Setenv("LIGHTSPEED_CLIENT_ID", "some-id")
+	t.Setenv("LIGHTSPEED_CLIENT_SECRET", "")
+	t.Setenv("LIGHTSPEED_ORG_ID", "some-org")
+
+	dir := t.TempDir()
+	td, err := task.Create(dir, "rhel-test-partial")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = setupRHELSubscription(context.Background(), "rhel-test-partial", td)
+	if err == nil {
+		t.Fatal("expected error when LIGHTSPEED_CLIENT_SECRET is missing")
 	}
 }
