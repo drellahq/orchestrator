@@ -106,6 +106,7 @@ variable "rhel_activation_key" {
 }
 
 output "init_script" {
+  sensitive = true
   value = <<-EOT
     #!/bin/bash
     set -euo pipefail
