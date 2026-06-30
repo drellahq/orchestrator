@@ -1,10 +1,14 @@
 # Orchestrator
 
-A CLI tool that spawns sandboxed coding agent instances using [gjoll](https://github.com/ondrejbudai/gjoll) (libvirt backend), exposes an MCP server for privileged actions (pulling code), and manages task lifecycle including conversation archival and code retrieval. Supports [Claude Code](https://claude.ai) and [OpenCode](https://opencode.ai/) as agent backends.
+A CLI tool that spawns sandboxed coding agent instances using [gjoll](https://github.com/ondrejbudai/gjoll) (VM) or podman (container) backends, exposes an MCP server for privileged actions (pulling code), and manages task lifecycle including conversation archival and code retrieval. Supports [Claude Code](https://claude.ai) and [OpenCode](https://opencode.ai/) as agent backends.
 
 The orchestrator bridges untrusted sandbox execution with trusted host operations: the agent runs inside a credential-free VM, but can request the host to pull committed code via MCP.
 
+Run `make check` to verify prerequisites before your first task.
+
 ## Prerequisites
+
+For local dev with Podman (no libvirt or GCP), see [Local Development](#local-development) instead.
 
 - **Go** (1.24+)
 - **gjoll**: `go install github.com/ondrejbudai/gjoll/cmd/gjoll@latest`
@@ -24,10 +28,12 @@ Or build from source:
 ```bash
 git clone https://github.com/drellahq/orchestrator.git
 cd orchestrator
-go build -o orchestrator ./cmd/orchestrator
+make build
 ```
 
 ## Setup
+
+For the lighter Podman path, skip to [Local Development → Option 1](#option-1-podman-backend-containers). For libvirt with Anthropic API instead of Vertex AI, see [Option 2](#option-2-gjoll-backend-with-direct-anthropic-api).
 
 1. Edit `configs/sandbox.tf` and replace `YOUR_PROJECT_ID_HERE` with your GCP project ID for Vertex AI.
 
@@ -75,11 +81,12 @@ The `orchestrator.yaml` file supports:
 | `sandbox_backend`           | `gjoll`                   | Sandbox backend: `gjoll` (VMs) or `podman` (containers) |
 | `gjoll_env`                 | `./configs/sandbox.tf`    | Path to gjoll .tf environment file (gjoll backend) |
 | `podman_image`              | `fedora:43`               | Container image for sandboxes (podman backend) |
-| `anthropic_key_file`        | `~/.anthropic/api_key`    | Path to Anthropic API key (podman backend) |
-| `agent_backend`             | `claude-code`             | Coding agent backend: `claude-code` or `opencode` |
+| `anthropic_key_file`        | (empty)                   | Path to Anthropic API key when using cloud Anthropic (not needed with default LM Studio) |
+| `agent_backend`             | `opencode`                | Coding agent backend: `claude-code` or `opencode` |
+| `llm_base_url`              | `http://127.0.0.1:1234/v1` | Local LLM API base URL (LM Studio); set empty to use cloud Anthropic/Vertex |
 | `allowed_repos`             | `[]` (deny all)           | Repos allowed for `open_pr`/`update_pr`/`comment_on_pr` (glob patterns)|
 | `profiles_repo`             | (empty)                   | GitHub repo containing profile directories (e.g. `myorg/profiles`) |
-| `profiles_dir`              | (empty)                   | Local directory override for profiles (takes precedence over `profiles_repo`) |
+| `profiles_dir`              | (empty)                   | Local directory override for profiles (takes precedence over `profiles_repo`; e.g. `../profiles` in a multi-repo checkout) |
 | `daemon.poll_interval`      | `60s`                     | How often the daemon polls for new PR comments and tasks |
 | `daemon.allowed_commenters` | `[]`                      | GitHub usernames allowed to trigger `task continue` via PR comments and to create tasks via `tasks_repo` issues |
 | `daemon.tasks_repo`         | (empty)                   | GitHub repo to monitor for task specs and issues (e.g. `myorg/tasks`) |
@@ -94,56 +101,98 @@ Faster and lighter for local development. Sandboxes run as podman containers ins
 
 **Prerequisites:**
 - **Podman**: `podman version` must work
-- **Anthropic API Key**: Sign up at [console.anthropic.com](https://console.anthropic.com) and save your API key to `~/.anthropic/api_key`
+- **[LM Studio](https://lmstudio.ai/)**: local server running with a model loaded (default API: `http://127.0.0.1:1234/v1`)
+
+No Anthropic API key is required with the default configuration — agents talk to LM Studio via `llm_base_url`.
 
 **Setup:**
 
-1. Configure `orchestrator.yaml`:
+1. Start LM Studio, load a model, and enable the local server.
+
+2. Copy and adjust config (set `sandbox_backend: podman` for the fastest local path):
+   ```bash
+   cp orchestrator.yaml.example orchestrator.yaml
+   ```
+
+   Minimal `orchestrator.yaml`:
    ```yaml
-   sandbox_backend: "podman"
-   podman_image: "fedora:43"
-   anthropic_key_file: "~/.anthropic/api_key"
+   sandbox_backend: podman
    output_dir: "./tasks"
    allowed_repos:
      - your-username/*
    ```
 
-2. Authenticate with GitHub CLI (for PR operations):
+3. Verify prerequisites:
+
+   ```bash
+   make check
+   ```
+
+4. Authenticate with GitHub CLI (for PR operations):
    ```bash
    gh auth login
    ```
 
-3. Run a task:
+5. Run a task:
    ```bash
    ./orchestrator task new hello-test "Create a hello.txt file"
    ```
 
 **How it works:**
 - Podman containers are created on-demand for each task
-- Claude Code is installed via install.sh in the container
-- API key is securely copied with proper ownership
+- OpenCode is installed in the container (default `agent_backend`)
+- The agent uses `ANTHROPIC_BASE_URL` pointing at LM Studio on the host (`--network host`)
 - Containers run as non-root user `claude`
 - Faster startup than VMs (seconds vs minutes)
 
-### Option 2: Gjoll Backend with Direct Anthropic API
+To use cloud Anthropic instead, sign up at [console.anthropic.com](https://console.anthropic.com), save your API key to `~/.anthropic/api_key`, and configure:
+
+```yaml
+llm_base_url: ""
+anthropic_key_file: "~/.anthropic/api_key"
+```
+
+### Option 2: Gjoll Backend with Local LLM
+
+Use gjoll libvirt VMs with a local LLM (Ollama or LM Studio) via gjoll's HTTP passthrough proxy.
+
+**Setup:**
+
+1. Install gjoll from a build that includes HTTP proxy support (see [gjoll](https://github.com/ondrejbudai/gjoll)).
+
+2. Configure `orchestrator.yaml`:
+   ```yaml
+   sandbox_backend: "gjoll"
+   gjoll_env: "../gjoll/examples/fedora-libvirt.tf"
+   llm_base_url: "http://127.0.0.1:11434/v1"
+   llm_model: "your-model-id"
+   output_dir: "./tasks"
+   allowed_repos:
+     - your-username/*
+   ```
+
+The orchestrator sets `TF_VAR_llm_host_port` so the VM can reach your host LLM through gjoll's reverse proxy.
+
+### Option 3: Gjoll Backend with Direct Anthropic API
 
 Use gjoll VMs (same as cloud deployment) but with direct Anthropic API instead of Vertex AI.
 
 **Prerequisites:**
 - Same as main prerequisites above, plus:
-- **Anthropic API Key**: Save to `~/.anthropic/api_key` on the orchestrator host
+- **Anthropic API Key**: Sign up at [console.anthropic.com](https://console.anthropic.com) and save your API key to `~/.anthropic/api_key` on the orchestrator host
 
 **Setup:**
 
 1. Copy the Anthropic API example config:
    ```bash
-   cp configs/sandbox-anthropic-api.tf.example configs/sandbox-local.tf
+   cp configs/sandbox-anthropic-api.tf.example configs/sandbox-anthropic.tf
    ```
 
 2. Configure `orchestrator.yaml`:
    ```yaml
    sandbox_backend: "gjoll"
-   gjoll_env: "./configs/sandbox-local.tf"
+   gjoll_env: "./configs/sandbox-anthropic.tf"
+   llm_base_url: ""
    output_dir: "./tasks"
    allowed_repos:
      - your-username/*
@@ -171,12 +220,12 @@ Use gjoll VMs (same as cloud deployment) but with direct Anthropic API instead o
 
 ### Agent Backend
 
-The orchestrator supports multiple coding agent backends. The default is Claude
-Code, but you can switch to [OpenCode](https://opencode.ai/) by setting
-`agent_backend` in `orchestrator.yaml`:
+The orchestrator supports multiple coding agent backends. The default is
+[OpenCode](https://opencode.ai/) with a local [LM Studio](https://lmstudio.ai/)
+LLM. Switch to Claude Code by setting `agent_backend` in `orchestrator.yaml`:
 
 ```yaml
-agent_backend: "opencode"   # default: "claude-code"
+agent_backend: "claude-code"   # default: "opencode"
 ```
 
 The backend controls how the agent is installed, invoked, and how transcripts
@@ -221,6 +270,8 @@ The per-task override takes precedence over the `agent_backend` config field.
 ### Issue attachments
 
 When a task is created from a tasks-repo GitHub issue (`--source-repo` / `--source-issue`, set automatically by the daemon), the orchestrator scans the **task description** for `https://github.com/user-attachments/...` links (the daemon passes the full issue body, so no extra API call is needed). If the description has no such links but `--source-issue` is set, the issue body is re-fetched via `gh api` before scanning. Matching files are downloaded on the host using `gh` credentials and copied into the sandbox at `~/attachments/`. The initial Claude prompt includes a manifest listing the local filenames. Requires an authenticated `gh` on the host.
+
+**See also:** [Dashboard](#dashboard) for browsing tasks in the browser; [Setup](#setup) step 4 for daemon mode via systemd; `make check` to verify prerequisites.
 
 ## Usage
 
@@ -274,8 +325,33 @@ Example:
 orchestrator task continue fix-bug "The tests are failing, please also update the test fixtures"
 ```
 
+### List and remove tasks
+
+List tasks stored under `output_dir`:
+
+```bash
+orchestrator task list
+orchestrator task list --json
+```
+
+Destroy a task's sandbox (podman container or gjoll VM) and remove its local
+`repo/` directory. The task directory itself (`state.json`, transcript,
+conversations) is kept:
+
+```bash
+orchestrator task rm <task-name>
+orchestrator task rm hello-test-8 -y
+orchestrator task rm hello-test-8 --dry-run
+```
+
+Use `--force` to destroy sandboxes for tasks that are `in_progress` or still
+have open PRs. The daemon performs similar cleanup automatically when PRs close;
+`task rm` is for manual/local cleanup without running the daemon.
+
 During execution, a human-readable transcript streams to stdout showing tool
-calls, their results, and Claude's text output.
+calls, their results, and the agent's text output. For OpenCode, tool output is
+included inline after each `[tool]` line; use `-v` to also show `thinking`
+blocks when the agent emits them (uncommon with some local models).
 
 ### Viewing transcripts
 
