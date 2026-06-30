@@ -2,7 +2,6 @@ package mcp
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
 	"log/slog"
 	"net"
@@ -26,6 +25,11 @@ const MCPRemotePort = 19090
 // CodePuller pulls committed code from a sandbox into a local git repo.
 type CodePuller interface {
 	Pull(ctx context.Context, name, remotePath, localRepoDir string) error
+}
+
+// FileCopier copies files to/from a sandbox.
+type FileCopier interface {
+	Cp(ctx context.Context, name, src, dest string) error
 }
 
 // PROpener handles GitHub operations for opening pull requests.
@@ -68,8 +72,7 @@ type CommentOnPRInput struct {
 
 // UploadImageInput is the input schema for the upload_image tool.
 type UploadImageInput struct {
-	Filename string `json:"filename" jsonschema_description:"Name for the image file (e.g. screenshot.png). Only alphanumeric, dashes, underscores, and dots allowed."`
-	Data     string `json:"data" jsonschema_description:"Base64-encoded image data"`
+	Path string `json:"path" jsonschema_description:"Absolute path to the image file inside the sandbox (e.g. /home/claude/screenshot.png)"`
 }
 
 var safeFilenameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
@@ -161,44 +164,54 @@ func resolveOriginatingIssue(tasksRepo, taskName string, state *task.State) (rep
 // non-empty, the open_pr tool is registered. When author is non-empty, a
 // Co-authored-by trailer is appended to each new commit before pushing.
 // tasksRepo is the daemon tasks_repo used to link PRs back to originating issues.
-// baseURL, when non-empty, enables the upload_image tool — uploaded files are
-// stored in the task's images/ subdirectory and served at baseURL/tasks/<name>/images/<file>.
-func New(logger *slog.Logger, taskName string, taskDir *task.Dir, puller CodePuller, prOpener PROpener, allowedRepos []string, author, tasksRepo, baseURL string) *Server {
+// baseURL, when non-empty, enables the upload_image tool — the agent passes
+// an absolute sandbox path and the host copies the file into the task's images/
+// subdirectory via copier. Images are served at baseURL/tasks/<name>/images/<file>.
+func New(logger *slog.Logger, taskName string, taskDir *task.Dir, puller CodePuller, copier FileCopier, prOpener PROpener, allowedRepos []string, author, tasksRepo, baseURL string) *Server {
 	mcpServer := mcp.NewServer(&mcp.Implementation{
 		Name:    "orchestrator",
 		Version: "0.1.0",
 	}, nil)
 
-	if baseURL != "" {
+	if baseURL != "" && copier != nil {
 		mcp.AddTool(mcpServer, &mcp.Tool{
 			Name:        "upload_image",
-			Description: "Upload a base64-encoded image and get back a public URL for use in PR comments and reviews",
+			Description: "Upload an image from the sandbox and get back a public URL for use in PR comments and reviews",
 		}, func(ctx context.Context, req *mcp.CallToolRequest, input *UploadImageInput) (*mcp.CallToolResult, any, error) {
-			logger.Info("Image upload requested", "task", taskName, "filename", input.Filename)
+			logger.Info("Image upload requested", "task", taskName, "path", input.Path)
 
-			if !safeFilenameRe.MatchString(input.Filename) {
+			if !filepath.IsAbs(input.Path) {
 				return &mcp.CallToolResult{
 					Content: []mcp.Content{
-						&mcp.TextContent{Text: fmt.Sprintf("invalid filename %q: only alphanumeric characters, dashes, underscores, and dots are allowed", input.Filename)},
+						&mcp.TextContent{Text: fmt.Sprintf("invalid path %q: must be absolute", input.Path)},
 					},
 					IsError: true,
 				}, nil, nil
 			}
 
-			if filepath.Ext(input.Filename) == "" {
+			if strings.Contains(input.Path, "..") {
 				return &mcp.CallToolResult{
 					Content: []mcp.Content{
-						&mcp.TextContent{Text: fmt.Sprintf("filename %q must have a file extension (e.g. .png, .jpg)", input.Filename)},
+						&mcp.TextContent{Text: fmt.Sprintf("invalid path %q: must not contain \"..\"", input.Path)},
 					},
 					IsError: true,
 				}, nil, nil
 			}
 
-			raw, err := base64.StdEncoding.DecodeString(input.Data)
-			if err != nil {
+			filename := filepath.Base(input.Path)
+			if !safeFilenameRe.MatchString(filename) {
 				return &mcp.CallToolResult{
 					Content: []mcp.Content{
-						&mcp.TextContent{Text: fmt.Sprintf("upload_image failed: invalid base64 data: %v", err)},
+						&mcp.TextContent{Text: fmt.Sprintf("invalid filename %q: only alphanumeric characters, dashes, underscores, and dots are allowed", filename)},
+					},
+					IsError: true,
+				}, nil, nil
+			}
+
+			if filepath.Ext(filename) == "" {
+				return &mcp.CallToolResult{
+					Content: []mcp.Content{
+						&mcp.TextContent{Text: fmt.Sprintf("filename %q must have a file extension (e.g. .png, .jpg)", filename)},
 					},
 					IsError: true,
 				}, nil, nil
@@ -214,8 +227,9 @@ func New(logger *slog.Logger, taskName string, taskDir *task.Dir, puller CodePul
 				}, nil, nil
 			}
 
-			dest := filepath.Join(imagesDir, input.Filename)
-			if err := os.WriteFile(dest, raw, 0644); err != nil {
+			dest := filepath.Join(imagesDir, filename)
+			if err := copier.Cp(ctx, taskName, taskName+":"+input.Path, dest); err != nil {
+				logger.Error("Image copy failed", "task", taskName, "error", err)
 				return &mcp.CallToolResult{
 					Content: []mcp.Content{
 						&mcp.TextContent{Text: fmt.Sprintf("upload_image failed: %v", err)},
@@ -224,10 +238,10 @@ func New(logger *slog.Logger, taskName string, taskDir *task.Dir, puller CodePul
 				}, nil, nil
 			}
 
-			url := strings.TrimRight(baseURL, "/") + "/tasks/" + taskName + "/images/" + input.Filename
-			logger.Info("Image uploaded", "task", taskName, "filename", input.Filename, "url", url)
+			url := strings.TrimRight(baseURL, "/") + "/tasks/" + taskName + "/images/" + filename
+			logger.Info("Image uploaded", "task", taskName, "filename", filename, "url", url)
 
-			markdown := fmt.Sprintf("![%s](%s)", input.Filename, url)
+			markdown := fmt.Sprintf("![%s](%s)", filename, url)
 			return &mcp.CallToolResult{
 				Content: []mcp.Content{
 					&mcp.TextContent{Text: markdown},

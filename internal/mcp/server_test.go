@@ -2,7 +2,6 @@ package mcp
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
 	"log/slog"
 	"os"
@@ -29,6 +28,28 @@ func (s *stubPuller) Pull(_ context.Context, name, remotePath, localRepoDir stri
 	s.gotPath = remotePath
 	s.gotLocal = localRepoDir
 	return s.err
+}
+
+// stubFileCopier implements FileCopier for testing.
+type stubFileCopier struct {
+	err    error
+	called bool
+	gotSrc string
+	gotDst string
+	data   []byte
+}
+
+func (s *stubFileCopier) Cp(_ context.Context, name, src, dest string) error {
+	s.called = true
+	s.gotSrc = src
+	s.gotDst = dest
+	if s.err != nil {
+		return s.err
+	}
+	if s.data != nil {
+		return os.WriteFile(dest, s.data, 0644)
+	}
+	return os.WriteFile(dest, []byte("fake-image-bytes"), 0644)
 }
 
 // stubPROpener implements PROpener for testing.
@@ -166,7 +187,7 @@ func startTestServer(t *testing.T, puller CodePuller, prOpener PROpener, allowed
 		author = authors[0]
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	s := New(logger, "test-task", td, puller, prOpener, allowedRepos, author, "", "")
+	s := New(logger, "test-task", td, puller, nil, prOpener, allowedRepos, author, "", "")
 	if err := s.StartOn("127.0.0.1:0"); err != nil {
 		t.Fatalf("StartOn() error: %v", err)
 	}
@@ -204,7 +225,7 @@ func TestStartAllocatesDynamicPort(t *testing.T) {
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 
-	s1 := New(logger, "task-1", td, nil, nil, nil, "", "", "")
+	s1 := New(logger, "task-1", td, nil, nil, nil, nil, "", "", "")
 	if err := s1.Start(); err != nil {
 		t.Fatalf("Start() error: %v", err)
 	}
@@ -216,7 +237,7 @@ func TestStartAllocatesDynamicPort(t *testing.T) {
 
 	dir2 := t.TempDir()
 	td2, _ := task.Create(dir2, "dyn-port-test-2")
-	s2 := New(logger, "task-2", td2, nil, nil, nil, "", "", "")
+	s2 := New(logger, "task-2", td2, nil, nil, nil, nil, "", "", "")
 	if err := s2.Start(); err != nil {
 		t.Fatalf("Start() second server: %v", err)
 	}
@@ -672,7 +693,7 @@ func TestOpenPRLinksOriginatingIssue(t *testing.T) {
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	s := New(logger, "tasks-42-add_dark_mode", td, puller, opener, []string{"org/*"}, "", "org/tasks", "")
+	s := New(logger, "tasks-42-add_dark_mode", td, puller, nil, opener, []string{"org/*"}, "", "org/tasks", "")
 	if err := s.StartOn("127.0.0.1:0"); err != nil {
 		t.Fatalf("StartOn() error: %v", err)
 	}
@@ -1391,7 +1412,7 @@ func TestPostReviewTool(t *testing.T) {
 	}
 }
 
-func startTestServerWithBaseURL(t *testing.T, baseURL string) (*task.Dir, string) {
+func startTestServerWithBaseURL(t *testing.T, copier FileCopier, baseURL string) (*task.Dir, string) {
 	t.Helper()
 	dir := t.TempDir()
 	td, err := task.Create(dir, "img-task")
@@ -1399,7 +1420,7 @@ func startTestServerWithBaseURL(t *testing.T, baseURL string) (*task.Dir, string
 		t.Fatal(err)
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	s := New(logger, "img-task", td, nil, nil, nil, "", "", baseURL)
+	s := New(logger, "img-task", td, nil, copier, nil, nil, "", "", baseURL)
 	if err := s.StartOn("127.0.0.1:0"); err != nil {
 		t.Fatalf("StartOn() error: %v", err)
 	}
@@ -1409,63 +1430,62 @@ func startTestServerWithBaseURL(t *testing.T, baseURL string) (*task.Dir, string
 }
 
 func TestUploadImageTool(t *testing.T) {
-	pngData := base64.StdEncoding.EncodeToString([]byte("fake-png-bytes"))
-
 	tests := []struct {
 		name      string
+		copier    *stubFileCopier
 		input     map[string]any
 		wantError bool
 		wantText  string
 	}{
 		{
-			name: "successful upload",
+			name:   "successful upload",
+			copier: &stubFileCopier{},
 			input: map[string]any{
-				"filename": "screenshot.png",
-				"data":     pngData,
+				"path": "/home/claude/screenshot.png",
 			},
 			wantText: "![screenshot.png](https://drella.example.com/tasks/img-task/images/screenshot.png)",
 		},
 		{
-			name: "invalid filename with path traversal",
+			name:   "relative path rejected",
+			copier: &stubFileCopier{},
 			input: map[string]any{
-				"filename": "../etc/passwd",
-				"data":     pngData,
+				"path": "screenshot.png",
 			},
 			wantError: true,
-			wantText:  "invalid filename",
+			wantText:  "must be absolute",
 		},
 		{
-			name: "invalid filename with slash",
+			name:   "path traversal rejected",
+			copier: &stubFileCopier{},
 			input: map[string]any{
-				"filename": "foo/bar.png",
-				"data":     pngData,
+				"path": "/home/claude/../etc/passwd",
 			},
 			wantError: true,
-			wantText:  "invalid filename",
+			wantText:  "must not contain",
 		},
 		{
-			name: "missing file extension",
+			name:   "missing file extension",
+			copier: &stubFileCopier{},
 			input: map[string]any{
-				"filename": "screenshot",
-				"data":     pngData,
+				"path": "/home/claude/screenshot",
 			},
 			wantError: true,
 			wantText:  "must have a file extension",
 		},
 		{
-			name: "invalid base64",
+			name:   "copy failure",
+			copier: &stubFileCopier{err: fmt.Errorf("file not found in sandbox")},
 			input: map[string]any{
-				"filename": "screenshot.png",
-				"data":     "not-valid-base64!!!",
+				"path": "/home/claude/screenshot.png",
 			},
 			wantError: true,
-			wantText:  "invalid base64",
+			wantText:  "file not found in sandbox",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			td, endpoint := startTestServerWithBaseURL(t, "https://drella.example.com")
+			td, endpoint := startTestServerWithBaseURL(t, tt.copier, "https://drella.example.com")
 			session := connectClient(t, endpoint)
 
 			result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
@@ -1491,14 +1511,16 @@ func TestUploadImageTool(t *testing.T) {
 			}
 
 			if !tt.wantError {
-				imgPath := filepath.Join(td.ImagesPath(), tt.input["filename"].(string))
-				data, err := os.ReadFile(imgPath)
-				if err != nil {
-					t.Fatalf("image file not found at %s: %v", imgPath, err)
+				if !tt.copier.called {
+					t.Error("copier.Cp was not called")
 				}
-				wantRaw, _ := base64.StdEncoding.DecodeString(tt.input["data"].(string))
-				if string(data) != string(wantRaw) {
-					t.Errorf("image content mismatch: got %d bytes, want %d bytes", len(data), len(wantRaw))
+				wantSrc := "img-task:" + tt.input["path"].(string)
+				if tt.copier.gotSrc != wantSrc {
+					t.Errorf("copier src = %q, want %q", tt.copier.gotSrc, wantSrc)
+				}
+				imgPath := filepath.Join(td.ImagesPath(), filepath.Base(tt.input["path"].(string)))
+				if _, err := os.Stat(imgPath); err != nil {
+					t.Fatalf("image file not found at %s: %v", imgPath, err)
 				}
 			}
 		})
@@ -1506,7 +1528,7 @@ func TestUploadImageTool(t *testing.T) {
 }
 
 func TestUploadImageNotRegisteredWithoutBaseURL(t *testing.T) {
-	_, endpoint := startTestServerWithBaseURL(t, "")
+	_, endpoint := startTestServerWithBaseURL(t, &stubFileCopier{}, "")
 	session := connectClient(t, endpoint)
 
 	result, err := session.ListTools(context.Background(), nil)
@@ -1521,15 +1543,13 @@ func TestUploadImageNotRegisteredWithoutBaseURL(t *testing.T) {
 }
 
 func TestUploadImageTrailingSlash(t *testing.T) {
-	_, endpoint := startTestServerWithBaseURL(t, "https://drella.example.com/")
+	_, endpoint := startTestServerWithBaseURL(t, &stubFileCopier{}, "https://drella.example.com/")
 	session := connectClient(t, endpoint)
 
-	pngData := base64.StdEncoding.EncodeToString([]byte("test"))
 	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
 		Name: "upload_image",
 		Arguments: map[string]any{
-			"filename": "test.png",
-			"data":     pngData,
+			"path": "/home/claude/test.png",
 		},
 	})
 	if err != nil {
