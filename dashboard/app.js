@@ -74,6 +74,15 @@
     return '';
   }
 
+  function budgetTooltip() {
+    var b = state.budget;
+    var lines = ['Total cost (USD)'];
+    if (b.warn_budget_usd > 0) lines.push('Warning: ' + formatCost(b.warn_budget_usd));
+    if (b.critical_budget_usd > 0) lines.push('Critical: ' + formatCost(b.critical_budget_usd));
+    if (b.max_budget_usd > 0) lines.push('Max: ' + formatCost(b.max_budget_usd));
+    return lines.join('\n');
+  }
+
   function budgetLevel(costUSD) {
     if (!costUSD || costUSD <= 0) return '';
     var b = state.budget;
@@ -326,7 +335,7 @@
     card.setAttribute('data-task', task.name);
     const usageStr = formatUsage(task.usage);
     const usageHtml = usageStr
-      ? '<span class="task-usage">' + escapeHtml(usageStr) + '</span>'
+      ? '<span class="task-usage" title="' + escapeHtml(budgetTooltip()) + '">' + escapeHtml(usageStr) + '</span>'
       : '';
 
     const taskHref = '#task/' + encodeURIComponent(task.name);
@@ -403,11 +412,7 @@
       let allParts = [];
       if (tokenParts.length > 0) allParts.push(tokenParts.join(' '));
       if (task.usage.cost_usd) {
-        var budgetInfo = '';
-        if (state.budget.max_budget_usd > 0) {
-          budgetInfo = ' / ' + formatCost(state.budget.max_budget_usd);
-        }
-        allParts.push('<span title="Total cost (USD)">' + formatCost(task.usage.cost_usd) + budgetInfo + '</span>');
+        allParts.push('<span title="' + escapeHtml(budgetTooltip()) + '">' + formatCost(task.usage.cost_usd) + '</span>');
       }
       if (allParts.length > 0) {
         html += '<div><span class="meta-label">usage:</span><span class="meta-usage">' +
