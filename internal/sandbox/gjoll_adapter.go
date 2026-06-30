@@ -13,19 +13,28 @@ import (
 // GjollAdapter wraps gjoll.Runner to implement the sandbox.Runner interface.
 type GjollAdapter struct {
 	runner *gjoll.Runner
+	rhel   *RHELRegistration
 }
 
 // NewGjollAdapter creates a sandbox.Runner from a gjoll.Runner.
-func NewGjollAdapter(gjollBin string) *GjollAdapter {
+func NewGjollAdapter(gjollBin string, rhel *RHELRegistration) *GjollAdapter {
 	return &GjollAdapter{
 		runner: gjoll.New(gjollBin),
+		rhel:   rhel,
 	}
 }
 
 // Up provisions a sandbox VM using gjoll.
 // config is the path to the .tf file.
 func (a *GjollAdapter) Up(ctx context.Context, name string, config string) error {
-	return a.runner.Up(ctx, name, config)
+	if err := a.runner.Up(ctx, name, config); err != nil {
+		return err
+	}
+	if err := registerRHEL(ctx, a.SSH, name, a.rhel); err != nil {
+		_ = a.runner.Down(context.Background(), name)
+		return fmt.Errorf("RHEL registration: %w", err)
+	}
+	return nil
 }
 
 // Start starts a stopped sandbox.
