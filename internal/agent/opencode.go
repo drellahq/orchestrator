@@ -6,7 +6,10 @@ import (
 	"strings"
 )
 
-type openCode struct{}
+type openCode struct {
+	llmBaseURL string
+	llmModel   string
+}
 
 func (b *openCode) Name() string { return "opencode" }
 
@@ -24,8 +27,13 @@ func (b *openCode) BuildRunScript(taskDescription string, continueSession bool, 
 	var flags string
 	var teeFlag string
 	if continueSession {
-		flags = "--continue"
+		flags = "--continue "
 		teeFlag = "-a"
+	}
+
+	var modelFlag string
+	if b.llmBaseURL != "" && b.llmModel != "" {
+		modelFlag = fmt.Sprintf("--model %s/%s ", localLLMProviderID, b.llmModel)
 	}
 
 	// OpenCode lacks --append-system-prompt-file; we handle this by merging
@@ -33,27 +41,27 @@ func (b *openCode) BuildRunScript(taskDescription string, continueSession bool, 
 	// sandbox setup. The systemPromptFile parameter is ignored here.
 
 	return fmt.Sprintf(`#!/bin/bash
+set -eo pipefail
 source ~/.bashrc
 export PATH="$HOME/.opencode/bin:$PATH"
-stdbuf -oL opencode run --dangerously-skip-permissions \
+mkdir -p ~/workspace
+%sstdbuf -oL opencode run --dangerously-skip-permissions \
+  --dir ~/workspace \
+  --agent build \
+  %s\
   --variant max \
   --format json \
-  %s '%s' \
+  %s'%s' \
   </dev/null | stdbuf -oL tee %s ~/transcript.jsonl
-`, flags, escapedDesc, teeFlag)
+`, llmEnvBlock(b.llmBaseURL), modelFlag, flags, escapedDesc, teeFlag)
 }
 
 func (b *openCode) MCPAddCmd(name, transport, url, scope string) string {
-	// OpenCode uses config-based MCP registration.
-	// Write an opencode.json in the project root with the MCP server config.
-	mcpType := "remote"
-	if transport == "stdio" {
-		mcpType = "local"
+	cmd, err := b.writeConfigCmd(name, transport, url)
+	if err != nil {
+		return fmt.Sprintf("echo %q >&2; exit 1", err.Error())
 	}
-	config := fmt.Sprintf(`{"mcp":{%q:{"type":%q,"url":%q}}}`, name, mcpType, url)
-	return fmt.Sprintf(`mkdir -p ~/.config/opencode && cat > ~/.config/opencode/opencode.json << 'MCPEOF'
-%s
-MCPEOF`, config)
+	return cmd
 }
 
 func (b *openCode) ConfigDir() string        { return ".opencode" }
@@ -99,8 +107,8 @@ func (b *openCode) FormatTranscriptLine(line []byte, verbose bool) string {
 
 	switch msg.Type {
 	case "text":
-		if msg.Part.Text != "" {
-			return msg.Part.Text + "\n"
+		if text := strings.TrimSpace(msg.Part.Text); text != "" {
+			return text + "\n"
 		}
 	case "thinking":
 		if verbose && msg.Part.Thinking != "" {
@@ -112,6 +120,7 @@ func (b *openCode) FormatTranscriptLine(line []byte, verbose bool) string {
 			tool = msg.Part.Type
 		}
 		var summary string
+		var out string
 		if msg.Part.State != nil {
 			input := msg.Part.State.Input
 			switch tool {
@@ -126,11 +135,19 @@ func (b *openCode) FormatTranscriptLine(line []byte, verbose bool) string {
 			case "grep", "glob":
 				summary = input.Pattern
 			}
+			if msg.Part.State.Output != "" {
+				line := firstLine(msg.Part.State.Output, 200)
+				if msg.Part.State.Metadata.Exit != 0 {
+					out = fmt.Sprintf("  → %s (exit %d)\n", line, msg.Part.State.Metadata.Exit)
+				} else {
+					out = fmt.Sprintf("  → %s\n", line)
+				}
+			}
 		}
 		if summary != "" {
-			return fmt.Sprintf("[tool] %s: %s\n", tool, summary)
+			return fmt.Sprintf("[tool] %s: %s\n", tool, summary) + out
 		}
-		return fmt.Sprintf("[tool] %s\n", tool)
+		return fmt.Sprintf("[tool] %s\n", tool) + out
 	case "step_finish":
 		if msg.Part.Reason == "stop" || msg.Part.Reason == "end_turn" {
 			var tokens string

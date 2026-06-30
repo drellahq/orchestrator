@@ -7,6 +7,12 @@ import (
 	"testing"
 )
 
+func strPtr(s string) *string { return &s }
+
+func defaultLLMBaseURL() *string {
+	return strPtr(DefaultLLMBaseURL)
+}
+
 func TestLoad(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -18,13 +24,15 @@ func TestLoad(t *testing.T) {
 		{
 			name:      "full config",
 			writeFile: true,
-			yaml:      "slack_webhook: https://hooks.slack.com/test\noutput_dir: /tmp/tasks\ngjoll_env: /path/to/sandbox.tf\n",
+			yaml:      "slack_webhook: https://hooks.slack.com/test\noutput_dir: /tmp/tasks\ngjoll_env: /path/to/sandbox.tf\nsandbox_backend: gjoll\nllm_base_url: \"\"\n",
 			want: Config{
-				SlackWebhook:     "https://hooks.slack.com/test",
-				OutputDir:        "/tmp/tasks",
-				SandboxBackend:   "gjoll",
-				GjollEnv:         "/path/to/sandbox.tf",
-				PodmanImage:      "fedora:43",
+				SlackWebhook:   "https://hooks.slack.com/test",
+				OutputDir:      "/tmp/tasks",
+				SandboxBackend: "gjoll",
+				GjollEnv:       "/path/to/sandbox.tf",
+				PodmanImage:    "fedora:43",
+				AgentBackend:   "opencode",
+				LLMBaseURL:     strPtr(""),
 				AnthropicKeyFile: "~/.anthropic/api_key",
 			},
 		},
@@ -33,12 +41,13 @@ func TestLoad(t *testing.T) {
 			writeFile: true,
 			yaml:      "slack_webhook: https://hooks.slack.com/test\n",
 			want: Config{
-				SlackWebhook:     "https://hooks.slack.com/test",
-				OutputDir:        "./tasks",
-				SandboxBackend:   "gjoll",
-				GjollEnv:         "./configs/sandbox.tf",
-				PodmanImage:      "fedora:43",
-				AnthropicKeyFile: "~/.anthropic/api_key",
+				SlackWebhook:   "https://hooks.slack.com/test",
+				OutputDir:      "./tasks",
+				SandboxBackend: "gjoll",
+				GjollEnv:       "./configs/sandbox.tf",
+				PodmanImage:    "fedora:43",
+				AgentBackend:   "opencode",
+				LLMBaseURL:     defaultLLMBaseURL(),
 			},
 		},
 		{
@@ -46,11 +55,12 @@ func TestLoad(t *testing.T) {
 			writeFile: true,
 			yaml:      "",
 			want: Config{
-				OutputDir:        "./tasks",
-				SandboxBackend:   "gjoll",
-				GjollEnv:         "./configs/sandbox.tf",
-				PodmanImage:      "fedora:43",
-				AnthropicKeyFile: "~/.anthropic/api_key",
+				OutputDir:      "./tasks",
+				SandboxBackend: "gjoll",
+				GjollEnv:       "./configs/sandbox.tf",
+				PodmanImage:    "fedora:43",
+				AgentBackend:   "opencode",
+				LLMBaseURL:     defaultLLMBaseURL(),
 			},
 		},
 		{
@@ -58,12 +68,13 @@ func TestLoad(t *testing.T) {
 			writeFile: true,
 			yaml:      "allowed_repos:\n  - osbuild/osbuild\n  - drellabot/*\n",
 			want: Config{
-				OutputDir:        "./tasks",
-				SandboxBackend:   "gjoll",
-				GjollEnv:         "./configs/sandbox.tf",
-				PodmanImage:      "fedora:43",
-				AnthropicKeyFile: "~/.anthropic/api_key",
-				AllowedRepos:     []string{"osbuild/osbuild", "drellabot/*"},
+				OutputDir:      "./tasks",
+				SandboxBackend: "gjoll",
+				GjollEnv:       "./configs/sandbox.tf",
+				PodmanImage:    "fedora:43",
+				AgentBackend:   "opencode",
+				LLMBaseURL:     defaultLLMBaseURL(),
+				AllowedRepos:   []string{"osbuild/osbuild", "drellabot/*"},
 			},
 		},
 		{
@@ -71,11 +82,12 @@ func TestLoad(t *testing.T) {
 			writeFile: true,
 			yaml:      "daemon:\n  poll_interval: \"30s\"\n  allowed_commenters:\n    - alice\n    - bob\n",
 			want: Config{
-				OutputDir:        "./tasks",
-				SandboxBackend:   "gjoll",
-				GjollEnv:         "./configs/sandbox.tf",
-				PodmanImage:      "fedora:43",
-				AnthropicKeyFile: "~/.anthropic/api_key",
+				OutputDir:      "./tasks",
+				SandboxBackend: "gjoll",
+				GjollEnv:       "./configs/sandbox.tf",
+				PodmanImage:    "fedora:43",
+				AgentBackend:   "opencode",
+				LLMBaseURL:     defaultLLMBaseURL(),
 				Daemon: DaemonConfig{
 					PollInterval:      "30s",
 					AllowedCommenters: []string{"alice", "bob"},
@@ -87,13 +99,14 @@ func TestLoad(t *testing.T) {
 			writeFile: true,
 			yaml:      "profiles_repo: drellabot/profiles\nprofiles_dir: /tmp/profiles\n",
 			want: Config{
-				OutputDir:        "./tasks",
-				SandboxBackend:   "gjoll",
-				GjollEnv:         "./configs/sandbox.tf",
-				PodmanImage:      "fedora:43",
-				AnthropicKeyFile: "~/.anthropic/api_key",
-				ProfilesRepo:     "drellabot/profiles",
-				ProfilesDir:      "/tmp/profiles",
+				OutputDir:      "./tasks",
+				SandboxBackend: "gjoll",
+				GjollEnv:       "./configs/sandbox.tf",
+				PodmanImage:    "fedora:43",
+				AgentBackend:   "opencode",
+				LLMBaseURL:     defaultLLMBaseURL(),
+				ProfilesRepo:   "drellabot/profiles",
+				ProfilesDir:    "/tmp/profiles",
 			},
 		},
 		{
@@ -101,11 +114,12 @@ func TestLoad(t *testing.T) {
 			writeFile: true,
 			yaml:      "agent:\n  max-budget-usd: 100\n  warn-budget-usd: 30\n  critical-budget-usd: 50\n",
 			want: Config{
-				OutputDir:        "./tasks",
-				SandboxBackend:   "gjoll",
-				GjollEnv:         "./configs/sandbox.tf",
-				PodmanImage:      "fedora:43",
-				AnthropicKeyFile: "~/.anthropic/api_key",
+				OutputDir:      "./tasks",
+				SandboxBackend: "gjoll",
+				GjollEnv:       "./configs/sandbox.tf",
+				PodmanImage:    "fedora:43",
+				AgentBackend:   "opencode",
+				LLMBaseURL:     defaultLLMBaseURL(),
 				Agent: AgentConfig{
 					MaxBudgetUSD:      100,
 					WarnBudgetUSD:     30,
@@ -118,11 +132,12 @@ func TestLoad(t *testing.T) {
 			writeFile: true,
 			yaml:      "agent:\n  max-budget-usd: 50\n",
 			want: Config{
-				OutputDir:        "./tasks",
-				SandboxBackend:   "gjoll",
-				GjollEnv:         "./configs/sandbox.tf",
-				PodmanImage:      "fedora:43",
-				AnthropicKeyFile: "~/.anthropic/api_key",
+				OutputDir:      "./tasks",
+				SandboxBackend: "gjoll",
+				GjollEnv:       "./configs/sandbox.tf",
+				PodmanImage:    "fedora:43",
+				AgentBackend:   "opencode",
+				LLMBaseURL:     defaultLLMBaseURL(),
 				Agent: AgentConfig{
 					MaxBudgetUSD: 50,
 				},
@@ -165,6 +180,56 @@ func TestLoad(t *testing.T) {
 				t.Errorf("got %+v, want %+v", *got, tt.want)
 			}
 		})
+	}
+}
+
+func TestUsesLocalLLM(t *testing.T) {
+	cfg := &Config{LLMBaseURL: defaultLLMBaseURL()}
+	if !cfg.UsesLocalLLM() {
+		t.Fatal("expected local LLM with default URL")
+	}
+
+	empty := ""
+	cfg.LLMBaseURL = &empty
+	if cfg.UsesLocalLLM() {
+		t.Fatal("expected cloud mode with empty llm_base_url")
+	}
+}
+
+func TestLocalLLMHostPort(t *testing.T) {
+	url := "http://127.0.0.1:11434/v1"
+	cfg := &Config{LLMBaseURL: &url}
+
+	port, err := cfg.LocalLLMHostPort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if port != 11434 {
+		t.Fatalf("port = %d, want 11434", port)
+	}
+
+	got, err := cfg.GjollLLMBaseURL()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "http://127.0.0.1:11434/v1" {
+		t.Fatalf("GjollLLMBaseURL() = %q", got)
+	}
+}
+
+func TestAgentOptionsGjollLocalLLM(t *testing.T) {
+	url := "http://127.0.0.1:11434/v1"
+	cfg := &Config{
+		SandboxBackend: "gjoll",
+		LLMBaseURL:     &url,
+		LLMModel:       "test-model",
+	}
+	opts := cfg.AgentOptions()
+	if opts.LLMBaseURL != "http://127.0.0.1:11434/v1" {
+		t.Fatalf("LLMBaseURL = %q, want gjoll proxy URL", opts.LLMBaseURL)
+	}
+	if opts.LLMModel != "test-model" {
+		t.Fatalf("LLMModel = %q", opts.LLMModel)
 	}
 }
 

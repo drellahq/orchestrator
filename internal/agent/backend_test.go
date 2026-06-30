@@ -17,7 +17,7 @@ func TestNew(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			b, err := New(tt.name)
+			b, err := New(tt.name, nil)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("New(%q) error = %v, wantErr = %v", tt.name, err, tt.wantErr)
 			}
@@ -83,6 +83,8 @@ func TestOpenCodeBuildRunScript(t *testing.T) {
 	}
 	for _, want := range []string{
 		"opencode run --dangerously-skip-permissions",
+		"--dir ~/workspace",
+		"--agent build",
 		"--format json",
 		"--variant max",
 		"fix the bug",
@@ -106,6 +108,22 @@ func TestOpenCodeBuildRunScript(t *testing.T) {
 	}
 }
 
+func TestOpenCodeBuildRunScriptLMStudio(t *testing.T) {
+	b := &openCode{llmBaseURL: "http://127.0.0.1:1234/v1", llmModel: "google/gemma-4-e4b"}
+	script := b.BuildRunScript("hello", false, "", 0)
+
+	for _, want := range []string{
+		"export ANTHROPIC_BASE_URL='http://127.0.0.1:1234/v1'",
+		"export ANTHROPIC_API_KEY=lm-studio",
+		"opencode run --dangerously-skip-permissions",
+		"--model local/google/gemma-4-e4b",
+	} {
+		if !contains(script, want) {
+			t.Errorf("script missing %q", want)
+		}
+	}
+}
+
 func TestClaudeCodeMCPAddCmd(t *testing.T) {
 	b := &claudeCode{}
 	cmd := b.MCPAddCmd("orchestrator", "http", "http://localhost:19090/mcp", "user")
@@ -116,7 +134,7 @@ func TestClaudeCodeMCPAddCmd(t *testing.T) {
 }
 
 func TestOpenCodeMCPAddCmd(t *testing.T) {
-	b := &openCode{}
+	b := &openCode{llmBaseURL: "http://127.0.0.1:1234/v1", llmModel: "test-model"}
 	cmd := b.MCPAddCmd("orchestrator", "http", "http://localhost:19090/mcp", "user")
 	if !contains(cmd, `"orchestrator"`) {
 		t.Error("MCP config missing server name")
@@ -127,8 +145,11 @@ func TestOpenCodeMCPAddCmd(t *testing.T) {
 	if !contains(cmd, "http://localhost:19090/mcp") {
 		t.Error("MCP config missing URL")
 	}
-	if !contains(cmd, "opencode.json") {
-		t.Error("MCP config should write opencode.json")
+	if !contains(cmd, `"provider"`) {
+		t.Error("MCP config should include local provider when LLM base URL is set")
+	}
+	if !contains(cmd, "~/workspace/opencode.json") {
+		t.Error("MCP config should write ~/workspace/opencode.json")
 	}
 }
 
@@ -211,10 +232,22 @@ func TestOpenCodeFormatTranscriptLine(t *testing.T) {
 			"hello world\n",
 		},
 		{
+			"whitespace-only text",
+			`{"type":"text","timestamp":123,"sessionID":"s1","part":{"type":"text","text":"\n\n"}}`,
+			false,
+			"",
+		},
+		{
 			"tool use bash",
 			`{"type":"tool_use","timestamp":123,"sessionID":"s1","part":{"type":"tool","tool":"bash","state":{"status":"completed","input":{"command":"ls","description":"list files"},"output":"file1\n"}}}`,
 			false,
-			"[tool] bash: list files\n",
+			"[tool] bash: list files\n  → file1\n",
+		},
+		{
+			"tool use with non-zero exit",
+			`{"type":"tool_use","timestamp":123,"sessionID":"s1","part":{"type":"tool","tool":"bash","state":{"status":"completed","input":{"command":"false"},"output":"failed","metadata":{"exit":1}}}}`,
+			false,
+			"[tool] bash: false\n  → failed (exit 1)\n",
 		},
 		{
 			"step finish with cost",

@@ -50,12 +50,16 @@ type UsageEntry struct {
 
 // New returns a Backend for the given name.
 // Valid names: "claude-code" (default), "opencode".
-func New(name string) (Backend, error) {
+func New(name string, opts *Options) (Backend, error) {
+	var o Options
+	if opts != nil {
+		o = *opts
+	}
 	switch name {
 	case "", "claude-code":
-		return &claudeCode{}, nil
+		return &claudeCode{llmBaseURL: o.LLMBaseURL}, nil
 	case "opencode":
-		return &openCode{}, nil
+		return &openCode{llmBaseURL: o.LLMBaseURL, llmModel: o.LLMModel}, nil
 	default:
 		return nil, fmt.Errorf("unknown agent backend %q (valid: claude-code, opencode)", name)
 	}

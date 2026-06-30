@@ -50,7 +50,8 @@ func runLog(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("loading config: %w", err)
 	}
 
-	backend, err := agent.New(cfg.AgentBackend)
+	opts := cfg.AgentOptions()
+	backend, err := agent.New(cfg.AgentBackend, &opts)
 	if err != nil {
 		return fmt.Errorf("creating agent backend: %w", err)
 	}
@@ -59,12 +60,14 @@ func runLog(cmd *cobra.Command, args []string) error {
 		ctx, cancel := signal.NotifyContext(cmd.Context(), os.Interrupt)
 		defer cancel()
 
-		runner, err := sandbox.NewFromConfig(cfg.SandboxBackend, cfg.GjollEnv, cfg.PodmanImage, cfg.AnthropicKeyFile, 19090, backend.InstallCmd())
+		runner, err := sandbox.NewFromConfig(cfg.SandboxBackend, cfg.GjollEnv, cfg.PodmanImage, cfg.AnthropicKeyFile, 19090, backend.InstallCmd(), nil)
 		if err != nil {
 			return fmt.Errorf("creating sandbox runner: %w", err)
 		}
 		tw := newTranscriptWriter(os.Stdout, verbose, backend)
-		return runner.SSHProxyOutput(ctx, taskName, tw, &sandbox.SSHOpts{Proxy: true}, "bash", "-c", "tail -f /home/claude/transcript.jsonl")
+		home := runner.UserHome()
+		sshOpts := &sandbox.SSHOpts{Proxy: cfg.SandboxBackend == "gjoll"}
+		return runner.SSHProxyOutput(ctx, taskName, tw, sshOpts, "bash", "-c", "tail -f "+home+"/transcript.jsonl")
 	}
 
 	transcriptPath := task.TranscriptPathFor(cfg.OutputDir, taskName)

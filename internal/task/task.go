@@ -366,7 +366,7 @@ func (d *Dir) SaveUsage(u *Usage) error {
 
 // BackfillUsage recalculates usage from the transcript and persists it
 // if the current usage data is missing or incomplete.
-func (d *Dir) BackfillUsage() error {
+func (d *Dir) BackfillUsage(backend agent.Backend) error {
 	state, err := d.LoadState()
 	if err != nil {
 		return err
@@ -380,8 +380,7 @@ func (d *Dir) BackfillUsage() error {
 		return nil
 	}
 
-	ccBackend, _ := agent.New("claude-code")
-	usage, err := ParseTranscriptUsage(transcriptPath, ccBackend)
+	usage, err := ParseTranscriptUsage(transcriptPath, backend)
 	if err != nil {
 		return fmt.Errorf("parsing transcript: %w", err)
 	}

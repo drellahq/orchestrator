@@ -8,7 +8,7 @@ import (
 )
 
 func TestTranscriptWriter(t *testing.T) {
-	ccBackend, _ := agent.New("claude-code")
+	ccBackend, _ := agent.New("claude-code", nil)
 
 	tests := []struct {
 		name    string
@@ -74,11 +74,12 @@ func TestTranscriptWriter(t *testing.T) {
 }
 
 func TestTranscriptWriter_OpenCode(t *testing.T) {
-	ocBackend, _ := agent.New("opencode")
+	ocBackend, _ := agent.New("opencode", nil)
 
 	writes := []string{
 		`{"type":"text","timestamp":123,"sessionID":"s1","part":{"type":"text","text":"hello"}}` + "\n",
-		`{"type":"step_finish","timestamp":124,"sessionID":"s1","part":{"reason":"stop","tokens":{"total":1200,"input":1000,"output":200},"cost":0.05}}` + "\n",
+		`{"type":"tool_use","timestamp":124,"sessionID":"s1","part":{"type":"tool","tool":"bash","state":{"status":"completed","input":{"command":"ls","description":"list files"},"output":"file1\n"}}}` + "\n",
+		`{"type":"step_finish","timestamp":125,"sessionID":"s1","part":{"reason":"stop","tokens":{"total":1200,"input":1000,"output":200},"cost":0.05}}` + "\n",
 	}
 
 	var buf bytes.Buffer
@@ -89,7 +90,7 @@ func TestTranscriptWriter_OpenCode(t *testing.T) {
 		}
 	}
 
-	want := "hello\n[result] done ($0.0500, 1.0k↑ 200↓)\n"
+	want := "hello\n[tool] bash: list files\n  → file1\n[result] done ($0.0500, 1.0k↑ 200↓)\n"
 	if got := buf.String(); got != want {
 		t.Errorf("output = %q, want %q", got, want)
 	}
