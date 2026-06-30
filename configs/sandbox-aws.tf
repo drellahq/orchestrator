@@ -100,6 +100,26 @@ output "init_script" {
     %{if var.rhel_org_id != "" && var.rhel_activation_key != ""}
     sudo dnf install -y subscription-manager
     sudo subscription-manager register --org '${var.rhel_org_id}' --activationkey '${var.rhel_activation_key}'
+
+    # Workaround: osbuild's org.osbuild.rpm stage fails when building RHEL 10+
+    # images because rpm-sequoia on Fedora rejects the Red Hat PQC GPG key
+    # (release key 4). The ignore_import_failures option skips the key import
+    # error but rpmkeys --checksig still hard-fails for packages signed with
+    # the missing key. This patch makes checksig failures non-fatal when
+    # ignore_import_failures is already set.
+    # Upstream: https://github.com/osbuild/osbuild (org.osbuild.rpm stage)
+    sudo tee /usr/local/sbin/patch-osbuild-pqc >/dev/null <<'PATCHEOF'
+    #!/bin/bash
+    set -euo pipefail
+    STAGE=/usr/lib/osbuild/stages/org.osbuild.rpm
+    [ -f "$STAGE" ] || exit 0
+    grep -q 'ignoring because ignore_import_failures' "$STAGE" && exit 0
+    sed -i 's/                print(f"Signature check failed on {filename}, lookup package name in manifest.")/                if ignore_import_failures:\n                    print(f"Signature check failed on {filename}, ignoring because ignore_import_failures is set.")\n                    continue\n                print(f"Signature check failed on {filename}, lookup package name in manifest.")/' "$STAGE"
+    PATCHEOF
+    sudo chmod +x /usr/local/sbin/patch-osbuild-pqc
+
+    sudo dnf install -y osbuild osbuild-depsolve-dnf
+    sudo /usr/local/sbin/patch-osbuild-pqc
     %{endif}
 
     # Configure Claude Code to use Vertex AI via local proxy
