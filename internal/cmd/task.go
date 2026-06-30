@@ -318,6 +318,11 @@ func executeTask(ctx context.Context, taskName, taskDescription string, taskDir 
 		maxRounds = 8
 	}
 
+	opencodeBashTimeout, err := cfg.Agent.OpenCodeBashTimeoutDuration()
+	if err != nil {
+		return fmt.Errorf("agent opencode bash timeout: %w", err)
+	}
+
 	var agentErr error
 	for round := 0; round < maxRounds; round++ {
 		sessionContinue := continueSession || round > 0
@@ -328,7 +333,7 @@ func executeTask(ctx context.Context, taskName, taskDescription string, taskDir 
 
 		slog.Info("Running agent", "task", taskName, "agent", backend.Name(), "round", round+1, "continue", sessionContinue)
 
-		runScript := backend.BuildRunScript(prompt, sessionContinue, systemPromptFile, cfg.Agent.MaxBudgetUSD)
+		runScript := backend.BuildRunScript(prompt, sessionContinue, systemPromptFile, cfg.Agent.MaxBudgetUSD, opencodeBashTimeout)
 		tmpRun, err := os.CreateTemp("", "run-claude-*.sh")
 		if err != nil {
 			return fmt.Errorf("creating run script: %w", err)

@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 )
 
 // Backend defines how to install, configure, and invoke a coding agent.
@@ -17,7 +18,8 @@ type Backend interface {
 	BinaryPath() string
 
 	// BuildRunScript builds the shell script that invokes the agent headlessly.
-	BuildRunScript(taskDescription string, continueSession bool, systemPromptFile string, maxBudgetUSD float64) string
+	// opencodeBashTimeout is used by OpenCode only (OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS).
+	BuildRunScript(taskDescription string, continueSession bool, systemPromptFile string, maxBudgetUSD float64, opencodeBashTimeout time.Duration) string
 
 	// MCPAddCmd returns a shell command to register an MCP server.
 	// For agents that use config files instead of CLI commands, this writes

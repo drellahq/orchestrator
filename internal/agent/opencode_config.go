@@ -14,6 +14,23 @@ type openCodeMCP struct {
 func OpenCodeConfigJSON(baseURL, model string, mcp map[string]openCodeMCP) (string, error) {
 	cfg := map[string]any{
 		"$schema": "https://opencode.ai/config.json",
+		"permission": map[string]any{
+			"bash":  "allow",
+			"edit":  "allow",
+			"write": "allow",
+			"read": map[string]any{
+				"*": "allow",
+			},
+		},
+		"agent": map[string]any{
+			"build": map[string]any{
+				"permission": map[string]any{
+					"bash":  "allow",
+					"edit":  "allow",
+					"write": "allow",
+				},
+			},
+		},
 	}
 	if baseURL != "" && model != "" {
 		cfg["provider"] = map[string]any{
@@ -21,8 +38,10 @@ func OpenCodeConfigJSON(baseURL, model string, mcp map[string]openCodeMCP) (stri
 				"npm":  "@ai-sdk/openai-compatible",
 				"name": "Local LLM (orchestrator)",
 				"options": map[string]any{
-					"baseURL": baseURL,
-					"apiKey":  "local",
+					"baseURL":       baseURL,
+					"apiKey":        "local",
+					"timeout":       600000,
+					"chunkTimeout":  60000,
 				},
 				"models": map[string]any{
 					model: map[string]any{

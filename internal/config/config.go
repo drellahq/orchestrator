@@ -6,16 +6,37 @@ import (
 	"os"
 	"path"
 	"strconv"
+	"time"
 
 	"github.com/drellahq/orchestrator/internal/agent"
 	"github.com/goccy/go-yaml"
 )
 
+// DefaultOpenCodeBashTimeout is the default bash tool timeout for OpenCode sandboxes.
+const DefaultOpenCodeBashTimeout = 3 * time.Hour
+
 // AgentConfig holds per-agent budget limits.
 type AgentConfig struct {
-	MaxBudgetUSD      float64 `yaml:"max-budget-usd" json:"max_budget_usd"`
-	WarnBudgetUSD     float64 `yaml:"warn-budget-usd" json:"warn_budget_usd"`
-	CriticalBudgetUSD float64 `yaml:"critical-budget-usd" json:"critical_budget_usd"`
+	MaxBudgetUSD        float64 `yaml:"max-budget-usd" json:"max_budget_usd"`
+	WarnBudgetUSD       float64 `yaml:"warn-budget-usd" json:"warn_budget_usd"`
+	CriticalBudgetUSD   float64 `yaml:"critical-budget-usd" json:"critical_budget_usd"`
+	OpenCodeBashTimeout string  `yaml:"opencode_bash_timeout" json:"opencode_bash_timeout"`
+}
+
+// OpenCodeBashTimeoutDuration returns the configured OpenCode bash tool timeout,
+// defaulting to DefaultOpenCodeBashTimeout when unset.
+func (a AgentConfig) OpenCodeBashTimeoutDuration() (time.Duration, error) {
+	if a.OpenCodeBashTimeout == "" {
+		return DefaultOpenCodeBashTimeout, nil
+	}
+	d, err := time.ParseDuration(a.OpenCodeBashTimeout)
+	if err != nil {
+		return 0, fmt.Errorf("parsing agent.opencode_bash_timeout: %w", err)
+	}
+	if d <= 0 {
+		return 0, fmt.Errorf("agent.opencode_bash_timeout must be positive")
+	}
+	return d, nil
 }
 
 const DefaultLLMBaseURL = "http://127.0.0.1:1234/v1"
@@ -173,6 +194,11 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.AnthropicKeyFile == "" && !cfg.UsesLocalLLM() {
 		cfg.AnthropicKeyFile = "~/.anthropic/api_key"
+	}
+	if cfg.Agent.OpenCodeBashTimeout != "" {
+		if _, err := cfg.Agent.OpenCodeBashTimeoutDuration(); err != nil {
+			return nil, err
+		}
 	}
 
 	return cfg, nil

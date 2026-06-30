@@ -83,6 +83,7 @@ The `orchestrator.yaml` file supports:
 | `podman_image`              | `fedora:43`               | Container image for sandboxes (podman backend) |
 | `anthropic_key_file`        | (empty)                   | Path to Anthropic API key when using cloud Anthropic (not needed with default LM Studio) |
 | `agent_backend`             | `opencode`                | Coding agent backend: `claude-code` or `opencode` |
+| `agent.opencode_bash_timeout` | `3h`                    | OpenCode bash tool timeout (e.g. `30m`, `6h`); avoids 2-minute default cap on long commands |
 | `llm_base_url`              | `http://127.0.0.1:1234/v1` | Local LLM API base URL (LM Studio); set empty to use cloud Anthropic/Vertex |
 | `allowed_repos`             | `[]` (deny all)           | Repos allowed for `open_pr`/`update_pr`/`comment_on_pr` (glob patterns)|
 | `profiles_repo`             | (empty)                   | GitHub repo containing profile directories (e.g. `myorg/profiles`) |
@@ -238,6 +239,7 @@ are parsed. Both backends produce the same human-readable output for
 | Runtime | Node.js | Standalone binary (Go) |
 | MCP registration | `claude mcp add` CLI | `opencode.json` config file |
 | System prompt | `--append-system-prompt-file` | Merged into CLAUDE.md |
+| Bash command timeout | No hard default cap | `OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS` via `agent.opencode_bash_timeout` (default `3h`) |
 | Transcript format | `stream-json` | `--format json` |
 
 When using the podman sandbox backend, the agent is installed automatically in

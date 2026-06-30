@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/drellahq/orchestrator/internal/shellutil"
 )
@@ -22,7 +23,7 @@ func (b *claudeCode) BinaryPath() string {
 	return `export PATH="$HOME/.local/bin:$PATH"`
 }
 
-func (b *claudeCode) BuildRunScript(taskDescription string, continueSession bool, systemPromptFile string, maxBudgetUSD float64) string {
+func (b *claudeCode) BuildRunScript(taskDescription string, continueSession bool, systemPromptFile string, maxBudgetUSD float64, _ time.Duration) string {
 	escapedDesc := strings.ReplaceAll(taskDescription, "'", "'\\''")
 
 	var claudeFlags string

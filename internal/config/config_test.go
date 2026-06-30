@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func strPtr(s string) *string { return &s }
@@ -180,6 +181,45 @@ func TestLoad(t *testing.T) {
 				t.Errorf("got %+v, want %+v", *got, tt.want)
 			}
 		})
+	}
+}
+
+func TestOpenCodeBashTimeoutDuration(t *testing.T) {
+	d, err := AgentConfig{}.OpenCodeBashTimeoutDuration()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d != DefaultOpenCodeBashTimeout {
+		t.Fatalf("default = %v, want %v", d, DefaultOpenCodeBashTimeout)
+	}
+
+	cfg := AgentConfig{OpenCodeBashTimeout: "45m"}
+	d, err = cfg.OpenCodeBashTimeoutDuration()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d != 45*time.Minute {
+		t.Fatalf("got %v, want 45m", d)
+	}
+
+	zero := AgentConfig{OpenCodeBashTimeout: "0s"}
+	if _, err = zero.OpenCodeBashTimeoutDuration(); err == nil {
+		t.Fatal("expected error for zero timeout")
+	}
+	invalid := AgentConfig{OpenCodeBashTimeout: "not-a-duration"}
+	if _, err = invalid.OpenCodeBashTimeoutDuration(); err == nil {
+		t.Fatal("expected error for invalid timeout")
+	}
+}
+
+func TestLoadOpenCodeBashTimeoutValidation(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("agent:\n  opencode_bash_timeout: \"0s\"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected error for zero opencode_bash_timeout")
 	}
 }
 

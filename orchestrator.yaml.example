@@ -70,6 +70,9 @@
 #   # Dashboard critical threshold — usage display turns red when cost exceeds
 #   # this value.
 #   critical-budget-usd: 50
+#   # OpenCode bash tool timeout (default: 3h). OpenCode kills shell commands
+#   # after this duration unless overridden per command.
+#   opencode_bash_timeout: "3h"
 
 # Daemon configuration for automatic PR comment polling.
 # daemon:

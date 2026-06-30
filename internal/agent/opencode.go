@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 )
 
 type openCode struct {
@@ -21,7 +22,7 @@ func (b *openCode) BinaryPath() string {
 	return `export PATH="$HOME/.opencode/bin:$PATH"`
 }
 
-func (b *openCode) BuildRunScript(taskDescription string, continueSession bool, systemPromptFile string, maxBudgetUSD float64) string {
+func (b *openCode) BuildRunScript(taskDescription string, continueSession bool, systemPromptFile string, maxBudgetUSD float64, opencodeBashTimeout time.Duration) string {
 	escapedDesc := strings.ReplaceAll(taskDescription, "'", "'\\''")
 
 	var flags string
@@ -45,6 +46,7 @@ set -eo pipefail
 source ~/.bashrc
 export PATH="$HOME/.opencode/bin:$PATH"
 mkdir -p ~/workspace
+export OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS=%d
 %sstdbuf -oL opencode run --dangerously-skip-permissions \
   --dir ~/workspace \
   --agent build \
@@ -53,7 +55,7 @@ mkdir -p ~/workspace
   --format json \
   %s'%s' \
   </dev/null | stdbuf -oL tee %s ~/transcript.jsonl
-`, llmEnvBlock(b.llmBaseURL), modelFlag, flags, escapedDesc, teeFlag)
+`, opencodeBashTimeout.Milliseconds(), llmEnvBlock(b.llmBaseURL), modelFlag, flags, escapedDesc, teeFlag)
 }
 
 func (b *openCode) MCPAddCmd(name, transport, url, scope string) string {

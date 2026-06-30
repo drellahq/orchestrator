@@ -17,6 +17,9 @@ func TestOpenCodeConfigJSON(t *testing.T) {
 		`"http://127.0.0.1:11434/v1"`,
 		`"qwen/qwen3.5-9b"`,
 		`"orchestrator"`,
+		`"bash":"allow"`,
+		`"timeout":600000`,
+		`"chunkTimeout":60000`,
 	} {
 		if !strings.Contains(raw, want) {
 			t.Errorf("config missing %q: %s", want, raw)
