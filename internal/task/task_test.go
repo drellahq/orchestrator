@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/drellahq/orchestrator/internal/agent"
 )
 
 func TestCreate(t *testing.T) {
@@ -827,6 +829,10 @@ func TestRemoveRepo_AlreadyGone(t *testing.T) {
 }
 
 func TestBackfillUsage_MissingUsage(t *testing.T) {
+	ccBackend, err := agent.New("claude-code", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	outputDir := t.TempDir()
 	td, err := Create(outputDir, "backfill-test")
 	if err != nil {
@@ -854,7 +860,7 @@ func TestBackfillUsage_MissingUsage(t *testing.T) {
 	}
 
 	// Backfill should parse transcript and save
-	if err := td.BackfillUsage(); err != nil {
+	if err := td.BackfillUsage(ccBackend); err != nil {
 		t.Fatalf("BackfillUsage() error: %v", err)
 	}
 
@@ -880,6 +886,10 @@ func TestBackfillUsage_MissingUsage(t *testing.T) {
 }
 
 func TestBackfillUsage_IncompleteUsage(t *testing.T) {
+	ccBackend, err := agent.New("claude-code", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	outputDir := t.TempDir()
 	td, err := Create(outputDir, "backfill-incomplete")
 	if err != nil {
@@ -902,7 +912,7 @@ func TestBackfillUsage_IncompleteUsage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := td.BackfillUsage(); err != nil {
+	if err := td.BackfillUsage(ccBackend); err != nil {
 		t.Fatalf("BackfillUsage() error: %v", err)
 	}
 
@@ -919,6 +929,10 @@ func TestBackfillUsage_IncompleteUsage(t *testing.T) {
 }
 
 func TestBackfillUsage_AlreadyComplete(t *testing.T) {
+	ccBackend, err := agent.New("claude-code", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	outputDir := t.TempDir()
 	td, err := Create(outputDir, "backfill-complete")
 	if err != nil {
@@ -942,7 +956,7 @@ func TestBackfillUsage_AlreadyComplete(t *testing.T) {
 	}
 
 	// BackfillUsage should be a no-op
-	if err := td.BackfillUsage(); err != nil {
+	if err := td.BackfillUsage(ccBackend); err != nil {
 		t.Fatalf("BackfillUsage() error: %v", err)
 	}
 
@@ -956,6 +970,10 @@ func TestBackfillUsage_AlreadyComplete(t *testing.T) {
 }
 
 func TestBackfillUsage_NoTranscript(t *testing.T) {
+	ccBackend, err := agent.New("claude-code", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	outputDir := t.TempDir()
 	td, err := Create(outputDir, "backfill-no-transcript")
 	if err != nil {
@@ -967,7 +985,7 @@ func TestBackfillUsage_NoTranscript(t *testing.T) {
 	}
 
 	// No transcript file exists — backfill should silently skip
-	if err := td.BackfillUsage(); err != nil {
+	if err := td.BackfillUsage(ccBackend); err != nil {
 		t.Fatalf("BackfillUsage() error: %v", err)
 	}
 

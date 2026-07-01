@@ -89,19 +89,22 @@ func TestWriteBudgetJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var got map[string]float64
+	var got config.AgentConfig
 	if err := json.Unmarshal(data, &got); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
 
-	if got["max_budget_usd"] != 100 {
-		t.Errorf("max_budget_usd = %v, want 100", got["max_budget_usd"])
+	if got.MaxBudgetUSD != 100 {
+		t.Errorf("max_budget_usd = %v, want 100", got.MaxBudgetUSD)
 	}
-	if got["warn_budget_usd"] != 30 {
-		t.Errorf("warn_budget_usd = %v, want 30", got["warn_budget_usd"])
+	if got.WarnBudgetUSD != 30 {
+		t.Errorf("warn_budget_usd = %v, want 30", got.WarnBudgetUSD)
 	}
-	if got["critical_budget_usd"] != 50 {
-		t.Errorf("critical_budget_usd = %v, want 50", got["critical_budget_usd"])
+	if got.CriticalBudgetUSD != 50 {
+		t.Errorf("critical_budget_usd = %v, want 50", got.CriticalBudgetUSD)
+	}
+	if got.OpenCodeBashTimeout != "" {
+		t.Errorf("opencode_bash_timeout = %q, want empty", got.OpenCodeBashTimeout)
 	}
 }
 
@@ -118,13 +121,22 @@ func TestWriteBudgetJSON_zeroes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var got map[string]float64
+	var got config.AgentConfig
 	if err := json.Unmarshal(data, &got); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
 
-	if got["max_budget_usd"] != 0 {
-		t.Errorf("max_budget_usd = %v, want 0", got["max_budget_usd"])
+	if got.MaxBudgetUSD != 0 {
+		t.Errorf("max_budget_usd = %v, want 0", got.MaxBudgetUSD)
+	}
+	if got.WarnBudgetUSD != 0 {
+		t.Errorf("warn_budget_usd = %v, want 0", got.WarnBudgetUSD)
+	}
+	if got.CriticalBudgetUSD != 0 {
+		t.Errorf("critical_budget_usd = %v, want 0", got.CriticalBudgetUSD)
+	}
+	if got.OpenCodeBashTimeout != "" {
+		t.Errorf("opencode_bash_timeout = %q, want empty", got.OpenCodeBashTimeout)
 	}
 }
 

@@ -4,11 +4,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/drellahq/orchestrator/internal/shellutil"
 )
 
-type claudeCode struct{}
+type claudeCode struct {
+	llmBaseURL string
+}
 
 func (b *claudeCode) Name() string { return "claude-code" }
 
@@ -20,7 +23,7 @@ func (b *claudeCode) BinaryPath() string {
 	return `export PATH="$HOME/.local/bin:$PATH"`
 }
 
-func (b *claudeCode) BuildRunScript(taskDescription string, continueSession bool, systemPromptFile string, maxBudgetUSD float64) string {
+func (b *claudeCode) BuildRunScript(taskDescription string, continueSession bool, systemPromptFile string, maxBudgetUSD float64, _ time.Duration) string {
 	escapedDesc := strings.ReplaceAll(taskDescription, "'", "'\\''")
 
 	var claudeFlags string
@@ -40,17 +43,23 @@ func (b *claudeCode) BuildRunScript(taskDescription string, continueSession bool
 		budgetFlag = fmt.Sprintf("--max-budget-usd %.2f ", maxBudgetUSD)
 	}
 
+	var apiKeyLine string
+	if b.llmBaseURL != "" {
+		apiKeyLine = llmEnvBlock(b.llmBaseURL)
+	} else {
+		apiKeyLine = `export ANTHROPIC_API_KEY="$(cat ~/.anthropic/api_key 2>/dev/null || true)"` + "\n"
+	}
+
 	return fmt.Sprintf(`#!/bin/bash
 source ~/.bashrc
 export PATH="$HOME/.local/bin:$PATH"
-export ANTHROPIC_API_KEY="$(cat ~/.anthropic/api_key 2>/dev/null || true)"
-set -o pipefail
+%sset -o pipefail
 stdbuf -oL claude --dangerously-skip-permissions -p --verbose \
   --effort max \
   --output-format stream-json %s%s\
-  %s %s'%s' \
+  %s '%s' \
   </dev/null | stdbuf -oL tee %s ~/transcript.jsonl
-`, budgetFlag, systemPromptFlag, claudeFlags, "", escapedDesc, teeFlag)
+`, apiKeyLine, budgetFlag, systemPromptFlag, claudeFlags, escapedDesc, teeFlag)
 }
 
 func (b *claudeCode) MCPAddCmd(name, transport, url, scope string) string {

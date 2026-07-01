@@ -13,19 +13,34 @@
 # base_url: "https://drella.example.com"
 
 # Sandbox backend: "gjoll" (VMs) or "podman" (containers).
-# Defaults to "gjoll" for backward compatibility.
+# Defaults to "gjoll". Use "podman" for faster local iteration.
 # sandbox_backend: "gjoll"
 
 # Gjoll backend settings (for VM-based sandboxes):
 # Path to the gjoll .tf file for sandbox provisioning.
-# Edit configs/sandbox.tf to set your Vertex AI project ID before use.
-# For direct Anthropic API, use configs/sandbox-anthropic-api.tf.example
+# - Local LLM + libvirt: gjoll/examples/fedora-libvirt.tf (gjoll proxy to host LM Studio/Ollama)
+# - Vertex AI cloud: ./configs/sandbox.tf (edit project ID first)
+# - Anthropic API cloud: configs/sandbox-anthropic-api.tf.example
 # gjoll_env: "./configs/sandbox.tf"
 
 # Podman backend settings (for container-based sandboxes):
 # Container image to use for sandboxes.
 # podman_image: "fedora:43"
-# Path to Anthropic API key file (will be copied into containers).
+
+# Agent backend: "opencode" (default) or "claude-code".
+# agent_backend: "opencode"
+
+# Local LLM API base URL (LM Studio or Ollama OpenAI-compatible endpoint).
+# Default when omitted: http://127.0.0.1:1234/v1
+# Set to empty string to use cloud Anthropic/Vertex instead.
+# llm_base_url: "http://127.0.0.1:1234/v1"
+
+# Model ID on the local API (OpenCode: passed as --model local/<id>).
+# When omitted, the first model from <llm_base_url>/models is used.
+# llm_model: "google/gemma-4-e4b"
+
+# Path to Anthropic API key file (only when llm_base_url is disabled).
+# Sign up at https://console.anthropic.com and save the key here.
 # anthropic_key_file: "~/.anthropic/api_key"
 
 # Repos the sandbox is allowed to open PRs against (supports wildcards).
@@ -55,6 +70,9 @@
 #   # Dashboard critical threshold — usage display turns red when cost exceeds
 #   # this value.
 #   critical-budget-usd: 50
+#   # OpenCode bash tool timeout (default: 3h). OpenCode kills shell commands
+#   # after this duration unless overridden per command.
+#   opencode_bash_timeout: "3h"
 
 # Daemon configuration for automatic PR comment polling.
 # daemon:

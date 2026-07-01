@@ -18,10 +18,11 @@ type PodmanRunner struct {
 	anthropicKey    string
 	mcpServerPort   int
 	agentInstallCmd string
+	rhel            *RHELRegistration
 }
 
 // NewPodman creates a PodmanRunner.
-func NewPodman(image, anthropicKeyFile string, mcpPort int, agentInstallCmd string) *PodmanRunner {
+func NewPodman(image, anthropicKeyFile string, mcpPort int, agentInstallCmd string, rhel *RHELRegistration) *PodmanRunner {
 	if image == "" {
 		image = "fedora:43"
 	}
@@ -33,6 +34,7 @@ func NewPodman(image, anthropicKeyFile string, mcpPort int, agentInstallCmd stri
 		anthropicKey:    anthropicKeyFile,
 		mcpServerPort:   mcpPort,
 		agentInstallCmd: agentInstallCmd,
+		rhel:            rhel,
 	}
 }
 
@@ -52,6 +54,11 @@ func (r *PodmanRunner) Up(ctx context.Context, name string, config string) error
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("podman run: %w", err)
+	}
+
+	if err := r.registerRHEL(ctx, name); err != nil {
+		_ = r.Down(context.Background(), name)
+		return fmt.Errorf("RHEL registration: %w", err)
 	}
 
 	// Create non-root user for Claude
@@ -214,6 +221,10 @@ func (r *PodmanRunner) UserHome() string {
 // AsUser wraps a command to run as the claude user via su.
 func (r *PodmanRunner) AsUser(cmd string) string {
 	return "su - claude -c " + shellutil.Quote(cmd)
+}
+
+func (r *PodmanRunner) registerRHEL(ctx context.Context, name string) error {
+	return registerRHEL(ctx, r.SSH, name, r.rhel)
 }
 
 func (r *PodmanRunner) run(ctx context.Context, args ...string) error {

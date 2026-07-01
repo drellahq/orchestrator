@@ -11,7 +11,7 @@ import (
 func intPtr(v int) *int { return &v }
 
 func TestParseTranscriptUsage(t *testing.T) {
-	ccBackend, _ := agent.New("claude-code")
+	ccBackend, _ := agent.New("claude-code", nil)
 
 	tests := []struct {
 		name            string
@@ -187,7 +187,7 @@ also invalid
 }
 
 func TestParseTranscriptUsage_OpenCode(t *testing.T) {
-	ocBackend, _ := agent.New("opencode")
+	ocBackend, _ := agent.New("opencode", nil)
 
 	content := `{"type":"step_start","timestamp":123,"sessionID":"s1","part":{"type":"step-start"}}
 {"type":"text","timestamp":124,"sessionID":"s1","part":{"type":"text","text":"hello"}}
@@ -216,7 +216,7 @@ func TestParseTranscriptUsage_OpenCode(t *testing.T) {
 }
 
 func TestParseTranscriptUsage_MissingFile(t *testing.T) {
-	ccBackend, _ := agent.New("claude-code")
+	ccBackend, _ := agent.New("claude-code", nil)
 	_, err := ParseTranscriptUsage("/nonexistent/transcript.jsonl", ccBackend)
 	if err == nil {
 		t.Fatal("expected error for missing file")

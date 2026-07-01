@@ -7,9 +7,10 @@ terraform {
 provider "libvirt" { uri = "qemu:///system" }
 
 resource "libvirt_volume" "base" {
-  name   = "fedora-base-${var.gjoll_name}.qcow2"
-  pool   = "default"
-  target = { format = { type = "qcow2" } }
+  name     = "fedora-base-${var.gjoll_name}.qcow2"
+  pool     = "default"
+  capacity = 5368709120 # 5 GiB (required when download has no Content-Length)
+  target   = { format = { type = "qcow2" } }
   create = {
     content = {
       url = "https://download.fedoraproject.org/pub/fedora/linux/releases/43/Cloud/x86_64/images/Fedora-Cloud-Base-Generic-43-1.6.x86_64.qcow2"
@@ -71,7 +72,7 @@ resource "libvirt_domain" "sandbox" {
       {
         source      = { network = { network = "default" } }
         model       = { type = "virtio" }
-        wait_for_ip = var.gjoll_instance_state == "running" ? { source = "lease" } : null
+        wait_for_ip = { source = "lease" }
       },
     ]
     consoles = [
@@ -91,20 +92,6 @@ output "public_ip" {
 }
 output "instance_id" { value = tostring(libvirt_domain.sandbox.id) }
 output "ssh_user"    { value = "fedora" }
-variable "rhel_org_id" {
-  type        = string
-  description = "Red Hat organization ID for subscription-manager registration"
-  default     = ""
-  sensitive   = true
-}
-
-variable "rhel_activation_key" {
-  type        = string
-  description = "Red Hat activation key for subscription-manager registration"
-  default     = ""
-  sensitive   = true
-}
-
 output "init_script" {
   sensitive = true
   value = <<-EOT
@@ -112,12 +99,6 @@ output "init_script" {
     set -euo pipefail
     sudo dnf install -y git-core tmux
     curl -fsSL https://claude.ai/install.sh | bash
-
-    # Register with Red Hat subscription-manager if credentials are provided
-    %{if var.rhel_org_id != "" && var.rhel_activation_key != ""}
-    sudo dnf install -y subscription-manager
-    sudo subscription-manager register --org '${var.rhel_org_id}' --activationkey '${var.rhel_activation_key}'
-    %{endif}
 
     # Configure Claude Code to use Vertex AI via local proxy
     cat >> ~/.bashrc <<'RCEOF'

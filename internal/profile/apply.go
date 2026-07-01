@@ -22,10 +22,14 @@ import (
 func Apply(ctx context.Context, p *Profile, runner sandbox.Runner, backend agent.Backend, sbx string, taskDir string, basePrompt string, vars map[string]string) error {
 	home := runner.UserHome()
 	configDir := backend.ConfigDir()
+	claudemdPath := home + "/" + configDir + "/CLAUDE.md"
+	if backend.Name() == "opencode" {
+		claudemdPath = home + "/workspace/CLAUDE.md"
+	}
 
 	// 1. Write combined CLAUDE.md
 	claudemd := basePrompt + "\n\n# Profile: " + p.Name + "\n\n" + p.Claudemd
-	if err := writeToSandbox(ctx, runner, backend, sbx, claudemd, sbx+":"+home+"/"+configDir+"/CLAUDE.md"); err != nil {
+	if err := writeToSandbox(ctx, runner, backend, sbx, claudemd, sbx+":"+claudemdPath); err != nil {
 		return fmt.Errorf("writing CLAUDE.md: %w", err)
 	}
 
@@ -39,7 +43,11 @@ func Apply(ctx context.Context, p *Profile, runner sandbox.Runner, backend agent
 
 	// Fix ownership of copied files (podman cp runs as root; on gjoll this
 	// is a harmless no-op error since the SSH user already owns the files).
-	fixCmd := "chown -R $(stat -c '%U:%G' " + home + ") " + home + "/" + configDir + " 2>/dev/null || true"
+	fixTarget := home + "/" + configDir
+	if backend.Name() == "opencode" {
+		fixTarget = home + "/workspace"
+	}
+	fixCmd := "chown -R $(stat -c '%U:%G' " + home + ") " + fixTarget + " 2>/dev/null || true"
 	_ = runner.SSH(ctx, sbx, "bash", "-c", fixCmd)
 
 	// 3. Register MCP servers from mcp.yaml

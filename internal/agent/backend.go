@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 )
 
 // Backend defines how to install, configure, and invoke a coding agent.
@@ -17,7 +18,8 @@ type Backend interface {
 	BinaryPath() string
 
 	// BuildRunScript builds the shell script that invokes the agent headlessly.
-	BuildRunScript(taskDescription string, continueSession bool, systemPromptFile string, maxBudgetUSD float64) string
+	// opencodeBashTimeout is used by OpenCode only (OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS).
+	BuildRunScript(taskDescription string, continueSession bool, systemPromptFile string, maxBudgetUSD float64, opencodeBashTimeout time.Duration) string
 
 	// MCPAddCmd returns a shell command to register an MCP server.
 	// For agents that use config files instead of CLI commands, this writes
@@ -50,12 +52,16 @@ type UsageEntry struct {
 
 // New returns a Backend for the given name.
 // Valid names: "claude-code" (default), "opencode".
-func New(name string) (Backend, error) {
+func New(name string, opts *Options) (Backend, error) {
+	var o Options
+	if opts != nil {
+		o = *opts
+	}
 	switch name {
 	case "", "claude-code":
-		return &claudeCode{}, nil
+		return &claudeCode{llmBaseURL: o.LLMBaseURL}, nil
 	case "opencode":
-		return &openCode{}, nil
+		return &openCode{llmBaseURL: o.LLMBaseURL, llmModel: o.LLMModel}, nil
 	default:
 		return nil, fmt.Errorf("unknown agent backend %q (valid: claude-code, opencode)", name)
 	}

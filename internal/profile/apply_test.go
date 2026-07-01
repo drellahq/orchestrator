@@ -34,7 +34,7 @@ func TestRegisterMCPServer_ShellInjection(t *testing.T) {
 		t.Skip("sh not found")
 	}
 
-	ccBackend, _ := agent.New("claude-code")
+	ccBackend, _ := agent.New("claude-code", nil)
 
 	tests := []struct {
 		name   string
@@ -71,7 +71,7 @@ func TestRegisterMCPServer_ShellInjection(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			script, outFile := writeGjollCapture(t)
-			runner := sandbox.NewGjollAdapter(script)
+			runner := sandbox.NewGjollAdapter(script, nil)
 
 			err := registerMCPServer(context.Background(), runner, ccBackend, "test-sandbox", tt.server)
 			if err != nil {
@@ -131,7 +131,7 @@ func TestRunSetup_ShellInjection(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			runner := sandbox.NewGjollAdapter(gjollScript)
+			runner := sandbox.NewGjollAdapter(gjollScript, nil)
 			taskDir := t.TempDir()
 
 			outputFile := filepath.Join(t.TempDir(), "helpers_output")

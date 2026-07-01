@@ -90,9 +90,10 @@ func testTF(t *testing.T) string {
 provider "libvirt" { uri = "qemu:///system" }
 
 resource "libvirt_volume" "base" {
-  name   = "fedora-base-${var.gjoll_name}.qcow2"
-  pool   = "default"
-  target = { format = { type = "qcow2" } }
+  name     = "fedora-base-${var.gjoll_name}.qcow2"
+  pool     = "default"
+  capacity = 5368709120 # 5 GiB (required when download has no Content-Length)
+  target   = { format = { type = "qcow2" } }
   create = {
     content = {
       url = "https://download.fedoraproject.org/pub/fedora/linux/releases/43/Cloud/x86_64/images/Fedora-Cloud-Base-Generic-43-1.6.x86_64.qcow2"
@@ -154,7 +155,7 @@ resource "libvirt_domain" "sandbox" {
       {
         source      = { network = { network = "default" } }
         model       = { type = "virtio" }
-        wait_for_ip = var.gjoll_instance_state == "running" ? { source = "lease" } : null
+        wait_for_ip = { source = "lease" }
       },
     ]
     consoles = [

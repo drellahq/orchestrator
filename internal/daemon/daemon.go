@@ -14,7 +14,8 @@ import (
 	"time"
 
 	gh "github.com/drellahq/orchestrator/internal/github"
-	"github.com/drellahq/orchestrator/internal/gjoll"
+	"github.com/drellahq/orchestrator/internal/agent"
+	"github.com/drellahq/orchestrator/internal/config"
 	"github.com/drellahq/orchestrator/internal/profile"
 	"github.com/drellahq/orchestrator/internal/prompts"
 	"github.com/drellahq/orchestrator/internal/task"
@@ -549,15 +550,13 @@ func buildNewTaskArgs(configPath, taskName, description, sourceRepo string, sour
 
 // ListTaskDirs returns the names of all task directories in outputDir.
 func ListTaskDirs(outputDir string) ([]string, error) {
-	entries, err := os.ReadDir(outputDir)
+	summaries, err := task.List(outputDir, true)
 	if err != nil {
 		return nil, err
 	}
-	var names []string
-	for _, e := range entries {
-		if e.IsDir() {
-			names = append(names, e.Name())
-		}
+	names := make([]string, len(summaries))
+	for i, s := range summaries {
+		names[i] = s.Name
 	}
 	return names, nil
 }
@@ -825,6 +824,18 @@ func (d *Daemon) cleanupSandboxes(ctx context.Context) {
 // the dashboard can display costs immediately from state.json without
 // client-side transcript parsing.
 func (d *Daemon) backfillUsage() {
+	cfg, err := config.Load(d.configPath)
+	if err != nil {
+		slog.Debug("Cannot load config for usage backfill", "error", err)
+		return
+	}
+	opts := cfg.AgentOptions()
+	backend, err := agent.New(cfg.AgentBackend, &opts)
+	if err != nil {
+		slog.Debug("Cannot create agent backend for usage backfill", "error", err)
+		return
+	}
+
 	entries, err := os.ReadDir(d.outputDir)
 	if err != nil {
 		slog.Debug("Cannot read output dir for usage backfill", "dir", d.outputDir, "error", err)
@@ -841,7 +852,7 @@ func (d *Daemon) backfillUsage() {
 		if err != nil {
 			continue
 		}
-		if err := td.BackfillUsage(); err != nil {
+		if err := td.BackfillUsage(backend); err != nil {
 			slog.Debug("Failed to backfill usage", "task", taskName, "error", err)
 		}
 	}
@@ -883,6 +894,9 @@ func (d *Daemon) closeSourceIssue(ctx context.Context, state *task.State, log *s
 }
 
 func (d *Daemon) defaultDownFunc(ctx context.Context, taskName string) error {
-	runner := gjoll.New("")
-	return runner.Down(ctx, taskName)
+	cfg, err := config.Load(d.configPath)
+	if err != nil {
+		return fmt.Errorf("loading config: %w", err)
+	}
+	return task.DestroySandbox(ctx, cfg, taskName)
 }

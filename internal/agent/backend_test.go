@@ -2,6 +2,7 @@ package agent
 
 import (
 	"testing"
+	"time"
 )
 
 func TestNew(t *testing.T) {
@@ -17,7 +18,7 @@ func TestNew(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			b, err := New(tt.name)
+			b, err := New(tt.name, nil)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("New(%q) error = %v, wantErr = %v", tt.name, err, tt.wantErr)
 			}
@@ -30,7 +31,7 @@ func TestNew(t *testing.T) {
 
 func TestClaudeCodeBuildRunScript(t *testing.T) {
 	b := &claudeCode{}
-	script := b.BuildRunScript("fix the bug", false, "~/system-prompt.md", 0)
+	script := b.BuildRunScript("fix the bug", false, "~/system-prompt.md", 0, 0)
 
 	if got := script; got == "" {
 		t.Fatal("empty script")
@@ -59,7 +60,7 @@ func TestClaudeCodeBuildRunScript(t *testing.T) {
 	}
 
 	// Continue session
-	script = b.BuildRunScript("continue task", true, "", 0)
+	script = b.BuildRunScript("continue task", true, "", 0, 0)
 	if !contains(script, "--continue") {
 		t.Error("continue script missing --continue flag")
 	}
@@ -68,7 +69,7 @@ func TestClaudeCodeBuildRunScript(t *testing.T) {
 	}
 
 	// With budget
-	script = b.BuildRunScript("fix the bug", false, "~/system-prompt.md", 100)
+	script = b.BuildRunScript("fix the bug", false, "~/system-prompt.md", 100, 0)
 	if !contains(script, "--max-budget-usd 100.00") {
 		t.Error("script missing --max-budget-usd flag")
 	}
@@ -76,13 +77,17 @@ func TestClaudeCodeBuildRunScript(t *testing.T) {
 
 func TestOpenCodeBuildRunScript(t *testing.T) {
 	b := &openCode{}
-	script := b.BuildRunScript("fix the bug", false, "~/system-prompt.md", 0)
+	bashTimeout := 3 * time.Hour
+	script := b.BuildRunScript("fix the bug", false, "~/system-prompt.md", 0, bashTimeout)
 
 	if got := script; got == "" {
 		t.Fatal("empty script")
 	}
 	for _, want := range []string{
 		"opencode run --dangerously-skip-permissions",
+		"export OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS=10800000",
+		"--dir ~/workspace",
+		"--agent build",
 		"--format json",
 		"--variant max",
 		"fix the bug",
@@ -106,6 +111,23 @@ func TestOpenCodeBuildRunScript(t *testing.T) {
 	}
 }
 
+func TestOpenCodeBuildRunScriptLMStudio(t *testing.T) {
+	b := &openCode{llmBaseURL: "http://127.0.0.1:1234/v1", llmModel: "google/gemma-4-e4b"}
+	script := b.BuildRunScript("hello", false, "", 0, 2*time.Hour)
+
+	for _, want := range []string{
+		"export ANTHROPIC_BASE_URL='http://127.0.0.1:1234/v1'",
+		"export ANTHROPIC_API_KEY=lm-studio",
+		"export OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS=7200000",
+		"opencode run --dangerously-skip-permissions",
+		"--model local/google/gemma-4-e4b",
+	} {
+		if !contains(script, want) {
+			t.Errorf("script missing %q", want)
+		}
+	}
+}
+
 func TestClaudeCodeMCPAddCmd(t *testing.T) {
 	b := &claudeCode{}
 	cmd := b.MCPAddCmd("orchestrator", "http", "http://localhost:19090/mcp", "user")
@@ -116,7 +138,7 @@ func TestClaudeCodeMCPAddCmd(t *testing.T) {
 }
 
 func TestOpenCodeMCPAddCmd(t *testing.T) {
-	b := &openCode{}
+	b := &openCode{llmBaseURL: "http://127.0.0.1:1234/v1", llmModel: "test-model"}
 	cmd := b.MCPAddCmd("orchestrator", "http", "http://localhost:19090/mcp", "user")
 	if !contains(cmd, `"orchestrator"`) {
 		t.Error("MCP config missing server name")
@@ -127,8 +149,11 @@ func TestOpenCodeMCPAddCmd(t *testing.T) {
 	if !contains(cmd, "http://localhost:19090/mcp") {
 		t.Error("MCP config missing URL")
 	}
-	if !contains(cmd, "opencode.json") {
-		t.Error("MCP config should write opencode.json")
+	if !contains(cmd, `"provider"`) {
+		t.Error("MCP config should include local provider when LLM base URL is set")
+	}
+	if !contains(cmd, "~/workspace/opencode.json") {
+		t.Error("MCP config should write ~/workspace/opencode.json")
 	}
 }
 
@@ -211,10 +236,22 @@ func TestOpenCodeFormatTranscriptLine(t *testing.T) {
 			"hello world\n",
 		},
 		{
+			"whitespace-only text",
+			`{"type":"text","timestamp":123,"sessionID":"s1","part":{"type":"text","text":"\n\n"}}`,
+			false,
+			"",
+		},
+		{
 			"tool use bash",
 			`{"type":"tool_use","timestamp":123,"sessionID":"s1","part":{"type":"tool","tool":"bash","state":{"status":"completed","input":{"command":"ls","description":"list files"},"output":"file1\n"}}}`,
 			false,
-			"[tool] bash: list files\n",
+			"[tool] bash: list files\n  → file1\n",
+		},
+		{
+			"tool use with non-zero exit",
+			`{"type":"tool_use","timestamp":123,"sessionID":"s1","part":{"type":"tool","tool":"bash","state":{"status":"completed","input":{"command":"false"},"output":"failed","metadata":{"exit":1}}}}`,
+			false,
+			"[tool] bash: false\n  → failed (exit 1)\n",
 		},
 		{
 			"step finish with cost",

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -11,6 +12,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -160,9 +162,9 @@ func logPreflightWarnings(ctx context.Context, cfg *config.Config) *gh.Runner {
 	return ghRunner
 }
 
-func createSandboxRunner(cfg *config.Config, backend agent.Backend) (sandbox.Runner, error) {
+func createSandboxRunner(cfg *config.Config, backend agent.Backend, rhel *sandbox.RHELRegistration) (sandbox.Runner, error) {
 	slog.Info("Creating sandbox runner", "backend", cfg.SandboxBackend, "agent", backend.Name())
-	return sandbox.NewFromConfig(cfg.SandboxBackend, cfg.GjollEnv, cfg.PodmanImage, cfg.AnthropicKeyFile, mcpserver.MCPRemotePort, backend.InstallCmd())
+	return sandbox.NewFromConfig(cfg.SandboxBackend, cfg.GjollEnv, cfg.PodmanImage, cfg.AnthropicKeyPath(), mcpserver.MCPRemotePort, backend.InstallCmd(), rhel)
 }
 
 func executeTask(ctx context.Context, taskName, taskDescription string, taskDir *task.Dir, cfg *config.Config, ghRunner *gh.Runner, continueSession bool, author string, profileName string, profileVars []string, labels []string, agentBackendOverride string) error {
@@ -170,12 +172,35 @@ func executeTask(ctx context.Context, taskName, taskDescription string, taskDir 
 	if agentBackendOverride != "" {
 		backendName = agentBackendOverride
 	}
-	backend, err := agent.New(backendName)
+	opts := cfg.AgentOptions()
+	if cfg.UsesLocalLLM() && opts.LLMModel == "" {
+		model, err := agent.ResolveLocalModel(cfg.LocalLLMBaseURL(), cfg.LLMModel)
+		if err != nil {
+			slog.Warn("Failed to auto-detect local LLM model", "error", err)
+		} else {
+			opts.LLMModel = model
+			slog.Debug("Auto-detected local LLM model", "model", model)
+		}
+	}
+	backend, err := agent.New(backendName, &opts)
 	if err != nil {
 		return fmt.Errorf("creating agent backend: %w", err)
 	}
 
-	runner, err := createSandboxRunner(cfg, backend)
+	var rhelReg *sandbox.RHELRegistration
+	if !continueSession && hasLabel(labels, "rhel") {
+		orgID, activationKey, err := setupRHELSubscription(ctx, taskName, taskDir)
+		if err != nil {
+			slog.Warn("RHEL subscription setup failed, continuing without it", "task", taskName, "error", err)
+		} else {
+			rhelReg = &sandbox.RHELRegistration{
+				OrgID:         orgID,
+				ActivationKey: activationKey,
+			}
+		}
+	}
+
+	runner, err := createSandboxRunner(cfg, backend, rhelReg)
 	if err != nil {
 		return fmt.Errorf("creating sandbox runner: %w", err)
 	}
@@ -213,15 +238,13 @@ func executeTask(ctx context.Context, taskName, taskDescription string, taskDir 
 			return fmt.Errorf("resuming sandbox: %w", err)
 		}
 	} else {
-		if hasLabel(labels, "rhel") {
-			if err := setupRHELSubscription(ctx, taskName, taskDir); err != nil {
-				slog.Warn("RHEL subscription setup failed, continuing without it", "task", taskName, "error", err)
-			}
-		}
-
 		tfPath, err := filepath.Abs(cfg.GjollEnv)
 		if err != nil {
 			return fmt.Errorf("resolving tf path: %w", err)
+		}
+
+		if err := setupGjollLLMProxyVars(cfg); err != nil {
+			return fmt.Errorf("configuring gjoll LLM proxy: %w", err)
 		}
 
 		slog.Info("Provisioning sandbox", "task", taskName)
@@ -275,56 +298,99 @@ func executeTask(ctx context.Context, taskName, taskDescription string, taskDir 
 
 	taskDescription += issueattachments.Manifest(attachmentFiles)
 
-	slog.Info("Running agent", "task", taskName, "agent", backend.Name())
+	agentPrompt := taskDescription
+	if backend.Name() == "opencode" && !continueSession {
+		agentPrompt = prompts.OnInit + "\n\n---\n\n" + agentPrompt
+	}
+
 	systemPromptFile := home + "/system-prompt.md"
 	if backend.Name() == "opencode" {
 		systemPromptFile = ""
 	}
-	runScript := backend.BuildRunScript(taskDescription, continueSession, systemPromptFile, cfg.Agent.MaxBudgetUSD)
-
-	tmpRun, err := os.CreateTemp("", "run-claude-*.sh")
-	if err != nil {
-		return fmt.Errorf("creating run script: %w", err)
-	}
-	defer os.Remove(tmpRun.Name())
-	if _, err := tmpRun.WriteString(runScript); err != nil {
-		tmpRun.Close()
-		return fmt.Errorf("writing run script: %w", err)
-	}
-	tmpRun.Close()
-
 	runScriptPath := home + "/run-claude.sh"
-	if err := runner.Cp(ctx, taskName, tmpRun.Name(), taskName+":"+runScriptPath); err != nil {
-		return fmt.Errorf("copying run script: %w", err)
-	}
-	if err := runner.SSH(ctx, taskName, "bash", "-c", "chmod a+rx "+runScriptPath); err != nil {
-		return fmt.Errorf("making run script executable: %w", err)
-	}
-
 	sshOpts := &sandbox.SSHOpts{
-		Proxy:          true,
+		Proxy:          cfg.SandboxBackend == "gjoll",
 		ReverseTunnels: []string{mcpTunnel},
 	}
 
-	// Write the raw JSONL transcript to the host file in real-time so the
-	// dashboard can poll it while the task is still running.
-	var transcriptFlags int
-	if continueSession {
-		transcriptFlags = os.O_WRONLY | os.O_CREATE | os.O_APPEND
-	} else {
-		transcriptFlags = os.O_WRONLY | os.O_CREATE | os.O_TRUNC
+	maxRounds := 1
+	if backend.Name() == "opencode" && !continueSession {
+		maxRounds = 8
 	}
-	transcriptFile, err := os.OpenFile(taskDir.TranscriptPath(), transcriptFlags, 0644)
-	if err != nil {
-		return fmt.Errorf("opening transcript file: %w", err)
-	}
-	defer transcriptFile.Close()
 
-	tw := newTranscriptWriter(os.Stdout, verbose, backend)
-	w := io.MultiWriter(tw, transcriptFile)
+	opencodeBashTimeout, err := cfg.Agent.OpenCodeBashTimeoutDuration()
+	if err != nil {
+		return fmt.Errorf("agent opencode bash timeout: %w", err)
+	}
+
 	var agentErr error
-	if agentErr = runner.SSHProxyOutput(ctx, taskName, w, sshOpts, "bash", "-c", runner.AsUser(runScriptPath)); agentErr != nil {
-		slog.Error("Agent exited with error", "task", taskName, "agent", backend.Name(), "error", agentErr)
+	for round := 0; round < maxRounds; round++ {
+		sessionContinue := continueSession || round > 0
+		prompt := agentPrompt
+		if round > 0 {
+			prompt = "Continue working on the task. Do not stop until the assigned work is complete."
+		}
+
+		slog.Info("Running agent", "task", taskName, "agent", backend.Name(), "round", round+1, "continue", sessionContinue)
+
+		runScript := backend.BuildRunScript(prompt, sessionContinue, systemPromptFile, cfg.Agent.MaxBudgetUSD, opencodeBashTimeout)
+		tmpRun, err := os.CreateTemp("", "run-claude-*.sh")
+		if err != nil {
+			return fmt.Errorf("creating run script: %w", err)
+		}
+		if _, err := tmpRun.WriteString(runScript); err != nil {
+			tmpRun.Close()
+			os.Remove(tmpRun.Name())
+			return fmt.Errorf("writing run script: %w", err)
+		}
+		tmpRun.Close()
+		tmpRunPath := tmpRun.Name()
+
+		if err := runner.Cp(ctx, taskName, tmpRunPath, taskName+":"+runScriptPath); err != nil {
+			os.Remove(tmpRunPath)
+			return fmt.Errorf("copying run script: %w", err)
+		}
+		os.Remove(tmpRunPath)
+		if err := runner.SSH(ctx, taskName, "bash", "-c", "chmod a+rx "+runScriptPath); err != nil {
+			return fmt.Errorf("making run script executable: %w", err)
+		}
+
+		var transcriptFlags int
+		switch {
+		case continueSession:
+			transcriptFlags = os.O_WRONLY | os.O_CREATE | os.O_APPEND
+		case round == 0:
+			transcriptFlags = os.O_WRONLY | os.O_CREATE | os.O_TRUNC
+		default:
+			transcriptFlags = os.O_WRONLY | os.O_CREATE | os.O_APPEND
+		}
+		transcriptFile, err := os.OpenFile(taskDir.TranscriptPath(), transcriptFlags, 0644)
+		if err != nil {
+			return fmt.Errorf("opening transcript file: %w", err)
+		}
+
+		tw := newTranscriptWriter(os.Stdout, verbose, backend)
+		w := io.MultiWriter(tw, transcriptFile)
+		if err := runner.SSHProxyOutput(ctx, taskName, w, sshOpts, "bash", "-c", runner.AsUser(runScriptPath)); err != nil {
+			agentErr = err
+			slog.Error("Agent exited with error", "task", taskName, "agent", backend.Name(), "round", round+1, "error", err)
+		}
+		transcriptFile.Close()
+
+		state, err := taskDir.LoadState()
+		if err != nil {
+			slog.Warn("Failed to load state after agent run", "task", taskName, "error", err)
+		} else if state.HasOpenPRs() {
+			break
+		}
+
+		if backend.Name() != "opencode" || round == maxRounds-1 {
+			break
+		}
+		if !opencodeStoppedEarly(taskDir.TranscriptPath()) {
+			break
+		}
+		slog.Info("OpenCode stopped early, continuing session", "task", taskName, "round", round+2)
 	}
 
 	slog.Info("Agent finished", "task", taskName, "agent", backend.Name())
@@ -365,6 +431,13 @@ func setupSandbox(ctx context.Context, runner sandbox.Runner, backend agent.Back
 	}
 	if err := runner.SSH(ctx, taskName, "bash", "-c", runner.AsUser("git config --global user.email imagebuilder-bots+drella@redhat.com")); err != nil {
 		return fmt.Errorf("git config user.email: %w", err)
+	}
+
+	if cfg.SandboxBackend == "gjoll" {
+		installCmd := backend.InstallCmd()
+		if err := runner.SSH(ctx, taskName, "bash", "-c", runner.AsUser(installCmd)); err != nil {
+			return fmt.Errorf("installing agent: %w", err)
+		}
 	}
 
 	// Always: register orchestrator MCP server
@@ -412,8 +485,8 @@ func setupSandboxDefault(ctx context.Context, runner sandbox.Runner, backend age
 
 // writeSystemPrompt writes the on_init system prompt into the sandbox.
 // For claude-code: writes ~/system-prompt.md (used via --append-system-prompt-file).
-// For opencode: appends to ~/.claude/CLAUDE.md (OpenCode reads this natively
-// and has no --append-system-prompt-file equivalent).
+// For opencode: writes ~/workspace/CLAUDE.md (OpenCode discovers project-level
+// CLAUDE.md from --dir; there is no --append-system-prompt-file equivalent).
 func writeSystemPrompt(ctx context.Context, runner sandbox.Runner, backend agent.Backend, taskName string) error {
 	tmpFile, err := os.CreateTemp("", "prompt-*.md")
 	if err != nil {
@@ -430,16 +503,14 @@ func writeSystemPrompt(ctx context.Context, runner sandbox.Runner, backend agent
 	home := runner.UserHome()
 
 	if backend.Name() == "opencode" {
-		// OpenCode lacks --append-system-prompt-file; append on_init to
-		// the CLAUDE.md that OpenCode reads natively.
-		configDir := backend.ConfigDir()
-		runner.SSH(ctx, taskName, "bash", "-c", runner.AsUser("mkdir -p ~/"+configDir))
-		claudemdDest := home + "/" + configDir + "/CLAUDE.md"
-		if err := runner.Cp(ctx, taskName, tmpFile.Name(), taskName+":"+home+"/system-prompt-tmp.md"); err != nil {
+		claudemdDest := home + "/workspace/CLAUDE.md"
+		runner.SSH(ctx, taskName, "bash", "-c", runner.AsUser("mkdir -p ~/workspace"))
+		if err := runner.Cp(ctx, taskName, tmpFile.Name(), taskName+":"+claudemdDest); err != nil {
 			return fmt.Errorf("copying system prompt: %w", err)
 		}
-		if err := runner.SSH(ctx, taskName, "bash", "-c", runner.AsUser(fmt.Sprintf("cat %s/system-prompt-tmp.md >> %s && rm %s/system-prompt-tmp.md", home, claudemdDest, home))); err != nil {
-			return fmt.Errorf("appending system prompt to CLAUDE.md: %w", err)
+		fixCmd := "chown $(stat -c '%U:%G' " + home + ") " + claudemdDest + " 2>/dev/null || true; chmod a+r " + claudemdDest
+		if err := runner.SSH(ctx, taskName, "bash", "-c", fixCmd); err != nil {
+			return fmt.Errorf("fixing system prompt permissions: %w", err)
 		}
 		return nil
 	}
@@ -453,6 +524,42 @@ func writeSystemPrompt(ctx context.Context, runner sandbox.Runner, backend agent
 	}
 
 	return nil
+}
+
+// opencodeStoppedEarly reports whether OpenCode ended after minimal tool use,
+// which often happens with misconfigured local models on the second turn.
+func opencodeStoppedEarly(transcriptPath string) bool {
+	data, err := os.ReadFile(transcriptPath)
+	if err != nil {
+		return false
+	}
+	tools := 0
+	steps := 0
+	lastReason := ""
+	for _, line := range strings.Split(string(data), "\n") {
+		if line == "" {
+			continue
+		}
+		var msg struct {
+			Type string `json:"type"`
+			Part struct {
+				Reason string `json:"reason"`
+			} `json:"part"`
+		}
+		if json.Unmarshal([]byte(line), &msg) != nil {
+			continue
+		}
+		switch msg.Type {
+		case "tool_use":
+			tools++
+		case "step_finish":
+			steps++
+			if msg.Part.Reason != "" {
+				lastReason = msg.Part.Reason
+			}
+		}
+	}
+	return lastReason == "stop" && tools < 3 && steps <= 2
 }
 
 // parseVarFlags parses --var KEY=VALUE flags into a map.
@@ -528,32 +635,46 @@ func hasLabel(labels []string, name string) bool {
 	return false
 }
 
-// setupRHELSubscription creates an activation key via the Red Hat API and sets
-// TF_VAR_ environment variables so the sandbox init_script can register with
-// subscription-manager. The env vars are inherited by the gjoll subprocess.
-// The activation key is also persisted in the task's state_secrets.json so it
-// can be recovered on orchestrator restart.
-func setupRHELSubscription(ctx context.Context, taskName string, taskDir *task.Dir) error {
+// setupGjollLLMProxyVars sets OpenTofu variables for the local LLM passthrough proxy
+// in gjoll .tf files (e.g. gjoll/examples/fedora-libvirt.tf).
+func setupGjollLLMProxyVars(cfg *config.Config) error {
+	if cfg.SandboxBackend != "gjoll" || !cfg.UsesLocalLLM() {
+		return nil
+	}
+	port, err := cfg.LocalLLMHostPort()
+	if err != nil {
+		return err
+	}
+	portStr := strconv.Itoa(port)
+	os.Setenv("TF_VAR_llm_host_port", portStr)
+	os.Setenv("TF_VAR_llm_proxy_port", portStr)
+	return nil
+}
+
+// setupRHELSubscription creates an activation key via the Red Hat API and persists
+// it in the task's state_secrets.json. Returns org ID and activation key for
+// SSH-based subscription-manager registration during sandbox Up.
+func setupRHELSubscription(ctx context.Context, taskName string, taskDir *task.Dir) (orgID, activationKey string, err error) {
 	clientID := os.Getenv("LIGHTSPEED_CLIENT_ID")
 	clientSecret := os.Getenv("LIGHTSPEED_CLIENT_SECRET")
-	orgID := os.Getenv("LIGHTSPEED_ORG_ID")
+	orgID = os.Getenv("LIGHTSPEED_ORG_ID")
 
 	if clientID == "" || clientSecret == "" || orgID == "" {
-		return fmt.Errorf("LIGHTSPEED_CLIENT_ID, LIGHTSPEED_CLIENT_SECRET, and LIGHTSPEED_ORG_ID must be set")
+		return "", "", fmt.Errorf("LIGHTSPEED_CLIENT_ID, LIGHTSPEED_CLIENT_SECRET, and LIGHTSPEED_ORG_ID must be set")
 	}
 
 	slog.Info("Creating RHEL activation key", "task", taskName)
 
 	var suffix [4]byte
 	if _, err := rand.Read(suffix[:]); err != nil {
-		return fmt.Errorf("generating random suffix: %w", err)
+		return "", "", fmt.Errorf("generating random suffix: %w", err)
 	}
 	akName := fmt.Sprintf("orchestrator-%s-%s", taskName, hex.EncodeToString(suffix[:]))
 
 	client := rhel.NewClient(clientID, clientSecret)
 	keyName, err := client.CreateActivationKey(ctx, akName)
 	if err != nil {
-		return fmt.Errorf("creating activation key: %w", err)
+		return "", "", fmt.Errorf("creating activation key: %w", err)
 	}
 
 	slog.Info("RHEL activation key created", "task", taskName, "key", keyName)
@@ -562,10 +683,7 @@ func setupRHELSubscription(ctx context.Context, taskName string, taskDir *task.D
 		slog.Warn("Failed to persist RHEL activation key to state_secrets.json", "task", taskName, "error", err)
 	}
 
-	os.Setenv("TF_VAR_rhel_org_id", orgID)
-	os.Setenv("TF_VAR_rhel_activation_key", keyName)
-
-	return nil
+	return orgID, keyName, nil
 }
 
 func copyAttachmentsToSandbox(ctx context.Context, runner sandbox.Runner, taskName string, files []issueattachments.DownloadedFile) error {
